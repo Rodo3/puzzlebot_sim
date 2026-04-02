@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<robot name="Puzzlebot_Jetson_Lidar_Ed.">
+
+  <!--MATERIALS-->
+  <material name="yellow">
+    <color rgba="0.8 0.7 0.1 1.0"/>
+  </material>
+
+  <!--LINKS-->
+
+  <!-- Base footprint -->
+  <link name="base_footprint"/>
+
+  <!-- Base link -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://puzzlebot_sim/meshes/Puzzlebot_Jetson_Lidar_Edition_Base.stl"/>
+      </geometry>
+      <material name="yellow"/>
+    </visual>
+  </link>
+
+  <!-- Right wheel -->
+  <link name="wheel_r_link">
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="1.5708 0 0"/>
+      <geometry>
+        <mesh filename="package://puzzlebot_sim/meshes/Puzzlebot_Wheel.stl"/>
+      </geometry>
+      <material name="yellow"/>
+    </visual>
+  </link>
+
+  <!-- Left wheel -->
+  <link name="wheel_l_link">
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="package://puzzlebot_sim/meshes/Puzzlebot_Wheel.stl"/>
+      </geometry>
+      <material name="yellow"/>
+    </visual>
+  </link>
+
+  <!-- Caster -->
+  <link name="caster_link">
+    <visual>
+      <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://puzzlebot_sim/meshes/Puzzlebot_Caster_Wheel.stl"/>
+      </geometry>
+      <material name="yellow"/>
+    </visual>
+  </link>
+
+  <!--JOINTS-->
+
+  <!-- base_footprint -> base_link -->
+  <joint name="base_link_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0.0 0.0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- base_link -> wheel_r_link -->
+  <joint name="wheel_r_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_r_link"/>
+    <origin xyz="0.052 -0.095 -0.0025" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- base_link -> wheel_l_link -->
+  <joint name="wheel_l_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_l_link"/>
+    <origin xyz="0.052 0.095 -0.0025" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- base_link -> caster_link -->
+  <joint name="caster_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="caster_link"/>
+    <origin xyz="-0.095 0.0 -0.03" rpy="0 0 0"/>
+  </joint>
+
+</robot>
