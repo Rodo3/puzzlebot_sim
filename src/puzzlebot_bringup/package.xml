@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>puzzlebot_bringup</name>
+  <version>0.0.0</version>
+  <description>Launch files for the Puzzlebot simulation</description>
+  <maintainer email="mario.mtz@manchester-robotics.com">Mario Martinez</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>puzzlebot_description</exec_depend>
+  <exec_depend>homework_01_transforms</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
