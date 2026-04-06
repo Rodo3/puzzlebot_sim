@@ -1,0 +1,25 @@
+# ROS 2 build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.eggs/
+
+# VS Code
+.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+
+
+# Colcon
+.colcon_install_layout
