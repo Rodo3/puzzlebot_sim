@@ -1,0 +1,9 @@
+yolo_node:
+  ros__parameters:
+    engine_path:        "models/yolov8n.engine"
+    use_trt:            false          # set true on Jetson Orin
+    confidence_thresh:  0.45
+    nms_thresh:         0.5
+    detection_rate_hz:  10.0
+    camera_width:       640
+    camera_height:      480

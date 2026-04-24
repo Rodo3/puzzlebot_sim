@@ -14,6 +14,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'),
             glob('launch/*.py')),
+        (os.path.join('share', package_name, 'config'),
+            glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -22,6 +24,9 @@ setup(
     description='Launch files for the Puzzlebot simulation',
     license='Apache-2.0',
     entry_points={
-        'console_scripts': [],
+        'console_scripts': [
+            'mock_encoders = puzzlebot_bringup.mock_encoders:main',
+            'smoke_test    = puzzlebot_bringup.smoke_test:main',
+        ],
     },
 )

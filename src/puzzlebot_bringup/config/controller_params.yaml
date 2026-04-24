@@ -1,0 +1,13 @@
+steering_controller_node:
+  ros__parameters:
+    lookahead_distance:  0.30   # metres
+    max_linear_vel:      0.30   # m/s
+    max_angular_vel:     1.50   # rad/s
+    goal_tolerance:      0.10   # metres
+    control_frequency:   20.0  # Hz
+
+obstacle_avoidance_node:
+  ros__parameters:
+    stop_distance:   0.30   # metres
+    slow_distance:   0.60   # metres
+    front_angle_deg: 30.0

@@ -110,6 +110,8 @@ Visualization Manager:
           Value: true
         caster_link:
           Value: true
+        lidar_link:
+          Value: true
         map:
           Value: true
         odom:
@@ -130,16 +132,94 @@ Visualization Manager:
               base_link:
                 caster_link:
                   {}
+                lidar_link:
+                  {}
                 wheel_l_link:
                   {}
                 wheel_r_link:
                   {}
       Update Interval: 0
       Value: true
+    - Alpha: 0.7
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: false
+      Enabled: true
+      Name: Map
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Update Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map_updates
+      Value: true
+    - Class: rviz_default_plugins/LaserScan
+      Enabled: true
+      Name: LaserScan
+      Size (m): 0.05
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /scan
+      Value: true
+      Color Transformer: FlatColor
+      Color:
+        R: 255
+        G: 0
+        B: 0
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Odometry
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /odom
+      Value: true
+      Keep: 50
+      Angle Tolerance: 0.1
+      Position Tolerance: 0.1
+      Shape:
+        Alpha: 1
+        Axes Length: 0.3
+        Axes Radius: 0.02
+        Color:
+          B: 0
+          G: 255
+          R: 255
+        Head Length: 0.05
+        Head Radius: 0.02
+        Shaft Length: 0.1
+        Shaft Radius: 0.01
+        Value: Arrow
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Path
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /planned_path
+      Value: true
+      Color:
+        R: 0
+        G: 0
+        B: 255
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: map
+    Fixed Frame: odom
     Frame Rate: 30
   Name: root
   Tools:

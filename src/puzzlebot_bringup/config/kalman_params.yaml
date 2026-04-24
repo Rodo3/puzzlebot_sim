@@ -1,0 +1,9 @@
+kalman_filter_node:
+  ros__parameters:
+    process_noise_x:     0.01
+    process_noise_y:     0.01
+    process_noise_theta: 0.005
+    meas_noise_x:        0.05
+    meas_noise_y:        0.05
+    meas_noise_theta:    0.01
+    initial_covariance:  0.1
