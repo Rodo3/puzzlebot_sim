@@ -23,3 +23,13 @@ Thumbs.db
 
 # Colcon
 .colcon_install_layout
+COLCON_IGNORE
+
+# Gazebo / simulation artifacts
+*.model.backup
+*.world.backup
+
+# ROS bag files
+*.bag
+*.db3
+*.mcap
