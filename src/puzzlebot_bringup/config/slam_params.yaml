@@ -1,0 +1,9 @@
+slam_node:
+  ros__parameters:
+    map_size_pixels:   800
+    map_size_meters:   16.0
+    n_particles:       200
+    particle_noise_x:  0.02
+    particle_noise_y:  0.02
+    particle_noise_t:  0.01
+    update_frequency:  5.0

@@ -8,8 +8,14 @@
   <license>Apache-2.0</license>
 
   <exec_depend>puzzlebot_description</exec_depend>
-  <exec_depend>homework_01_transforms</exec_depend>
+  <exec_depend>puzzlebot_localization</exec_depend>
+  <exec_depend>puzzlebot_slam</exec_depend>
+  <exec_depend>puzzlebot_perception</exec_depend>
+  <exec_depend>puzzlebot_planning</exec_depend>
+  <exec_depend>puzzlebot_control</exec_depend>
+  <exec_depend>puzzlebot_controller</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>ros2launch</exec_depend>
 

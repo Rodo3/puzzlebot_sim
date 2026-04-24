@@ -1,0 +1,4 @@
+/**:
+  ros__parameters:
+    wheel_radius: 0.05      # metres
+    wheelbase:    0.18      # metres — distance between wheel contact points
