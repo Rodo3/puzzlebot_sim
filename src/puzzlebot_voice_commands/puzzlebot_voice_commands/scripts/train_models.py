@@ -7,14 +7,28 @@ Usage (after building and sourcing):
     --model      both \\
     --output-dir <path/to/artifacts>
 
-Artifacts written to output-dir:
-  kmeans_model.pkl, gnb_model.pkl, labels.json,
-  train_metadata.json, feature_config.json
-
-Full implementation in Phases 3 and 4.
+Artifacts written to --output-dir:
+  kmeans_model.pkl      (Phase 3)
+  gnb_model.pkl         (Phase 4)
+  labels.json
+  feature_config.json
+  train_metadata.json
 """
 import argparse
 import sys
+import time
+import warnings
+from pathlib import Path
+from typing import Dict
+
+import numpy as np
+
+from ..audio_io import load_wav, normalize
+from ..config import DatasetConfig, KMeansConfig, MFCCConfig
+from ..dataset import DatasetSplit, discover_dataset, split_dataset
+from ..mfcc import extract_mfcc_frames, extract_mfcc_summary
+from ..models.kmeans_codebook import KMeansCodebookClassifier
+from ..serialization import artifact_size_kb, save_json, save_pickle
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         '--dataset',
         type=str,
         required=True,
-        help='Path to the root dataset folder.',
+        help='Path to the root dataset folder (one subfolder per class).',
     )
     parser.add_argument(
         '--model',
@@ -62,18 +76,184 @@ def build_parser() -> argparse.ArgumentParser:
         default=16,
         help='Number of K-Means clusters per class codebook (default: 16).',
     )
+    parser.add_argument(
+        '--n-mfcc',
+        type=int,
+        default=13,
+        help='Number of MFCC coefficients (default: 13).',
+    )
+    parser.add_argument(
+        '--n-filters',
+        type=int,
+        default=26,
+        help='Number of Mel filterbank channels (default: 26).',
+    )
+    parser.add_argument(
+        '--sample-rate',
+        type=int,
+        default=16000,
+        help='Expected audio sample rate in Hz (default: 16000).',
+    )
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    # Phases 3/4: implement training for each model type.
-    print("[train_voice_models] Phases 3/4 not yet implemented.")
-    print(f"  dataset     : {args.dataset}")
-    print(f"  model       : {args.model}")
-    print(f"  output-dir  : {args.output_dir}")
-    sys.exit(0)
+
+    dataset_root = Path(args.dataset)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    mfcc_cfg = MFCCConfig(
+        sample_rate=args.sample_rate,
+        n_mfcc=args.n_mfcc,
+        n_filters=args.n_filters,
+    )
+    dataset_cfg = DatasetConfig(
+        test_ratio=args.test_ratio,
+        random_state=args.random_state,
+    )
+    kmeans_cfg = KMeansConfig(
+        n_clusters=args.n_clusters,
+        random_state=args.random_state,
+    )
+
+    train_kmeans = args.model in ('kmeans', 'both')
+    train_gnb = args.model in ('gnb', 'both')
+
+    # ------------------------------------------------------------------
+    # 1. Discover and split dataset
+    # ------------------------------------------------------------------
+    print(f"[train_voice_models] Dataset : {dataset_root}")
+    try:
+        samples_by_class = discover_dataset(dataset_root)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    split: DatasetSplit = split_dataset(samples_by_class, dataset_cfg)
+    print(split.summary())
+
+    # ------------------------------------------------------------------
+    # 2. Save shared metadata artifacts
+    # ------------------------------------------------------------------
+    labels_path = output_dir / 'labels.json'
+    save_json(split.labels, labels_path)
+
+    feature_config_path = output_dir / 'feature_config.json'
+    save_json({
+        'sample_rate': mfcc_cfg.sample_rate,
+        'pre_emphasis': mfcc_cfg.pre_emphasis,
+        'frame_size': mfcc_cfg.frame_size,
+        'frame_stride': mfcc_cfg.frame_stride,
+        'n_fft': mfcc_cfg.n_fft,
+        'n_filters': mfcc_cfg.n_filters,
+        'n_mfcc': mfcc_cfg.n_mfcc,
+        'include_delta': mfcc_cfg.include_delta,
+        'include_delta_delta': mfcc_cfg.include_delta_delta,
+    }, feature_config_path)
+
+    train_metadata_path = output_dir / 'train_metadata.json'
+    save_json(split.to_metadata_dict(dataset_cfg), train_metadata_path)
+
+    print(f"\n[train_voice_models] Shared artifacts saved to: {output_dir}")
+
+    # ------------------------------------------------------------------
+    # 3. Train KMeans codebook classifier
+    # ------------------------------------------------------------------
+    if train_kmeans:
+        print("\n[train_voice_models] Training KMeansCodebookClassifier ...")
+        frames_by_class, load_errors = _load_frames(split, mfcc_cfg, dataset_root)
+
+        if not frames_by_class:
+            print("ERROR: No frames extracted — check dataset audio files.", file=sys.stderr)
+            sys.exit(1)
+        if load_errors:
+            print(f"  WARNING: {load_errors} file(s) failed to load and were skipped.")
+
+        # Log frame counts per class
+        total_frames = 0
+        for label in split.labels:
+            n = frames_by_class.get(label, np.empty((0, mfcc_cfg.n_mfcc))).shape[0]
+            total_frames += n
+            print(f"  {label:15s}  {n} frames")
+        print(f"  Total frames: {total_frames}")
+
+        t0 = time.perf_counter()
+        model = KMeansCodebookClassifier(config=kmeans_cfg)
+        model.fit(frames_by_class)
+        elapsed = time.perf_counter() - t0
+
+        kmeans_path = output_dir / 'kmeans_model.pkl'
+        model.save(kmeans_path)
+        size_kb = artifact_size_kb(kmeans_path)
+
+        print(f"\n  Training time : {elapsed:.2f}s")
+        print(f"  n_clusters    : {kmeans_cfg.n_clusters} per class")
+        print(f"  Artifact      : {kmeans_path}  ({size_kb:.1f} KB)")
+        print("  KMeans: OK")
+
+    # ------------------------------------------------------------------
+    # 4. Train Gaussian Naive Bayes (Phase 4)
+    # ------------------------------------------------------------------
+    if train_gnb:
+        print("\n[train_voice_models] GaussianNaiveBayesClassifier — Phase 4 not yet implemented.")
+
+    # ------------------------------------------------------------------
+    # 5. Final summary
+    # ------------------------------------------------------------------
+    print("\n--- Training summary ---")
+    print(f"  Dataset       : {dataset_root}")
+    print(f"  Labels        : {split.labels}")
+    print(f"  Train samples : {len(split.train)}")
+    print(f"  Test samples  : {len(split.test)}")
+    print(f"  Output dir    : {output_dir}")
+    if train_kmeans:
+        print(f"  kmeans_model  : {output_dir / 'kmeans_model.pkl'}")
+    if train_gnb:
+        print(f"  gnb_model     : pending (Phase 4)")
+    print("Done.")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _load_frames(
+    split: DatasetSplit,
+    mfcc_cfg: MFCCConfig,
+    dataset_root: Path,
+) -> tuple:
+    """Load all train samples and extract frame-level MFCCs per class.
+
+    Returns:
+        frames_by_class: Dict[label, (N_frames, n_mfcc) ndarray]
+        n_errors: int — number of files that failed to load
+    """
+    accum: Dict[str, list] = {label: [] for label in split.labels}
+    errors = 0
+
+    for sample in split.train:
+        try:
+            signal, _ = load_wav(sample.path, target_sr=mfcc_cfg.sample_rate)
+            signal = normalize(signal)
+            frames = extract_mfcc_frames(signal, mfcc_cfg)  # (n_frames, n_mfcc)
+            accum[sample.label].append(frames)
+        except Exception as exc:
+            warnings.warn(
+                f"Skipping {sample.path.name}: {exc}",
+                UserWarning,
+                stacklevel=2,
+            )
+            errors += 1
+
+    frames_by_class: Dict[str, np.ndarray] = {}
+    for label, frame_list in accum.items():
+        if frame_list:
+            frames_by_class[label] = np.concatenate(frame_list, axis=0)
+
+    return frames_by_class, errors
 
 
 if __name__ == '__main__':
