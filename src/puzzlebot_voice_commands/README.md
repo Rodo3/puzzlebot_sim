@@ -193,6 +193,42 @@ High std on GNB (5.6%) is expected with only 2 speakers — will decrease with 4
 
 **GaussianNB is the recommended model for ROS 2 integration.**
 
+## Phase 7 — HMM (Hidden Markov Model) plan
+
+A third classifier will be added using a discrete-observation HMM trained on
+frame-level MFCCs — implemented entirely from scratch with NumPy only.
+
+### Why HMM?
+- KMeans and GNB treat each audio sample as a static feature vector, ignoring
+  temporal dynamics (how a word evolves over time).
+- HMM explicitly models the sequence of MFCC frames as transitions between
+  hidden states, which is the classical approach for speech recognition.
+- Expected to outperform KMeans and GNB on commands with similar spectral
+  content but different duration/rhythm (e.g. `avanzar` vs `retroceder`).
+
+### Design (from scratch, NumPy only)
+
+| Component | Description |
+|-----------|-------------|
+| Observation quantization | K-Means codebook (reuse existing) to map MFCC frames → discrete symbols |
+| HMM topology | Left-to-right (Bakis) — states flow forward only, matching speech progression |
+| Training | Baum-Welch algorithm (EM) — forward-backward to estimate A, B, π |
+| Inference | Viterbi algorithm — most likely state sequence → log-likelihood score |
+| Classifier | One HMM per class; argmax of log-likelihoods across all models |
+| Parameters | `n_states` (default 5), `n_iter` (default 20), `n_symbols` from codebook |
+
+### Files to add
+
+```
+models/
+└── hmm.py              — HiddenMarkovModel + Baum-Welch + Viterbi
+scripts/
+└── train_hmm.py        — CLI: train_hmm_models  (saves hmm_models.pkl)
+```
+
+`evaluate_models.py`, `predict_file.py`, `cross_validate.py`, `learning_curve.py`,
+and `speaker_test.py` will be extended to support `--model hmm`.
+
 ## Implementation phases
 
 | Phase | Content | Status |
@@ -203,7 +239,8 @@ High std on GNB (5.6%) is expected with only 2 speakers — will decrease with 4
 | 4 | GaussianNaiveBayesClassifier + training script | **Done** |
 | 5 | Full metrics, report generation, model comparison | **Done** |
 | 6 | Documentation cleanup, validation checklist | **Done** |
-| 7+ | ROS 2 inference node, Puzzlebot integration | Future |
+| 7  | Hidden Markov Model (HMM) classifier from scratch        | Pending     |
+| 8+ | ROS 2 inference node, Puzzlebot integration              | Future      |
 
 ## CLI scripts
 
