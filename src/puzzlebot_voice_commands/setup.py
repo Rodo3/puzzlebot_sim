@@ -17,7 +17,7 @@ setup(
     maintainer_email='rpz.dar14@gmail.com',
     description=(
         'Offline voice command recognition using MFCC features and '
-        'from-scratch ML models. Phase 1: package structure only.'
+        'from-scratch ML models (KMeans codebook + Gaussian Naive Bayes).'
     ),
     license='Apache-2.0',
     entry_points={
@@ -30,6 +30,8 @@ setup(
                 'puzzlebot_voice_commands.scripts.evaluate_models:main',
             'predict_voice_file = '
                 'puzzlebot_voice_commands.scripts.predict_file:main',
+            'merge_voice_datasets = '
+                'puzzlebot_voice_commands.scripts.merge_datasets:main',
         ],
     },
 )
