@@ -32,6 +32,12 @@ setup(
                 'puzzlebot_voice_commands.scripts.predict_file:main',
             'merge_voice_datasets = '
                 'puzzlebot_voice_commands.scripts.merge_datasets:main',
+            'cross_validate_voice = '
+                'puzzlebot_voice_commands.scripts.cross_validate:main',
+            'learning_curve_voice = '
+                'puzzlebot_voice_commands.scripts.learning_curve:main',
+            'speaker_test_voice = '
+                'puzzlebot_voice_commands.scripts.speaker_test:main',
         ],
     },
 )
