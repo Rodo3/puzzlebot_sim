@@ -8,8 +8,8 @@ Usage (after building and sourcing):
     --output-dir <path/to/artifacts>
 
 Artifacts written to --output-dir:
-  kmeans_model.pkl      (Phase 3)
-  gnb_model.pkl         (Phase 4)
+  kmeans_model.pkl
+  gnb_model.pkl
   labels.json
   feature_config.json
   train_metadata.json

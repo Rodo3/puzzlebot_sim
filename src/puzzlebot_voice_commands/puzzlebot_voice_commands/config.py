@@ -1,6 +1,5 @@
 """
 Central configuration dataclasses for the voice command recognition pipeline.
-Implemented in Phase 2.
 """
 from dataclasses import dataclass, field
 from typing import List

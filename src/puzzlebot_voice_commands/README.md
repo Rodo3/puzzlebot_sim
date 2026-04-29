@@ -2,8 +2,8 @@
 
 Offline voice command recognition package for the Puzzlebot ROS 2 workspace.
 
-**Current phase:** 5 complete — full offline pipeline implemented and pushed.
-**Status:** All models, metrics, and report generation are functional. Phase 6 (docs cleanup) pending.
+**Current phase:** 6 complete — all offline phases done.
+**Status:** Full offline pipeline functional. VALIDATION.md checklist added. Phase 7+ (ROS 2 node, robot integration) is future work.
 
 ## Purpose
 
@@ -98,7 +98,7 @@ No scikit-learn, PyTorch, TensorFlow, or any prebuilt ML classifier.
 | 3     | KMeansCodebookClassifier + training script               | **Done**    |
 | 4     | GaussianNaiveBayesClassifier + training script           | **Done**    |
 | 5     | Full metrics, report generation, model comparison        | **Done**    |
-| 6     | Documentation cleanup, validation checklist              | Pending     |
+| 6     | Documentation cleanup, validation checklist              | **Done**    |
 | 7+    | ROS 2 inference node, Puzzlebot integration              | Future      |
 
 ## What is implemented (Phases 1–5)
