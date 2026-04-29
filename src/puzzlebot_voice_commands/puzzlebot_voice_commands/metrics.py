@@ -23,15 +23,17 @@ import numpy as np
 _STOP_COMMANDS = {'alto', 'stop', 'pare', 'halt'}
 
 # Movement commands (a stop command predicted as one of these = safety error)
-_MOVE_COMMANDS = {'adelante', 'atras', 'izquierda', 'derecha',
-                  'forward', 'backward', 'left', 'right'}
+_MOVE_COMMANDS = {'avanzar', 'retroceder', 'izquierda', 'derecha',
+                  'adelante', 'atras', 'forward', 'backward', 'left', 'right'}
 
 # Opposite-direction pairs (either direction counts as a diagnostic error)
 _OPPOSITE_PAIRS = [
-    ('adelante', 'atras'),
-    ('atras', 'adelante'),
+    ('avanzar', 'retroceder'),
+    ('retroceder', 'avanzar'),
     ('izquierda', 'derecha'),
     ('derecha', 'izquierda'),
+    ('adelante', 'atras'),
+    ('atras', 'adelante'),
     ('forward', 'backward'),
     ('backward', 'forward'),
     ('left', 'right'),

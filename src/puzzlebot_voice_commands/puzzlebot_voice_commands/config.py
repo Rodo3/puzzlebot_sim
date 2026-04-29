@@ -25,7 +25,7 @@ class DatasetConfig:
     test_ratio: float = 0.3
     random_state: int = 42
     supported_commands: List[str] = field(default_factory=lambda: [
-        'adelante', 'atras', 'izquierda', 'derecha', 'alto', 'inicio',
+        'avanzar', 'retroceder', 'izquierda', 'derecha', 'alto', 'inicio',
     ])
 
 
