@@ -24,9 +24,10 @@ from typing import Dict
 import numpy as np
 
 from ..audio_io import load_wav, normalize
-from ..config import DatasetConfig, KMeansConfig, MFCCConfig
+from ..config import DatasetConfig, GNBConfig, KMeansConfig, MFCCConfig
 from ..dataset import DatasetSplit, discover_dataset, split_dataset
 from ..mfcc import extract_mfcc_frames, extract_mfcc_summary
+from ..models.gaussian_nb import GaussianNaiveBayesClassifier
 from ..models.kmeans_codebook import KMeansCodebookClassifier
 from ..serialization import artifact_size_kb, save_json, save_pickle
 
@@ -195,10 +196,39 @@ def main() -> None:
         print("  KMeans: OK")
 
     # ------------------------------------------------------------------
-    # 4. Train Gaussian Naive Bayes (Phase 4)
+    # 4. Train Gaussian Naive Bayes
     # ------------------------------------------------------------------
     if train_gnb:
-        print("\n[train_voice_models] GaussianNaiveBayesClassifier — Phase 4 not yet implemented.")
+        print("\n[train_voice_models] Training GaussianNaiveBayesClassifier ...")
+        X_train, y_train, load_errors_gnb = _load_summaries(split, mfcc_cfg)
+
+        if len(X_train) == 0:
+            print("ERROR: No summary vectors extracted — check dataset.", file=sys.stderr)
+            sys.exit(1)
+        if load_errors_gnb:
+            print(f"  WARNING: {load_errors_gnb} file(s) failed to load and were skipped.")
+
+        # Log sample counts per class
+        for label in split.labels:
+            n = sum(1 for yi in y_train if yi == label)
+            print(f"  {label:15s}  {n} samples")
+        print(f"  Total samples : {len(X_train)}")
+        print(f"  Feature dim   : {X_train.shape[1]}  (n_mfcc={mfcc_cfg.n_mfcc} × 2 mean+std)")
+
+        gnb_cfg = GNBConfig()
+        t0 = time.perf_counter()
+        gnb_model = GaussianNaiveBayesClassifier(config=gnb_cfg)
+        gnb_model.fit(X_train, y_train)
+        elapsed = time.perf_counter() - t0
+
+        gnb_path = output_dir / 'gnb_model.pkl'
+        gnb_model.save(gnb_path)
+        size_kb = artifact_size_kb(gnb_path)
+
+        print(f"\n  Training time : {elapsed:.3f}s")
+        print(f"  var_epsilon   : {gnb_cfg.var_epsilon}")
+        print(f"  Artifact      : {gnb_path}  ({size_kb:.1f} KB)")
+        print("  GNB: OK")
 
     # ------------------------------------------------------------------
     # 5. Final summary
@@ -212,7 +242,7 @@ def main() -> None:
     if train_kmeans:
         print(f"  kmeans_model  : {output_dir / 'kmeans_model.pkl'}")
     if train_gnb:
-        print(f"  gnb_model     : pending (Phase 4)")
+        print(f"  gnb_model     : {output_dir / 'gnb_model.pkl'}")
     print("Done.")
 
 
@@ -254,6 +284,44 @@ def _load_frames(
             frames_by_class[label] = np.concatenate(frame_list, axis=0)
 
     return frames_by_class, errors
+
+
+def _load_summaries(
+    split: DatasetSplit,
+    mfcc_cfg: MFCCConfig,
+) -> tuple:
+    """Load all train samples and extract fixed-length MFCC summary vectors.
+
+    Returns:
+        X:        (N_samples, n_features) float32 ndarray
+        y:        list of N_samples string labels
+        n_errors: int — number of files that failed to load
+    """
+    X_list = []
+    y_list = []
+    errors = 0
+
+    for sample in split.train:
+        try:
+            signal, _ = load_wav(sample.path, target_sr=mfcc_cfg.sample_rate)
+            signal = normalize(signal)
+            vec = extract_mfcc_summary(signal, mfcc_cfg)   # (n_mfcc * 2,)
+            X_list.append(vec)
+            y_list.append(sample.label)
+        except Exception as exc:
+            warnings.warn(
+                f"Skipping {sample.path.name}: {exc}",
+                UserWarning,
+                stacklevel=2,
+            )
+            errors += 1
+
+    if X_list:
+        X = np.stack(X_list, axis=0)   # (N, n_features)
+    else:
+        X = np.empty((0, mfcc_cfg.n_mfcc * 2), dtype=np.float32)
+
+    return X, y_list, errors
 
 
 if __name__ == '__main__':

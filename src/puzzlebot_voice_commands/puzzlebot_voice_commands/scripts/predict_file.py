@@ -127,8 +127,31 @@ def main() -> None:
             print(f"  {rank}. {lbl:15s}  avg_min_dist={dist:.4f}")
 
     elif args.model_type == 'gnb':
-        print("[predict_voice_file] GNB model — Phase 4 not yet implemented.")
-        sys.exit(0)
+        from ..models.gaussian_nb import GaussianNaiveBayesClassifier
+
+        try:
+            model = GaussianNaiveBayesClassifier.load(model_path)
+        except (FileNotFoundError, TypeError) as exc:
+            print(f"ERROR loading model: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        summary = extract_mfcc_summary(signal, mfcc_cfg)
+
+        t0 = time.perf_counter()
+        label, scores = model.predict(summary)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        ranked = model.predict_ranked(summary)
+
+        print(f"\nAudio             : {audio_path}")
+        print(f"Model             : GaussianNB  ({model_path.name})")
+        print(f"Predicted command : {label}")
+        print(f"Confidence        : {scores[label]:.4f}  (softmax-normalised)")
+        print(f"Inference time    : {elapsed_ms:.1f} ms")
+        print("\nRanked predictions:")
+        for rank, (lbl, log_post) in enumerate(ranked, 1):
+            print(f"  {rank}. {lbl:15s}  log_posterior={log_post:.2f}  "
+                  f"score={scores.get(lbl, 0.0):.4f}")
 
 
 if __name__ == '__main__':
