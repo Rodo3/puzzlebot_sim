@@ -24,11 +24,12 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from ..audio_io import load_wav, normalize
-from ..config import DatasetConfig, GNBConfig, KMeansConfig, MFCCConfig
+from ..config import DatasetConfig, GNBConfig, HMMConfig, KMeansConfig, MFCCConfig
 from ..dataset import DatasetSplit, discover_dataset, split_dataset, Sample
 from ..metrics import accuracy, macro_f1, precision_recall_f1
 from ..mfcc import extract_mfcc_frames, extract_mfcc_summary
 from ..models.gaussian_nb import GaussianNaiveBayesClassifier
+from ..models.hmm import HiddenMarkovModelClassifier
 from ..models.kmeans_codebook import KMeansCodebookClassifier
 from ..serialization import save_json
 
@@ -65,6 +66,7 @@ def _evaluate_at_fraction(
     fraction: float,
     run_kmeans: bool,
     run_gnb: bool,
+    run_hmm: bool,
     seed: int = 42,
 ) -> Dict:
     n_train_total = len(train_labels)
@@ -117,10 +119,31 @@ def _evaluate_at_fraction(
             sum(v['recall'] for v in prf.values()) / len(prf), 4
         )
 
+    if run_hmm:
+        seqs_by_class: Dict[str, List[np.ndarray]] = {lbl: [] for lbl in all_labels}
+        for i in indices:
+            seqs_by_class[train_labels[i]].append(train_frames[i])
+        seqs_by_class = {lbl: seqs for lbl, seqs in seqs_by_class.items() if seqs}
+
+        model_hmm = HiddenMarkovModelClassifier(config=HMMConfig())
+        model_hmm.fit(seqs_by_class)
+
+        y_train_sub = [train_labels[i] for i in indices]
+        y_pred_train = [model_hmm.predict(train_frames[i])[0] for i in indices]
+        y_pred_test  = [model_hmm.predict(f)[0] for f in test_frames]
+
+        result['hmm_train_acc'] = round(accuracy(y_train_sub, y_pred_train), 4)
+        result['hmm_test_acc']  = round(accuracy(test_labels, y_pred_test), 4)
+        prf = precision_recall_f1(test_labels, y_pred_test, all_labels)
+        result['hmm_test_f1']   = round(macro_f1(prf), 4)
+        result['hmm_test_recall'] = round(
+            sum(v['recall'] for v in prf.values()) / len(prf), 4
+        )
+
     return result
 
 
-def _print_table(rows: List[Dict], run_kmeans: bool, run_gnb: bool) -> None:
+def _print_table(rows: List[Dict], run_kmeans: bool, run_gnb: bool, run_hmm: bool) -> None:
     print(f"\n{'='*72}")
     print("  Learning Curve")
     print(f"{'='*72}")
@@ -149,6 +172,18 @@ def _print_table(rows: List[Dict], run_kmeans: bool, run_gnb: bool) -> None:
                   f"{r['gnb_train_acc']:10.4f}  {r['gnb_test_acc']:10.4f}  "
                   f"{r['gnb_test_f1']:8.4f}  {r['gnb_test_recall']:9.4f}{flag}")
 
+    if run_hmm:
+        print("\n  HMM")
+        print(f"  {'Frac':>6}  {'N train':>8}  {'Train acc':>10}  "
+              f"{'Test acc':>10}  {'Test F1':>8}  {'Test Rec':>9}")
+        print(f"  {'-'*60}")
+        for r in rows:
+            gap = r['hmm_train_acc'] - r['hmm_test_acc']
+            flag = '  <-- overfit?' if gap > 0.10 else ''
+            print(f"  {r['fraction']:6.0%}  {r['n_train']:8d}  "
+                  f"{r['hmm_train_acc']:10.4f}  {r['hmm_test_acc']:10.4f}  "
+                  f"{r['hmm_test_f1']:8.4f}  {r['hmm_test_recall']:9.4f}{flag}")
+
     print(f"\n  Interpretation:")
     print("  - Train acc >> Test acc at 100% -> overfitting")
     print("  - Test acc still rising at 100% -> need more data")
@@ -161,7 +196,9 @@ def build_parser() -> argparse.ArgumentParser:
         description='Plot accuracy vs training set size to detect overfitting.',
     )
     parser.add_argument('--dataset', required=True)
-    parser.add_argument('--model', choices=['kmeans', 'gnb', 'both'], default='both')
+    parser.add_argument('--model', choices=['kmeans', 'gnb', 'hmm', 'both', 'all'],
+                        default='both',
+                        help='Models to evaluate (both=kmeans+gnb, all=kmeans+gnb+hmm).')
     parser.add_argument('--output-dir', required=True,
                         help='Directory to save learning_curve.json.')
     parser.add_argument('--test-ratio', type=float, default=0.3)
@@ -184,8 +221,9 @@ def main() -> None:
                               n_mfcc=args.n_mfcc, n_filters=args.n_filters)
     dataset_cfg = DatasetConfig(test_ratio=args.test_ratio,
                                 random_state=args.random_state)
-    run_kmeans  = args.model in ('kmeans', 'both')
-    run_gnb     = args.model in ('gnb', 'both')
+    run_kmeans  = args.model in ('kmeans', 'both', 'all')
+    run_gnb     = args.model in ('gnb',    'both', 'all')
+    run_hmm     = args.model in ('hmm',            'all')
 
     print(f"[learning_curve] Dataset: {dataset_root}")
     try:
@@ -209,13 +247,13 @@ def main() -> None:
         row = _evaluate_at_fraction(
             tr_frames, tr_sums, tr_labels,
             te_frames, te_sums, te_labels,
-            all_labels, frac, run_kmeans, run_gnb,
+            all_labels, frac, run_kmeans, run_gnb, run_hmm,
             seed=args.random_state,
         )
         rows.append(row)
         print("done")
 
-    _print_table(rows, run_kmeans, run_gnb)
+    _print_table(rows, run_kmeans, run_gnb, run_hmm)
 
     out_path = output_dir / 'learning_curve.json'
     save_json(rows, out_path)

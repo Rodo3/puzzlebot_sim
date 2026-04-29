@@ -24,11 +24,12 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from ..audio_io import load_wav, normalize
-from ..config import DatasetConfig, GNBConfig, KMeansConfig, MFCCConfig
+from ..config import DatasetConfig, GNBConfig, HMMConfig, KMeansConfig, MFCCConfig
 from ..dataset import Sample, discover_dataset
 from ..metrics import accuracy, macro_f1, precision_recall_f1, safety_critical_errors
 from ..mfcc import extract_mfcc_frames, extract_mfcc_summary
 from ..models.gaussian_nb import GaussianNaiveBayesClassifier
+from ..models.hmm import HiddenMarkovModelClassifier
 from ..models.kmeans_codebook import KMeansCodebookClassifier
 
 
@@ -86,12 +87,14 @@ def _run_cv(
     k: int,
     run_kmeans: bool,
     run_gnb: bool,
+    run_hmm: bool,
     mfcc_cfg: MFCCConfig,
 ) -> Dict:
     n = len(labels)
     results = {
         'kmeans': {'accuracy': [], 'macro_f1': [], 'macro_recall': [], 'safety_errors': []},
         'gnb':    {'accuracy': [], 'macro_f1': [], 'macro_recall': [], 'safety_errors': []},
+        'hmm':    {'accuracy': [], 'macro_f1': [], 'macro_recall': [], 'safety_errors': []},
     }
 
     for fold_i, (train_idx, test_idx) in enumerate(_kfold_indices(n, k), 1):
@@ -146,6 +149,27 @@ def _run_cv(
             print(f"    GaussianNB acc={accuracy(y_test, y_pred_gnb):.4f}  "
                   f"recall={mr:.4f}  safety_err={sc['safety_critical_count']}")
 
+        if run_hmm:
+            seqs_by_class: Dict[str, List[np.ndarray]] = {lbl: [] for lbl in all_labels}
+            for i in train_idx:
+                seqs_by_class[labels[i]].append(frames_list[i])
+            seqs_by_class = {lbl: seqs for lbl, seqs in seqs_by_class.items() if seqs}
+
+            model_hmm = HiddenMarkovModelClassifier(config=HMMConfig())
+            model_hmm.fit(seqs_by_class)
+
+            y_pred_hmm = [model_hmm.predict(frames_list[i])[0] for i in test_idx]
+            prf = precision_recall_f1(y_test, y_pred_hmm, all_labels)
+            sc  = safety_critical_errors(y_test, y_pred_hmm)
+            mr  = sum(v['recall'] for v in prf.values()) / len(prf)
+
+            results['hmm']['accuracy'].append(accuracy(y_test, y_pred_hmm))
+            results['hmm']['macro_f1'].append(macro_f1(prf))
+            results['hmm']['macro_recall'].append(mr)
+            results['hmm']['safety_errors'].append(sc['safety_critical_count'])
+            print(f"    HMM        acc={accuracy(y_test, y_pred_hmm):.4f}  "
+                  f"recall={mr:.4f}  safety_err={sc['safety_critical_count']}")
+
     return results
 
 
@@ -154,7 +178,7 @@ def _print_cv_summary(results: Dict, k: int) -> None:
     print(f"  Cross-validation summary  (k={k})")
     print(f"{'='*60}")
 
-    for model_name, key in [('KMeans', 'kmeans'), ('GaussianNB', 'gnb')]:
+    for model_name, key in [('KMeans', 'kmeans'), ('GaussianNB', 'gnb'), ('HMM', 'hmm')]:
         r = results[key]
         if not r['accuracy']:
             continue
@@ -187,7 +211,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument('--dataset', required=True,
                         help='Path to dataset root folder.')
-    parser.add_argument('--model', choices=['kmeans', 'gnb', 'both'], default='both')
+    parser.add_argument('--model', choices=['kmeans', 'gnb', 'hmm', 'both', 'all'],
+                        default='both',
+                        help='Models to cross-validate (both=kmeans+gnb, all=kmeans+gnb+hmm).')
     parser.add_argument('--k', type=int, default=5,
                         help='Number of folds (default: 5).')
     parser.add_argument('--sample-rate', type=int, default=16000)
@@ -206,8 +232,9 @@ def main() -> None:
         n_mfcc=args.n_mfcc,
         n_filters=args.n_filters,
     )
-    run_kmeans = args.model in ('kmeans', 'both')
-    run_gnb    = args.model in ('gnb', 'both')
+    run_kmeans = args.model in ('kmeans', 'both', 'all')
+    run_gnb    = args.model in ('gnb',    'both', 'all')
+    run_hmm    = args.model in ('hmm',            'all')
 
     print(f"[cross_validate] Dataset : {dataset_root}")
     print(f"[cross_validate] k={args.k}  model={args.model}")
@@ -236,6 +263,7 @@ def main() -> None:
         k=args.k,
         run_kmeans=run_kmeans,
         run_gnb=run_gnb,
+        run_hmm=run_hmm,
         mfcc_cfg=mfcc_cfg,
     )
 

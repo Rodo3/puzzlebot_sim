@@ -42,3 +42,15 @@ class KMeansConfig:
 class GNBConfig:
     """Parameters for GaussianNaiveBayesClassifier."""
     var_epsilon: float = 1e-9       # variance smoothing for numerical stability
+
+
+@dataclass
+class HMMConfig:
+    """Parameters for HiddenMarkovModel classifier."""
+    n_states: int = 5               # hidden states per HMM (left-to-right topology)
+    n_symbols: int = 32             # codebook size for observation quantization
+    n_iter: int = 20                # Baum-Welch EM iterations
+    kmeans_max_iter: int = 300      # K-Means iterations for codebook training
+    kmeans_tol: float = 1e-4
+    random_state: int = 42
+    log_zero: float = -1e30         # substitute for log(0)

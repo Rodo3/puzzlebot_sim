@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--model-type',
         type=str,
-        choices=['kmeans', 'gnb'],
+        choices=['kmeans', 'gnb', 'hmm'],
         required=True,
         help='Type of model to use for inference.',
     )
@@ -125,6 +125,33 @@ def main() -> None:
         print("\nRanked predictions:")
         for rank, (lbl, dist) in enumerate(ranked, 1):
             print(f"  {rank}. {lbl:15s}  avg_min_dist={dist:.4f}")
+
+    elif args.model_type == 'hmm':
+        from ..models.hmm import HiddenMarkovModelClassifier
+
+        try:
+            model = HiddenMarkovModelClassifier.load(model_path)
+        except (FileNotFoundError, TypeError) as exc:
+            print(f"ERROR loading model: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        frames = extract_mfcc_frames(signal, mfcc_cfg)
+
+        t0 = time.perf_counter()
+        ranked = model.predict_ranked(frames)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        label  = ranked[0][0]
+        margin = ranked[0][1] - ranked[1][1] if len(ranked) > 1 else 0.0
+
+        print(f"\nAudio             : {audio_path}")
+        print(f"Model             : HMM  ({model_path.name})")
+        print(f"Predicted command : {label}")
+        print(f"Log-lik margin    : {margin:.2f}  (higher = more confident)")
+        print(f"Inference time    : {elapsed_ms:.1f} ms")
+        print("\nRanked predictions:")
+        for rank, (lbl, log_lik) in enumerate(ranked, 1):
+            print(f"  {rank}. {lbl:15s}  log_likelihood={log_lik:.2f}")
 
     elif args.model_type == 'gnb':
         from ..models.gaussian_nb import GaussianNaiveBayesClassifier

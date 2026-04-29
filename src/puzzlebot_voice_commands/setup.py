@@ -38,6 +38,8 @@ setup(
                 'puzzlebot_voice_commands.scripts.learning_curve:main',
             'speaker_test_voice = '
                 'puzzlebot_voice_commands.scripts.speaker_test:main',
+            'train_hmm_models = '
+                'puzzlebot_voice_commands.scripts.train_hmm:main',
         ],
     },
 )

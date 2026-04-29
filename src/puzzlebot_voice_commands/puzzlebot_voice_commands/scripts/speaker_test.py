@@ -41,11 +41,12 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from ..audio_io import load_wav, normalize
-from ..config import GNBConfig, KMeansConfig, MFCCConfig
+from ..config import GNBConfig, HMMConfig, KMeansConfig, MFCCConfig
 from ..dataset import Sample, discover_dataset
 from ..metrics import accuracy, macro_f1, precision_recall_f1, safety_critical_errors
 from ..mfcc import extract_mfcc_frames, extract_mfcc_summary
 from ..models.gaussian_nb import GaussianNaiveBayesClassifier
+from ..models.hmm import HiddenMarkovModelClassifier
 from ..models.kmeans_codebook import KMeansCodebookClassifier
 from ..serialization import save_json
 
@@ -104,11 +105,21 @@ def _fit_gnb(summaries, labels):
     return model
 
 
+def _fit_hmm(frames_list, labels, all_labels):
+    seqs_by_class: Dict[str, List] = {lbl: [] for lbl in all_labels}
+    for f, lbl in zip(frames_list, labels):
+        seqs_by_class[lbl].append(f)
+    seqs_by_class = {lbl: seqs for lbl, seqs in seqs_by_class.items() if seqs}
+    model = HiddenMarkovModelClassifier(config=HMMConfig())
+    model.fit(seqs_by_class)
+    return model
+
+
 def _evaluate_speaker(
-    model_km, model_gnb,
+    model_km, model_gnb, model_hmm,
     frames_list, summaries, labels,
     all_labels, speaker,
-    run_kmeans, run_gnb,
+    run_kmeans, run_gnb, run_hmm,
 ) -> Dict:
     result = {'speaker': speaker, 'n_samples': len(labels)}
 
@@ -138,17 +149,32 @@ def _evaluate_speaker(
             'per_class_recall': {lbl: round(prf[lbl]['recall'], 4) for lbl in all_labels},
         }
 
+    if run_hmm and model_hmm is not None:
+        y_pred = [model_hmm.predict(f)[0] for f in frames_list]
+        prf = precision_recall_f1(labels, y_pred, all_labels)
+        sc  = safety_critical_errors(labels, y_pred)
+        mr  = sum(v['recall'] for v in prf.values()) / len(prf)
+        result['hmm'] = {
+            'accuracy':      round(accuracy(labels, y_pred), 4),
+            'macro_recall':  round(mr, 4),
+            'macro_f1':      round(macro_f1(prf), 4),
+            'safety_errors': sc['safety_critical_count'],
+            'per_class_recall': {lbl: round(prf[lbl]['recall'], 4) for lbl in all_labels},
+        }
+
     return result
 
 
 def _print_results(results: List[Dict], all_labels: List[str],
-                   run_kmeans: bool, run_gnb: bool, mode: str) -> None:
+                   run_kmeans: bool, run_gnb: bool, run_hmm: bool, mode: str) -> None:
     print(f"\n{'='*65}")
     print(f"  Speaker test  (mode={mode})")
     print(f"{'='*65}")
 
-    for model_key, model_name in ([('kmeans', 'KMeans')] if run_kmeans else []) + \
-                                  ([('gnb', 'GaussianNB')] if run_gnb else []):
+    model_list = (([('kmeans', 'KMeans')] if run_kmeans else []) +
+                  ([('gnb', 'GaussianNB')] if run_gnb else []) +
+                  ([('hmm', 'HMM')] if run_hmm else []))
+    for model_key, model_name in model_list:
         print(f"\n  {model_name}")
         print(f"  {'Speaker':<14}  {'N':>4}  {'Acc':>7}  {'Recall':>7}  "
               f"{'F1':>7}  {'SafeErr':>7}")
@@ -190,7 +216,9 @@ def build_parser() -> argparse.ArgumentParser:
         description='Per-speaker evaluation to verify each team member is recognized.',
     )
     parser.add_argument('--dataset', required=True)
-    parser.add_argument('--model', choices=['kmeans', 'gnb', 'both'], default='gnb')
+    parser.add_argument('--model', choices=['kmeans', 'gnb', 'hmm', 'both', 'all'],
+                        default='gnb',
+                        help='Models to evaluate (both=kmeans+gnb, all=kmeans+gnb+hmm).')
     parser.add_argument('--mode', choices=['all-train', 'leave-one-out'],
                         default='all-train',
                         help=(
@@ -212,8 +240,9 @@ def main() -> None:
     dataset_root = Path(args.dataset)
     mfcc_cfg = MFCCConfig(sample_rate=args.sample_rate,
                           n_mfcc=args.n_mfcc, n_filters=args.n_filters)
-    run_kmeans = args.model in ('kmeans', 'both')
-    run_gnb    = args.model in ('gnb', 'both')
+    run_kmeans = args.model in ('kmeans', 'both', 'all')
+    run_gnb    = args.model in ('gnb',    'both', 'all')
+    run_hmm    = args.model in ('hmm',            'all')
 
     print(f"[speaker_test] Dataset : {dataset_root}")
     print(f"[speaker_test] Mode    : {args.mode}")
@@ -241,6 +270,7 @@ def main() -> None:
         print("\n  Training on ALL samples...")
         model_km  = _fit_kmeans(all_frames, all_labels_list, class_labels) if run_kmeans else None
         model_gnb = _fit_gnb(all_sums, all_labels_list) if run_gnb else None
+        model_hmm = _fit_hmm(all_frames, all_labels_list, class_labels) if run_hmm else None
 
         for sp in speakers:
             idx = [i for i, s in enumerate(all_speakers) if s == sp]
@@ -249,9 +279,9 @@ def main() -> None:
             sp_labels = [all_labels_list[i] for i in idx]
             print(f"  Evaluating speaker '{sp}' ({len(idx)} samples)...", end=' ')
             r = _evaluate_speaker(
-                model_km, model_gnb,
+                model_km, model_gnb, model_hmm,
                 sp_frames, sp_sums, sp_labels,
-                class_labels, sp, run_kmeans, run_gnb,
+                class_labels, sp, run_kmeans, run_gnb, run_hmm,
             )
             results.append(r)
             print("done")
@@ -272,15 +302,16 @@ def main() -> None:
                   f"train={len(train_idx)}, test={len(test_idx)}")
             model_km  = _fit_kmeans(tr_frames, tr_labels, class_labels) if run_kmeans else None
             model_gnb = _fit_gnb(tr_sums, tr_labels) if run_gnb else None
+            model_hmm = _fit_hmm(tr_frames, tr_labels, class_labels) if run_hmm else None
 
             r = _evaluate_speaker(
-                model_km, model_gnb,
+                model_km, model_gnb, model_hmm,
                 te_frames, te_sums, te_labels,
-                class_labels, sp_test, run_kmeans, run_gnb,
+                class_labels, sp_test, run_kmeans, run_gnb, run_hmm,
             )
             results.append(r)
 
-    _print_results(results, class_labels, run_kmeans, run_gnb, args.mode)
+    _print_results(results, class_labels, run_kmeans, run_gnb, run_hmm, args.mode)
 
     if args.output_dir:
         out_dir = Path(args.output_dir)

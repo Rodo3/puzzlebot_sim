@@ -10,8 +10,10 @@ Usage (after building and sourcing):
 Reports written to --output-dir:
   confusion_matrix_kmeans.csv
   confusion_matrix_gnb.csv
+  confusion_matrix_hmm.csv
   metrics_kmeans.json
   metrics_gnb.json
+  metrics_hmm.json
   safety_metrics.json
   inference_time.json
   model_comparison.md
@@ -41,6 +43,7 @@ from ..metrics import (
 )
 from ..mfcc import extract_mfcc_frames, extract_mfcc_summary
 from ..models.gaussian_nb import GaussianNaiveBayesClassifier
+from ..models.hmm import HiddenMarkovModelClassifier
 from ..models.kmeans_codebook import KMeansCodebookClassifier
 from ..reports import (
     generate_comparison_report,
@@ -79,9 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--model',
         type=str,
-        choices=['kmeans', 'gnb', 'both'],
+        choices=['kmeans', 'gnb', 'hmm', 'both', 'all'],
         default='both',
-        help='Which model(s) to evaluate (default: both).',
+        help='Which model(s) to evaluate (default: both = kmeans+gnb; all = kmeans+gnb+hmm).',
     )
     parser.add_argument(
         '--test-ratio',
@@ -107,8 +110,9 @@ def main() -> None:
     output_dir    = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    eval_kmeans = args.model in ('kmeans', 'both')
-    eval_gnb    = args.model in ('gnb',    'both')
+    eval_kmeans = args.model in ('kmeans', 'both', 'all')
+    eval_gnb    = args.model in ('gnb',    'both', 'all')
+    eval_hmm    = args.model in ('hmm',           'all')
 
     # ------------------------------------------------------------------
     # 1. Load MFCC config from artifact dir (falls back to defaults)
@@ -169,6 +173,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     kmeans_metrics_dict: Optional[Dict[str, Any]] = None
     gnb_metrics_dict:    Optional[Dict[str, Any]] = None
+    hmm_metrics_dict:    Optional[Dict[str, Any]] = None
 
     if eval_kmeans:
         kmeans_path = artifact_dir / 'kmeans_model.pkl'
@@ -227,14 +232,44 @@ def main() -> None:
             save_metrics_json(gnb_metrics_dict, output_dir / 'metrics_gnb.json')
             print(f"  Reports saved to: {output_dir}")
 
+    if eval_hmm:
+        hmm_path = artifact_dir / 'hmm_model.pkl'
+        if not hmm_path.exists():
+            print(f"WARNING: {hmm_path} not found — skipping HMM evaluation.",
+                  file=sys.stderr)
+        else:
+            print("\n[evaluate_voice_models] Evaluating HiddenMarkovModelClassifier ...")
+            model = HiddenMarkovModelClassifier.load(hmm_path)
+            hmm_metrics_dict = _evaluate_hmm(
+                model, split, mfcc_cfg, split.labels
+            )
+            hmm_metrics_dict['artifact_size_kb'] = round(
+                artifact_size_kb(hmm_path), 2
+            )
+            hmm_metrics_dict['model_config'] = {
+                'n_states':  model.config.n_states,
+                'n_symbols': model.config.n_symbols,
+                'n_iter':    model.config.n_iter,
+            }
+            _print_metrics_summary('HMM', hmm_metrics_dict)
+
+            save_confusion_matrix_csv(
+                np.array(hmm_metrics_dict['confusion_matrix_list']),
+                split.labels,
+                output_dir / 'confusion_matrix_hmm.csv',
+            )
+            save_metrics_json(hmm_metrics_dict, output_dir / 'metrics_hmm.json')
+            print(f"  Reports saved to: {output_dir}")
+
     # ------------------------------------------------------------------
     # 5. Shared safety and inference time reports
     # ------------------------------------------------------------------
-    if kmeans_metrics_dict or gnb_metrics_dict:
+    if kmeans_metrics_dict or gnb_metrics_dict or hmm_metrics_dict:
         safety_report: Dict[str, Any] = {}
         inf_time_report: Dict[str, Any] = {}
 
-        for name, mdict in [('kmeans', kmeans_metrics_dict), ('gnb', gnb_metrics_dict)]:
+        for name, mdict in [('kmeans', kmeans_metrics_dict), ('gnb', gnb_metrics_dict),
+                             ('hmm', hmm_metrics_dict)]:
             if mdict:
                 safety_report[name] = mdict.get('safety', {})
                 inf_time_report[name] = mdict.get('inference_time', {})
@@ -263,6 +298,42 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 # Evaluation helpers
 # ---------------------------------------------------------------------------
+
+def _evaluate_hmm(
+    model: HiddenMarkovModelClassifier,
+    split: DatasetSplit,
+    mfcc_cfg: MFCCConfig,
+    labels: List[str],
+) -> Dict[str, Any]:
+    """Run HMM inference on the test split and collect all metrics."""
+    y_true:       List[str]       = []
+    y_pred:       List[str]       = []
+    ranked_preds: List[List[str]] = []
+    margins:      List[float]     = []
+    times_ms:     List[float]     = []
+
+    for sample in split.test:
+        try:
+            signal, _ = load_wav(sample.path, target_sr=mfcc_cfg.sample_rate)
+            signal = normalize(signal)
+            frames = extract_mfcc_frames(signal, mfcc_cfg)
+
+            t0 = time.perf_counter()
+            ranked = model.predict_ranked(frames)
+            times_ms.append((time.perf_counter() - t0) * 1000.0)
+
+            pred_label = ranked[0][0]
+            margin = ranked[0][1] - ranked[1][1] if len(ranked) > 1 else 0.0
+
+            y_true.append(sample.label)
+            y_pred.append(pred_label)
+            ranked_preds.append([lbl for lbl, _ in ranked])
+            margins.append(margin)
+        except Exception as exc:
+            warnings.warn(f"Skipping {sample.path.name}: {exc}", UserWarning, stacklevel=2)
+
+    return _build_metrics_dict(y_true, y_pred, ranked_preds, margins, times_ms, labels)
+
 
 def _evaluate_kmeans(
     model: KMeansCodebookClassifier,

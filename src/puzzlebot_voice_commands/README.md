@@ -2,7 +2,7 @@
 
 Offline voice command recognition package for the Puzzlebot ROS 2 workspace.
 
-**Current phase:** 6 complete — all offline phases done.
+**Current phase:** 7 complete — HMM classifier implemented from scratch.
 **Status:** Full pipeline functional. Dataset collection in progress (2/4 speakers recorded).
 Recommended model: **GaussianNB** (98.1% accuracy, 0 safety errors, 0.17 ms inference).
 
@@ -15,6 +15,7 @@ hand-crafted MFCC features. Two models are implemented from scratch:
 |-------|---------------|----------|
 | `KMeansCodebookClassifier` | Frame-level MFCCs | One K-Means codebook per class (VQ-style) |
 | `GaussianNaiveBayesClassifier` | MFCC summary vector | Gaussian log-likelihood + class prior |
+| `HiddenMarkovModelClassifier` | Frame-level MFCCs | Left-to-right HMM per class, Baum-Welch + Viterbi |
 
 This package is **offline only** — it does not connect to the robot or publish
 to `/cmd_vel`. Integration with the Puzzlebot control stack is a future phase.
@@ -72,7 +73,19 @@ python -m puzzlebot_voice_commands.scripts.speaker_test `
   --mode       all-train `
   --output-dir reports
 
-# 8. Predict a single file
+# 8. Train HMM
+python -m puzzlebot_voice_commands.scripts.train_hmm `
+  --dataset    datasets\voice_commands_dataset `
+  --output-dir artifacts
+
+# 9. Evaluate HMM (or all three: --model all)
+python -m puzzlebot_voice_commands.scripts.evaluate_models `
+  --dataset      datasets\voice_commands_dataset `
+  --artifact-dir artifacts `
+  --output-dir   reports `
+  --model        hmm
+
+# 10. Predict a single file
 python -m puzzlebot_voice_commands.scripts.predict_file `
   --model-type gnb `
   --model-path artifacts\gnb_model.pkl `
@@ -115,12 +128,14 @@ puzzlebot_voice_commands/
 │   ├── reports.py          — CSV, JSON, and Markdown report writers
 │   ├── models/
 │   │   ├── kmeans_codebook.py  — KMeansCodebookClassifier
-│   │   └── gaussian_nb.py      — GaussianNaiveBayesClassifier
+│   │   ├── gaussian_nb.py      — GaussianNaiveBayesClassifier
+│   │   └── hmm.py              — HiddenMarkovModelClassifier
 │   └── scripts/
 │       ├── grabar.py           — CLI: record samples interactively
 │       ├── merge_datasets.py   — CLI: merge per-person folders into one dataset
 │       ├── prepare_dataset.py  — CLI: prepare_voice_dataset
 │       ├── train_models.py     — CLI: train_voice_models
+│       ├── train_hmm.py        — CLI: train_hmm_models
 │       ├── evaluate_models.py  — CLI: evaluate_voice_models
 │       ├── predict_file.py     — CLI: predict_voice_file
 │       ├── cross_validate.py   — CLI: k-fold cross-validation
@@ -193,7 +208,7 @@ High std on GNB (5.6%) is expected with only 2 speakers — will decrease with 4
 
 **GaussianNB is the recommended model for ROS 2 integration.**
 
-## Phase 7 — HMM (Hidden Markov Model) plan
+## Phase 7 — HMM (Hidden Markov Model)
 
 A third classifier will be added using a discrete-observation HMM trained on
 frame-level MFCCs — implemented entirely from scratch with NumPy only.
@@ -217,17 +232,30 @@ frame-level MFCCs — implemented entirely from scratch with NumPy only.
 | Classifier | One HMM per class; argmax of log-likelihoods across all models |
 | Parameters | `n_states` (default 5), `n_iter` (default 20), `n_symbols` from codebook |
 
-### Files to add
+### Files added
 
 ```
 models/
 └── hmm.py              — HiddenMarkovModel + Baum-Welch + Viterbi
 scripts/
-└── train_hmm.py        — CLI: train_hmm_models  (saves hmm_models.pkl)
+└── train_hmm.py        — CLI: train_hmm_models  (saves hmm_model.pkl)
 ```
 
 `evaluate_models.py`, `predict_file.py`, `cross_validate.py`, `learning_curve.py`,
-and `speaker_test.py` will be extended to support `--model hmm`.
+and `speaker_test.py` now support `--model hmm` and `--model all`.
+
+### Initial results (2 speakers, default params)
+
+| Metric | KMeans | GaussianNB | HMM |
+|--------|--------|------------|-----|
+| Global accuracy | 92.6% | **98.1%** | 63.0% |
+| Macro recall | 92.6% | **98.1%** | 63.0% |
+| Safety errors | 1 | **0** | 3 |
+| Avg inference | 0.58 ms | **0.17 ms** | 26.45 ms |
+
+HMM underperforms with only 2 speakers and default hyperparameters.
+Expected to improve significantly with 4 speakers and tuned `n_states`/`n_symbols`.
+Use `--n-states` and `--n-symbols` flags in `train_hmm` to experiment.
 
 ## Implementation phases
 
@@ -239,7 +267,7 @@ and `speaker_test.py` will be extended to support `--model hmm`.
 | 4 | GaussianNaiveBayesClassifier + training script | **Done** |
 | 5 | Full metrics, report generation, model comparison | **Done** |
 | 6 | Documentation cleanup, validation checklist | **Done** |
-| 7  | Hidden Markov Model (HMM) classifier from scratch        | Pending     |
+| 7  | Hidden Markov Model (HMM) classifier from scratch        | **Done**    |
 | 8+ | ROS 2 inference node, Puzzlebot integration              | Future      |
 
 ## CLI scripts
@@ -255,3 +283,4 @@ and `speaker_test.py` will be extended to support `--model hmm`.
 | `cross_validate_voice` | standalone | K-fold CV: mean/std of accuracy and recall |
 | `learning_curve_voice` | standalone | Accuracy vs training size, detects overfitting |
 | `speaker_test_voice` | standalone | Per-speaker recall, all-train or leave-one-out |
+| `train_hmm_models` | ROS 2 / standalone | Train HMM classifiers, save `hmm_model.pkl` |
