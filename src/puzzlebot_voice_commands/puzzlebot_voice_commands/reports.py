@@ -146,6 +146,7 @@ def generate_comparison_report(
 
     rows = [
         ('Global accuracy',     'accuracy'),
+        ('Macro recall',        'macro_recall'),
         ('Macro F1',            'macro_f1'),
         ('Top-2 accuracy',      'top2_accuracy'),
         ('Safety-critical errors', 'safety_critical_count'),

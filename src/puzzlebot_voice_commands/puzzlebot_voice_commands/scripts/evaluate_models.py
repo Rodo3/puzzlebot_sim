@@ -347,11 +347,14 @@ def _build_metrics_dict(
     cm      = confusion_matrix(y_true, y_pred, labels)
     safety  = safety_critical_errors(y_true, y_pred)
 
+    macro_recall = sum(v['recall'] for v in prf.values()) / len(prf) if prf else 0.0
+
     return {
         'n_samples':              len(y_true),
         'labels':                 labels,
         'accuracy':               round(accuracy(y_true, y_pred), 6),
         'macro_f1':               round(macro_f1(prf), 6),
+        'macro_recall':           round(macro_recall, 6),
         'top2_accuracy':          round(top2_accuracy(y_true, ranked_preds), 6),
         'per_class':              {
             lbl: {k: round(v, 6) for k, v in prf[lbl].items()}
@@ -394,6 +397,13 @@ def _print_metrics_summary(model_name: str, mdict: Dict[str, Any]) -> None:
     for lbl, prf in mdict['per_class'].items():
         print(f"  {lbl:15s}  {prf['precision']:6.3f}  "
               f"{prf['recall']:6.3f}  {prf['f1']:6.3f}")
+
+    print(f"\n  {'Class':15s}  {'Recall':>8}")
+    for lbl, prf in mdict['per_class'].items():
+        flag = '  <-- BAJO' if prf['recall'] < 0.90 else ''
+        print(f"  {lbl:15s}  {prf['recall']:8.4f}{flag}")
+    macro_recall = sum(v['recall'] for v in mdict['per_class'].values()) / len(mdict['per_class'])
+    print(f"  {'Macro recall':15s}  {macro_recall:8.4f}")
 
 
 def _load_mfcc_config(artifact_dir: Path) -> MFCCConfig:

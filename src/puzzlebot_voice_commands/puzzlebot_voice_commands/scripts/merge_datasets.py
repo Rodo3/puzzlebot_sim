@@ -123,16 +123,16 @@ def merge(input_dirs: List[Path], output_dir: Path, dry_run: bool = False) -> No
                 total_copied += 1
 
     # Print summary table
-    print(f"\n{'─'*60}")
+    print(f"\n{'-'*60}")
     print(f"  Merge {'(DRY RUN) ' if dry_run else ''}summary")
-    print(f"{'─'*60}")
+    print(f"{'-'*60}")
 
     persons = sorted({p for cls_dict in summary.values() for p in cls_dict})
     col_w = max(len(p) for p in persons) + 2 if persons else 8
 
     header = f"  {'Class':<14}" + "".join(f"{p:>{col_w}}" for p in persons) + f"{'Total':>8}"
     print(header)
-    print(f"  {'─'*12}" + "─" * (col_w * len(persons) + 8))
+    print(f"  {'-'*12}" + "-" * (col_w * len(persons) + 8))
 
     for cls in sorted(EXPECTED_CLASSES):
         counts = summary[cls]
@@ -140,7 +140,7 @@ def merge(input_dirs: List[Path], output_dir: Path, dry_run: bool = False) -> No
         row = f"  {cls:<14}" + "".join(f"{counts.get(p, 0):>{col_w}}" for p in persons) + f"{row_total:>8}"
         print(row)
 
-    print(f"  {'─'*12}" + "─" * (col_w * len(persons) + 8))
+    print(f"  {'-'*12}" + "-" * (col_w * len(persons) + 8))
     grand_total = sum(sum(d.values()) for d in summary.values())
     print(f"  {'TOTAL':<14}" + "".join(
         f"{sum(summary[cls].get(p, 0) for cls in EXPECTED_CLASSES):>{col_w}}"
