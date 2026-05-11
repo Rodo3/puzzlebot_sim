@@ -1,9 +1,28 @@
 slam_node:
   ros__parameters:
-    map_size_pixels:   800
-    map_size_meters:   16.0
-    n_particles:       200
-    particle_noise_x:  0.02
-    particle_noise_y:  0.02
-    particle_noise_t:  0.01
-    update_frequency:  5.0
+    # Grid geometry — 500×500 cells × 0.05 m = 25×25 m centered on (0,0)
+    map_size_pixels:   500
+    map_size_meters:   25.0
+    map_origin_x:     -12.5
+    map_origin_y:     -12.5
+
+    # Sensor model — inverse_sensor_model probabilities
+    # p_occ  > 0.5 means cells hit by a beam endpoint become more occupied
+    # p_free < 0.5 means cells along the beam path become more free
+    # log_odds increments are derived: l = log(p/(1-p))
+    p_occ:             0.75    # → l_occ  ≈ +1.10
+    p_free:            0.45    # → l_free ≈ -0.20
+    l_clamp:           5.0     # saturation limit
+
+    # Beam processing
+    scan_step:         1       # use every ray
+    max_range_factor:  0.95    # rays >= 95% of range_max → no-hit (free only)
+    min_useful_range:  0.20    # ignore beams shorter than 20 cm
+
+    # Frames
+    map_frame:        'map'
+    odom_frame:       'odom'
+
+    # Pose/scan timing
+    pose_buffer_sec:   3.0
+    max_scan_pose_age: 0.20

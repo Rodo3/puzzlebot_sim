@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = 'puzzlebot_slam'
 
@@ -10,6 +12,10 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # Install the maze PNG map alongside the package Python files
+        (os.path.join('share', package_name, 'puzzlebot_slam'),
+            glob(os.path.join('puzzlebot_slam', '*.png')) +
+            glob(os.path.join('puzzlebot_slam', '*.yaml'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -19,7 +25,10 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'slam_node = puzzlebot_slam.slam_node:main',
+            'slam_node          = puzzlebot_slam.slam_node:main',
+            'dead_reckoning     = puzzlebot_slam.dead_reckoning:main',
+            'ground_truth_odom  = puzzlebot_slam.ground_truth_odom:main',
+            'mcl                = puzzlebot_slam.mcl:main',
         ],
     },
 )
