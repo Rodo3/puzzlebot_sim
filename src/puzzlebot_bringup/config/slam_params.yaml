@@ -26,3 +26,10 @@ slam_node:
     # Pose/scan timing
     pose_buffer_sec:   3.0
     max_scan_pose_age: 0.20
+
+    # Architecture hooks for the physical-robot SLAM path. Disabled by default
+    # to preserve the validated Gazebo mapping behavior.
+    use_keyframes:             false
+    keyframe_min_translation:  0.10
+    keyframe_min_rotation:     0.0873  # 5 deg
+    scan_matching_enabled:     false

@@ -88,7 +88,13 @@ src/
 │   └── puzzlebot_slam/
 │       ├── dead_reckoning.py         # ✅ Funcional (sim + real robot)
 │       ├── mcl.py                    # ✅ MCL contra maze_map.png
-│       ├── slam_node.py              # ✅ Mapping log-odds Bresenham + pose buffer
+│       ├── slam_node.py              # ✅ Orquestador ROS del mapper
+│       ├── occupancy_grid_map.py     # ✅ Log-odds + Bresenham + OccupancyGrid
+│       ├── odometry_buffer.py        # ✅ Sincronización /odom ↔ /scan
+│       ├── scan_matcher.py           # ⚠️ Hook; aún pass-through
+│       ├── keyframe_manager.py       # ✅ Gate opcional de integración
+│       ├── slam_math.py              # ✅ Helpers geométricos
+│       ├── slam_types.py             # ✅ Pose2D
 │       ├── ground_truth_odom.py      # ✅ Pose real de Gazebo → /odom para mapping
 │       ├── maze_map.png              # 206×221 px, origen (-5.54, -8.10)
 │       └── generate_maze_map.py      # Regenera maze_map.png desde maze.sdf
@@ -116,6 +122,8 @@ El `slam_node.py` construye `/map` con occupancy grid mapping log-odds. Usa un
 buffer de poses por timestamp para integrar cada `/scan` con la pose de `/odom`
 correspondiente. En Gazebo, `gz_sim.launch.py` usa `ground_truth_odom` por default
 cuando `mode:=mapping`, evitando que la deriva de wheel odometry deforme el mapa.
+El nodo ya está dividido internamente en `OdometryBuffer`, `OccupancyGridMap`,
+`KeyframeManager` y `LocalScanMatcher`; el matcher todavía es pass-through.
 
 ```bash
 ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping
@@ -236,6 +244,7 @@ slam_node (mode=mapping):
 | slam map tamaño | 500×500 px = 25×25 m | slam_params.yaml |
 | slam p_occ / p_free | 0.75 / 0.45 | slam_params.yaml |
 | slam pose buffer | 3.0 s, max age 0.20 s | slam_params.yaml |
+| keyframes / scan matching | desactivados por default | slam_params.yaml |
 | wheel_separation | 0.19 m | gz_sim.launch.py → dead_reckoning |
 | wheel_radius | 0.05 m | gz_sim.launch.py → dead_reckoning |
 

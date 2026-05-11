@@ -556,6 +556,18 @@ deforme por deriva de wheel odometry.
    - `DurabilityPolicy.TRANSIENT_LOCAL`
    - RViz recibe el mapa aunque se abra despues.
 
+4. División interna para SLAM real:
+   - `slam_node.py`: orquestador ROS.
+   - `odometry_buffer.py`: sincroniza `/odom` con `/scan`.
+   - `occupancy_grid_map.py`: log-odds, Bresenham y mensaje `OccupancyGrid`.
+   - `keyframe_manager.py`: gate opcional de keyframes.
+   - `scan_matcher.py`: hook para implementar scan matching local.
+   - `slam_math.py` / `slam_types.py`: utilidades puras y `Pose2D`.
+
+Por default, `use_keyframes=false` y `scan_matching_enabled=false` para preservar
+el comportamiento validado en Gazebo. La implementación real del robot debe
+empezar por `LocalScanMatcher.match()`.
+
 ### Launch actual
 
 ```bash

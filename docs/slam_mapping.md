@@ -209,6 +209,32 @@ Eso significa que en el robot fisico el nodo depende de la calidad de `/odom`. S
 
    Para validar el robot fisico, empieza con un cuarto pequeno o un pasillo simple. Si el mapa sale bien ahi, escala a entornos mas grandes.
 
+## Division interna actual
+
+El `slam_node.py` ya no contiene todo el algoritmo en un solo archivo. Ahora es
+un orquestador ROS que conecta componentes pequenos:
+
+| Componente | Archivo | Responsabilidad |
+|---|---|---|
+| `SlamNode` | `slam_node.py` | Subscripciones, publishers, timers y TF |
+| `Pose2D` | `slam_types.py` | Tipo comun para poses 2D |
+| `slam_math` | `slam_math.py` | Bresenham, yaw, normalizacion angular, timestamps |
+| `OdometryBuffer` | `odometry_buffer.py` | Buffer temporal de `/odom` e interpolacion por timestamp |
+| `OccupancyGridMap` | `occupancy_grid_map.py` | Log-odds, conversion mundo-celda, integracion de rayos y publicacion de mapa |
+| `KeyframeManager` | `keyframe_manager.py` | Decide si un scan debe integrarse al mapa |
+| `LocalScanMatcher` | `scan_matcher.py` | Punto de extension para el scan matching real |
+
+Por default, `KeyframeManager` y `LocalScanMatcher` no cambian el comportamiento
+validado en Gazebo:
+
+```yaml
+use_keyframes: false
+scan_matching_enabled: false
+```
+
+La siguiente fase para robot fisico debe implementar `LocalScanMatcher.match()`
+para buscar una correccion local `(dx, dy, dtheta)` alrededor de la pose de odometria.
+
 ## Parametros importantes
 
 Archivo: `src/puzzlebot_bringup/config/slam_params.yaml`
@@ -226,6 +252,10 @@ Archivo: `src/puzzlebot_bringup/config/slam_params.yaml`
 | `min_useful_range` | 0.20 | Ignora retornos demasiado cercanos |
 | `pose_buffer_sec` | 3.0 | Historial de poses |
 | `max_scan_pose_age` | 0.20 | Tolerancia scan-pose |
+| `use_keyframes` | false | Si se activa, integra solo scans separados por movimiento minimo |
+| `keyframe_min_translation` | 0.10 | Distancia minima entre keyframes |
+| `keyframe_min_rotation` | 0.0873 | Rotacion minima entre keyframes, 5 grados |
+| `scan_matching_enabled` | false | Hook para activar el scan matcher futuro |
 
 ## Criterio de exito
 
