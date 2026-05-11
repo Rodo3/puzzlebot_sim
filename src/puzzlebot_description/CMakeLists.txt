@@ -3,7 +3,7 @@ project(puzzlebot_description)
 
 find_package(ament_cmake REQUIRED)
 
-install(DIRECTORY urdf meshes rviz
+install(DIRECTORY urdf meshes rviz sdf worlds config
   DESTINATION share/${PROJECT_NAME}
 )
 
