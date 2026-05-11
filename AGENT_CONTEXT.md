@@ -55,7 +55,8 @@ ws/
 └── src/
     ├── puzzlebot_description/   # meshes, URDF/SDF, worlds, RViz configs
     ├── puzzlebot_bringup/       # launch principal gz_sim.launch.py + configs
-    ├── puzzlebot_slam/          # slam_node, dead_reckoning, ground_truth_odom, mcl
+    ├── puzzlebot_localization/  # odometry_node, kalman_filter_node, pose debug sources
+    ├── puzzlebot_slam/          # slam_node, map representation, scan matcher, mcl
     ├── puzzlebot_planning/      # A*, obstacle avoidance
     ├── puzzlebot_control/       # state machine / control de alto nivel
     └── puzzlebot_perception/    # ArUco, cámara, YOLO skeletons
@@ -117,8 +118,6 @@ setup(
     entry_points={
         'console_scripts': [
             'slam_node = puzzlebot_slam.slam_node:main',
-            'dead_reckoning = puzzlebot_slam.dead_reckoning:main',
-            'ground_truth_odom = puzzlebot_slam.ground_truth_odom:main',
             'mcl = puzzlebot_slam.mcl:main',
         ],
     },
@@ -354,8 +353,8 @@ def generate_launch_description():
 
     # ── 5. dead_reckoning ─────────────────────────────────────────────────────
     dead_reckoning = Node(
-        package='puzzlebot_slam',
-        executable='dead_reckoning',
+        package='puzzlebot_localization',
+        executable='dead_reckoning_debug',
         parameters=[{
             'use_sim_time': True,
             'wheel_radius': 0.05,
@@ -371,7 +370,7 @@ def generate_launch_description():
     # default cuando mode:=mapping. No lanzar ground_truth_odom y dead_reckoning
     # publicando /odom al mismo tiempo.
     ground_truth_odom = Node(
-        package='puzzlebot_slam',
+        package='puzzlebot_localization',
         executable='ground_truth_odom',
         parameters=[{
             'use_sim_time': True,
@@ -414,9 +413,10 @@ def generate_launch_description():
 
 ---
 
-## 8. Nodo dead_reckoning
+## 8. Nodo odometry / dead_reckoning_debug
 
-Archivo: `src/puzzlebot_slam/puzzlebot_slam/dead_reckoning.py`
+Archivo oficial robot real: `src/puzzlebot_localization/src/odometry_node.cpp`
+Archivo debug Python: `src/puzzlebot_localization/scripts/dead_reckoning_debug`
 
 ### Qué hace
 
@@ -431,7 +431,9 @@ y   += v * sin(θ) * dt
 θ   += ω * dt
 ```
 
-Publica `/odom` (`nav_msgs/Odometry`) y el TF `odom → base_footprint`.
+`odometry_node.cpp` publica `/odom_raw` para que `kalman_filter_node.cpp` pueda
+publicar `/odom`. El script `dead_reckoning_debug` publica `/odom` directamente
+cuando se usa como fuente rápida de simulación/debug.
 
 ### Parámetros
 
@@ -742,16 +744,16 @@ ros2 topic echo /mcl/pose --once
 
 ## 15. Transición simulación → robot real
 
-Solo cambia el parámetro `input_source` en el launch del dead_reckoning:
+Para robot real, preferir `odometry_node.cpp` como fuente oficial:
 
 ```python
-# Simulación:
-parameters=[{'input_source': 'joint_states', 'use_sim_time': True, ...}]
-remappings=[('/joint_states', '/world/<world>/model/puzzlebot/joint_state')]
-
 # Robot real:
-parameters=[{'input_source': 'encoders', 'use_sim_time': False, ...}]
-# Sin remappings — suscribe directamente /velocity_enc_r y /velocity_enc_l
+odometry_node: /velocity_enc_r + /velocity_enc_l -> /odom_raw
+kalman_filter_node: /odom_raw (+ ArUco/IMU futuras) -> /odom
+
+# Simulación/debug:
+dead_reckoning_debug puede publicar /odom desde joint states si se requiere
+comparar contra ground_truth_odom.
 ```
 
 El nodo `mcl.py` no necesita cambios de algoritmo para el robot real: suscribe
@@ -765,8 +767,9 @@ depende completamente de la calidad de `/odom`, porque no habrá `ground_truth_o
 
 Si el agente recibe los archivos fuente del repositorio original:
 
-- `dead_reckoning.py` — listo para usar sin modificaciones.
-- `ground_truth_odom.py` — usar solo en Gazebo para mapping; publica `/odom` desde
+- `odometry_node.cpp` — fuente oficial de odometría real.
+- `dead_reckoning_debug` — script Python de debug, no pertenece a SLAM.
+- `ground_truth_odom` — usar solo en Gazebo para mapping; publica `/odom` desde
   `/world/<world>/dynamic_pose/info`.
 - `slam_node.py` — occupancy-grid mapping log-odds desde `/scan` + `/odom`; usa
   buffer temporal de poses. Ver `docs/slam_mapping.md`.

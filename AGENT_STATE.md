@@ -54,7 +54,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard \
 |------|-----------|----------|--------------|
 | `robot_state_publisher` | ✅ | ✅ | ✅ |
 | `gz_bridge` (Fortress, ignition.msgs) | ✅ | ✅ | ✅ |
-| `dead_reckoning` → `/odom` | ✅ | ✅ | solo si `odom_source:=dead_reckoning` |
+| `dead_reckoning_debug` → `/odom` | ✅ | ✅ | solo si `odom_source:=dead_reckoning` |
 | `ground_truth_odom` → `/odom` | — | — | ✅ default (`odom_source:=ground_truth`) |
 | `mcl` → `/mcl/pose`, `/mcl/map`, TF `map→odom` | — | ✅ | — |
 | `slam_node` → `/map`, TF `map→odom` | — | — | ✅ |
@@ -84,9 +84,16 @@ src/
 │       ├── controller_params.yaml    # lookahead, velocidades, PID
 │       └── yolo_params.yaml          # engine_path, conf threshold
 │
-├── puzzlebot_slam/           # Algoritmos SLAM/localización
+├── puzzlebot_localization/   # Odometría y estimación de pose
+│   ├── src/
+│   │   ├── odometry_node.cpp          # ✅ Odometría C++ oficial para robot real
+│   │   └── kalman_filter_node.cpp     # ✅ EKF/Kalman C++
+│   └── scripts/
+│       ├── dead_reckoning_debug       # ✅ Odometría Python para debug/sim
+│       └── ground_truth_odom          # ✅ Pose real de Gazebo → /odom
+│
+├── puzzlebot_slam/           # Algoritmos lidar/mapa
 │   └── puzzlebot_slam/
-│       ├── dead_reckoning.py         # ✅ Funcional (sim + real robot)
 │       ├── mcl.py                    # ✅ MCL contra maze_map.png
 │       ├── slam_node.py              # ✅ Orquestador ROS del mapper
 │       ├── occupancy_grid_map.py     # ✅ Log-odds + Bresenham + OccupancyGrid
@@ -95,7 +102,6 @@ src/
 │       ├── keyframe_manager.py       # ✅ Gate opcional de integración
 │       ├── slam_math.py              # ✅ Helpers geométricos
 │       ├── slam_types.py             # ✅ Pose2D
-│       ├── ground_truth_odom.py      # ✅ Pose real de Gazebo → /odom para mapping
 │       ├── maze_map.png              # 206×221 px, origen (-5.54, -8.10)
 │       └── generate_maze_map.py      # Regenera maze_map.png desde maze.sdf
 │
@@ -158,8 +164,9 @@ a `/mcl/map`, no a `/map`. Hay que alinear este topic.
 
 ### 4. kalman_filter_node [DESPUÉS de percepción]
 
-El EKF no tiene sentido sin correcciones externas (ArUco). No implementar hasta
-tener ArUco en el maze world. El `dead_reckoning.py` es suficiente mientras tanto.
+El EKF no tiene sentido sin correcciones externas (ArUco/IMU/scan matching). No
+depender de él hasta tener una medición externa; `odometry_node.cpp` y
+`dead_reckoning_debug` cubren la odometría base mientras tanto.
 
 ### 5. ArUco en maze world [DESPUÉS del steering controller]
 
@@ -192,11 +199,12 @@ Requiere modelo `.engine` entrenado. Hasta entonces el `yolo_node.py` es skeleto
 
 5. **`use_sim_time: True`** en todos los nodos de Gazebo. En robot real: `False`.
 
-6. **No hay paquete `puzzlebot_localization`** — el code path de `localization.launch.py`
-   y `slam.launch.py` está roto (referencia a paquete inexistente). Usar `gz_sim.launch.py`.
+6. **`gz_sim.launch.py` es el launch principal de simulación Fortress.**
+   Los launch antiguos `simulation.launch.py`, `slam.launch.py` y
+   `localization.launch.py` son legacy y deben revisarse antes de usarse.
 
 7. **`robot_params.yaml` tiene `wheelbase: 0.18`** pero el SDF usa `wheel_separation: 0.19`.
-   El `dead_reckoning.py` usa el parámetro del launch (`wheel_separation: 0.19`). Hay
+   `dead_reckoning_debug` usa el parámetro del launch (`wheel_separation: 0.19`). Hay
    inconsistencia — al pasar al robot real medir la separación real y unificar.
 
 ---
@@ -213,7 +221,7 @@ Gazebo Fortress
   └─→ /world/*/dynamic_pose/info    → ground_truth_odom (mode=mapping default)
                   │
                   ▼
-         dead_reckoning
+         dead_reckoning_debug
                   │
                   └─→ /odom   →  mcl (moves particles)
                   └─→ TF odom→base_footprint
@@ -245,8 +253,8 @@ slam_node (mode=mapping):
 | slam p_occ / p_free | 0.75 / 0.45 | slam_params.yaml |
 | slam pose buffer | 3.0 s, max age 0.20 s | slam_params.yaml |
 | keyframes / scan matching | desactivados por default | slam_params.yaml |
-| wheel_separation | 0.19 m | gz_sim.launch.py → dead_reckoning |
-| wheel_radius | 0.05 m | gz_sim.launch.py → dead_reckoning |
+| wheel_separation | 0.19 m | gz_sim.launch.py → dead_reckoning_debug |
+| wheel_radius | 0.05 m | gz_sim.launch.py → dead_reckoning_debug |
 
 ---
 

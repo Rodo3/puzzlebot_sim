@@ -27,13 +27,13 @@ Teleop (needs its own TTY):
 Arguments:
   world  [flat_plane]  'flat_plane' or 'maze'
   gui    [true]
-  slam   [true]        Launch dead_reckoning (+ mcl or slam_node depending on mode)
+  slam   [true]        Launch localization (+ mcl or slam_node depending on mode)
   rviz   [true]
   mode   [mcl]         'mcl' = localise against maze_map.png
                        'mapping' = build OccupancyGrid from scratch (any world)
   odom_source [ground_truth]  For mode:=mapping only:
                        'ground_truth' = Gazebo pose (best maps in simulation)
-                       'dead_reckoning' = wheel odometry (realistic drift test)
+                       'dead_reckoning' = wheel odometry debug path
 """
 import os
 
@@ -293,12 +293,13 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ── 5. Dead-reckoning odometry ───────────────────────────────────────
-    # Remapped to the world-scoped joint_state topic from the bridge.
+    # ── 5. Debug dead-reckoning odometry ─────────────────────────────────
+    # This lives in puzzlebot_localization because it is a pose source, not SLAM.
+    # It is kept for comparing wheel odometry against Gazebo ground truth.
     dead_reckoning_flat = Node(
-        package='puzzlebot_slam',
-        executable='dead_reckoning',
-        name='dead_reckoning',
+        package='puzzlebot_localization',
+        executable='dead_reckoning_debug',
+        name='dead_reckoning_debug',
         output='screen',
         parameters=[{
             'use_sim_time': True,
@@ -319,9 +320,9 @@ def generate_launch_description():
     )
 
     dead_reckoning_maze = Node(
-        package='puzzlebot_slam',
-        executable='dead_reckoning',
-        name='dead_reckoning',
+        package='puzzlebot_localization',
+        executable='dead_reckoning_debug',
+        name='dead_reckoning_debug',
         output='screen',
         parameters=[{
             'use_sim_time': True,
@@ -346,7 +347,7 @@ def generate_launch_description():
     # simulator's true dynamic pose by default so mapping quality is limited by
     # the scan model, not by wheel slip / encoder integration drift.
     ground_truth_flat = Node(
-        package='puzzlebot_slam',
+        package='puzzlebot_localization',
         executable='ground_truth_odom',
         name='ground_truth_odom',
         output='screen',
@@ -364,7 +365,7 @@ def generate_launch_description():
     )
 
     ground_truth_maze = Node(
-        package='puzzlebot_slam',
+        package='puzzlebot_localization',
         executable='ground_truth_odom',
         name='ground_truth_odom',
         output='screen',

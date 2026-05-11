@@ -30,7 +30,7 @@ Este es el default para `mode:=mapping`. El launch bridgea:
 /world/<world>/dynamic_pose/info
 ```
 
-y lanza `ground_truth_odom`, que publica:
+y lanza `ground_truth_odom` desde `puzzlebot_localization`, que publica:
 
 ```text
 /odom
@@ -159,7 +159,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard \
   --ros-args --remap cmd_vel:=/model/puzzlebot/cmd_vel
 ```
 
-Prueba con odometria realista de ruedas:
+Prueba con odometria realista de ruedas usando el nodo de debug:
 
 ```bash
 ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping odom_source:=dead_reckoning
@@ -219,7 +219,7 @@ un orquestador ROS que conecta componentes pequenos:
 | `SlamNode` | `slam_node.py` | Subscripciones, publishers, timers y TF |
 | `Pose2D` | `slam_types.py` | Tipo comun para poses 2D |
 | `slam_math` | `slam_math.py` | Bresenham, yaw, normalizacion angular, timestamps |
-| `OdometryBuffer` | `odometry_buffer.py` | Buffer temporal de `/odom` e interpolacion por timestamp |
+| `OdometryBuffer` | `odometry_buffer.py` | Buffer temporal de `/odom` e interpolacion por timestamp; no produce odometria |
 | `OccupancyGridMap` | `occupancy_grid_map.py` | Log-odds, conversion mundo-celda, integracion de rayos y publicacion de mapa |
 | `KeyframeManager` | `keyframe_manager.py` | Decide si un scan debe integrarse al mapa |
 | `LocalScanMatcher` | `scan_matcher.py` | Punto de extension para el scan matching real |

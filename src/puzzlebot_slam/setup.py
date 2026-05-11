@@ -26,8 +26,6 @@ setup(
     entry_points={
         'console_scripts': [
             'slam_node          = puzzlebot_slam.slam_node:main',
-            'dead_reckoning     = puzzlebot_slam.dead_reckoning:main',
-            'ground_truth_odom  = puzzlebot_slam.ground_truth_odom:main',
             'mcl                = puzzlebot_slam.mcl:main',
         ],
     },

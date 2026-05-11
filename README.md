@@ -9,7 +9,8 @@ puzzlebot_sim/
 ├── src/
 │   ├── puzzlebot_description/      # URDF, SDF, meshes, RViz configs, worlds
 │   ├── puzzlebot_bringup/          # Gazebo Fortress launch files
-│   ├── puzzlebot_slam/             # SLAM mapping + dead reckoning + MCL
+│   ├── puzzlebot_localization/     # Odometry, EKF, sim/debug pose sources
+│   ├── puzzlebot_slam/             # Lidar mapping, scan matching, MCL
 │   ├── homework_01_transforms/     # HW1: TF transforms + circular trajectory
 │   ├── puzzlebot_tf_tools/         # Reusable TF utilities (shared)
 │   └── shared_utils/               # General Python helpers (shared)
@@ -50,7 +51,7 @@ The workspace includes a complete Gazebo Fortress (ignition-gazebo 6) simulation
 Start the simulation (choose one):
 
 ```bash
-# Flat plane world — dead-reckoning odometry only
+# Flat plane world — debug wheel odometry only
 ros2 launch puzzlebot_bringup gz_sim.launch.py
 
 # Maze world with MCL localization (recommended for testing)
@@ -68,7 +69,7 @@ ros2 launch puzzlebot_bringup gz_sim.launch.py rviz:=false
 # Headless (no GUI)
 ros2 launch puzzlebot_bringup gz_sim.launch.py gui:=false
 
-# Disable SLAM (dead_reckoning + MCL)
+# Disable SLAM/localization extras
 ros2 launch puzzlebot_bringup gz_sim.launch.py slam:=false
 ```
 
@@ -101,7 +102,7 @@ Then use keyboard to control:
 | **Gazebo Fortress** | Physics engine (ODE), sensor simulation |
 | **robot_state_publisher** | Publishes TF tree from URDF |
 | **ros_gz_bridge** | Bidirectional ROS ↔ Gazebo message bridge |
-| **dead_reckoning** | Differential-drive odometry from joint states |
+| **dead_reckoning_debug** | Debug differential-drive odometry from joint states |
 | **ground_truth_odom** | Gazebo pose → `/odom` for clean mapping in simulation |
 | **slam_node** | Log-odds occupancy grid mapping from `/scan` + `/odom` |
 | **MCL (maze only)** | Monte Carlo Localization for map-based pose estimation |
