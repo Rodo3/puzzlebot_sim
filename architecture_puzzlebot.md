@@ -192,12 +192,16 @@ corners, ids, _ = detector.detectMarkers(gray_frame)
 
 ## 4. LiDAR, Mapping, and SLAM — Full Pipeline
 
-This section ties directly to what was covered in the Semana 3 slides. The pipeline is:
+This section ties directly to what was covered in the Semana 3 slides. The conceptual pipeline is:
 
 ```
 Raw LiDAR scans  →  Feature extraction  →  Scan matching (RANSAC)  →  Pose estimation
                                          +  Monte Carlo particle filter  →  Occupancy grid map
 ```
+
+In this repository, pose sources and pose filters live in `puzzlebot_localization`.
+LiDAR-map algorithms live in `puzzlebot_slam`. Dead reckoning is a localization
+input, not a SLAM algorithm.
 
 ### 4.1 What a LiDAR scan is
 
@@ -468,7 +472,8 @@ class SlamNode(Node):
 **Why two localization layers?**
 - Dead reckoning (`odometry_node`) is fast but drifts
 - EKF (`kalman_filter_node`) fuses odometry with Aruco for low-latency corrected pose
-- MCL inside `slam_node` uses the corrected pose + LiDAR to build and maintain the map
+- `slam_node` uses the corrected pose + LiDAR to build and maintain the map
+- `mcl.py` is a separate LiDAR-map localization node for known maps
 
 ---
 
@@ -500,10 +505,19 @@ puzzlebot_ws/
     │       ├── yolo_node.py
     │       └── encoder_node.py   # (may be provided by hardware — subscribe only)
     ├── puzzlebot_localization/
-    │   └── puzzlebot_localization/
-    │       ├── odometry_node.py
-    │       ├── kalman_filter_node.py
-    │       └── slam_node.py
+    │   ├── src/
+    │   │   ├── odometry_node.cpp
+    │   │   └── kalman_filter_node.cpp
+    │   └── scripts/
+    │       ├── dead_reckoning_debug
+    │       └── ground_truth_odom
+    ├── puzzlebot_slam/
+    │   └── puzzlebot_slam/
+    │       ├── slam_node.py
+    │       ├── occupancy_grid_map.py
+    │       ├── scan_matcher.py
+    │       ├── keyframe_manager.py
+    │       └── mcl.py
     ├── puzzlebot_planning/
     │   └── puzzlebot_planning/
     │       ├── path_planner_node.py
@@ -635,7 +649,7 @@ ros2 bag record /scan -o lidar_corridor_test
 ros2 bag play lidar_corridor_test --loop
 
 # Now run your slam_node against recorded data — no robot needed
-ros2 run puzzlebot_localization slam_node
+ros2 run puzzlebot_slam slam_node
 ```
 
 ### Pattern 3 — Mock Aruco detections
@@ -772,7 +786,7 @@ def generate_launch_description():
             ]
         ),
         Node(
-            package='puzzlebot_localization',
+            package='puzzlebot_slam',
             executable='slam_node',
             parameters=[
                 os.path.join(config_dir, 'slam_params.yaml')
@@ -989,7 +1003,8 @@ Language per node — follow this table strictly; do not deviate without a docum
 | `odometry_node` | C++ | 20–50 Hz tight loop — latency directly affects pose accuracy |
 | `kalman_filter_node` | C++ | High-rate matrix math; Eigen is faster than NumPy |
 | `steering_controller_node` | C++ | PID loop — microsecond jitter causes oscillation |
-| `slam_node` | Python | MCL math is compute-heavy but not latency-sensitive; NumPy/BreezySLAM ecosystem |
+| `slam_node` | Python | Mapping and scan matching are still experimental; Python/NumPy speeds iteration |
+| `mcl` | Python | Particle scoring and likelihood tuning are easier to iterate in Python |
 | `yolo_node` | Python | TensorRT Python bindings are standard; ultralytics is Python-first |
 | `aruco_node` | Python | OpenCV Python is fine; not latency-critical |
 | `path_planner_node` | Python | A* runs once per goal, not in a tight loop |

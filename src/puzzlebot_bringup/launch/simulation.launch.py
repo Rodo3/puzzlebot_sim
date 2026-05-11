@@ -118,7 +118,8 @@ def generate_launch_description():
     localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(bringup_dir, 'launch', 'localization.launch.py')
-        )
+        ),
+        launch_arguments={'use_sim_time': 'true'}.items(),
     )
 
     # ── SLAM ──────────────────────────────────────────────────────────

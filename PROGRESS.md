@@ -1,11 +1,11 @@
 # Puzzlebot Sim — Project Progress
 **Course:** Robots Autónomos — ITESM 2026
 **Timeline:** 6 weeks remaining (April – May 2026)
-**Mode:** Simulation-first (Gazebo / RViz). Hardware transfer in week 6 only if time allows.
+**Mode:** Simulation-first (Gazebo / RViz), with package boundaries aligned for hardware transfer.
 
 ---
 
-## Current Status: Sprint 1 — Topic Plumbing & Sim Bringup
+## Current Status: SLAM mapping validated in Gazebo; architecture cleanup in progress
 
 ---
 
@@ -13,28 +13,28 @@
 
 | Package | Type | Status | What it contains |
 |---|---|---|---|
-| `puzzlebot_description` | CMake | ✅ Exists | URDF, meshes, RViz config |
+| `puzzlebot_description` | CMake | ✅ Exists | URDF/SDF, meshes, RViz config, worlds |
 | `puzzlebot_msgs` | CMake | ✅ Created | `HealthIndex.msg`, `ParticleArray.msg` |
 | `puzzlebot_bringup` | Python | ✅ Updated | Launch files, YAML configs |
-| `puzzlebot_localization` | CMake (C++) | ✅ Created | `odometry_node`, `kalman_filter_node` |
-| `puzzlebot_slam` | Python | ✅ Created | `slam_node` (MCL particle filter) |
+| `puzzlebot_localization` | CMake (C++ + debug Python scripts) | ✅ Updated | `odometry_node`, `kalman_filter_node`, `ground_truth_odom`, `dead_reckoning_debug` |
+| `puzzlebot_slam` | Python | ✅ Updated | `slam_node`, occupancy grid map, scan matcher hook, MCL |
 | `puzzlebot_perception` | Python | ✅ Created | `camera_node`, `aruco_node`, `yolo_node` |
 | `puzzlebot_planning` | Python | ✅ Created | `path_planner_node` (A*), `obstacle_avoidance_node` |
 | `puzzlebot_control` | Python | ✅ Created | `state_machine_node` |
 | `puzzlebot_controller` | CMake (C++) | ✅ Created | `steering_controller_node` (pure pursuit) |
-| `shared_utils` | Python | ⬜ Empty | Placeholder for shared helpers |
+| `shared_utils` | Python | ⬜ Legacy/unused | Placeholder for shared helpers if needed later |
 | `homework_01_transforms` | Python | ⬜ Legacy | Circular motion homework — not used in project |
 
 ---
 
 ## Sprint Checklist
 
-### Sprint 1 — Week 1: Topic Plumbing & Sim Bringup
+### Sprint 1 — Topic Plumbing & Sim Bringup
 - [x] All packages scaffolded with correct structure
 - [x] Config YAMLs created (`robot_params`, `kalman_params`, `slam_params`, `yolo_params`, `controller_params`)
 - [x] Launch files created (`localization.launch.py`, `slam.launch.py`, `simulation.launch.py`)
-- [ ] **Build the workspace** — `colcon build --symlink-install`
-- [ ] Verify all packages compile without errors
+- [x] **Build core Gazebo/SLAM packages** — `colcon build --packages-select puzzlebot_slam puzzlebot_bringup`
+- [ ] Verify all packages compile without errors after resolving `shared_utils`
 - [ ] Confirm topics are live: `ros2 topic list` after launching
 - [ ] `odometry_node` publishes `/odom_raw`
 - [ ] `kalman_filter_node` publishes `/odom`
@@ -48,11 +48,12 @@
 - [ ] Tune `kalman_params.yaml` (Q and R matrices)
 
 ### Sprint 3 — Week 3: SLAM
-- [ ] `slam_node` subscribes to `/scan` and `/odom`
-- [ ] `/map` topic publishes an `OccupancyGrid`
-- [ ] Map visible in RViz
-- [ ] Corridor walls visible in map after one pass
-- [ ] Tune `slam_params.yaml` (particle count, noise)
+- [x] `slam_node` subscribes to `/scan` and `/odom`
+- [x] `/map` topic publishes an `OccupancyGrid`
+- [x] Map visible in RViz
+- [x] Maze walls/boxes visible in map after exploration
+- [x] `slam_node` split into mapper components
+- [ ] Implement real scan matching in `scan_matcher.py`
 
 ### Sprint 4 — Week 4: Perception
 - [ ] `aruco_node` detects markers and publishes `/aruco/poses`
@@ -94,14 +95,13 @@ ros2 launch puzzlebot_bringup simulation.launch.py
 ros2 topic list
 ros2 topic echo /odom
 ros2 topic echo /map --no-arr   # check map is publishing
-ros2 param set /slam_node n_particles 500
 ```
 
 ---
 
 ## Known Issues / Notes
 
-- `slam_node` map-update uses best-weight particle; performance depends on initial particle spread — may need tuning in Sprint 3.
+- `slam_node` currently performs occupancy-grid mapping with pose input; real robot SLAM still needs scan matching.
 - `yolo_node` falls back to PyTorch (`ultralytics`) in simulation; TensorRT path only activates on Jetson with `use_trt:=true`.
 - `obstacle_avoidance_node` sits between `/cmd_vel_in` (steering controller output) and `/cmd_vel` (firmware input) — ensure remapping is correct in launch.
 - `homework_01_transforms` package is legacy homework, not used by any project launch file.
