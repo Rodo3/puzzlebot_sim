@@ -293,21 +293,24 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ── 5. Debug dead-reckoning odometry ─────────────────────────────────
-    # This lives in puzzlebot_localization because it is a pose source, not SLAM.
-    # It is kept for comparing wheel odometry against Gazebo ground truth.
-    dead_reckoning_flat = Node(
+    # ── 5. Wheel odometry from Gazebo joint states ───────────────────────
+    # Uses the same C++ odometry node as the physical robot, but with
+    # input_source='joint_states' because Gazebo publishes wheel velocities
+    # through the bridged JointState stream instead of encoder Float32 topics.
+    wheel_odom_flat = Node(
         package='puzzlebot_localization',
-        executable='dead_reckoning_debug',
-        name='dead_reckoning_debug',
+        executable='odometry_node',
+        name='odometry_node',
         output='screen',
         parameters=[{
             'use_sim_time': True,
             'wheel_radius': 0.05,
             'wheel_separation': 0.19,
+            'odom_topic': '/odom',
             'odom_frame': 'odom',
             'base_frame': 'base_footprint',
             'input_source': 'joint_states',
+            'publish_tf': True,
         }],
         remappings=[
             ('/joint_states',
@@ -319,18 +322,20 @@ def generate_launch_description():
         ])),
     )
 
-    dead_reckoning_maze = Node(
+    wheel_odom_maze = Node(
         package='puzzlebot_localization',
-        executable='dead_reckoning_debug',
-        name='dead_reckoning_debug',
+        executable='odometry_node',
+        name='odometry_node',
         output='screen',
         parameters=[{
             'use_sim_time': True,
             'wheel_radius': 0.05,
             'wheel_separation': 0.19,
+            'odom_topic': '/odom',
             'odom_frame': 'odom',
             'base_frame': 'base_footprint',
             'input_source': 'joint_states',
+            'publish_tf': True,
         }],
         remappings=[
             ('/joint_states',
@@ -481,8 +486,8 @@ def generate_launch_description():
         lidar_tf,
         spawn_flat,
         spawn_maze,
-        dead_reckoning_flat,
-        dead_reckoning_maze,
+        wheel_odom_flat,
+        wheel_odom_maze,
         ground_truth_flat,
         ground_truth_maze,
         slam_mapping,
