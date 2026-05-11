@@ -42,22 +42,22 @@ make rviz
 
 See [docs/setup.md](docs/setup.md) for detailed setup instructions.
 
-## Gazebo Fortress Simulation
+## Running In Simulation
 
 The workspace includes a complete Gazebo Fortress (ignition-gazebo 6) simulation stack with two worlds: flat plane and maze.
 
-### Launch Gazebo Simulation
+### Gazebo Fortress
 
 Start the simulation (choose one):
 
 ```bash
-# Flat plane world — debug wheel odometry only
+# Flat plane world
 ros2 launch puzzlebot_bringup gz_sim.launch.py
 
-# Maze world with MCL localization (recommended for testing)
+# Maze world with MCL localization against the known map
 ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze
 
-# Maze world — build a map from lidar scans (recommended mapping mode)
+# Maze world — build a map from lidar scans
 ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping
 
 # Mapping with wheel odometry instead of Gazebo ground truth
@@ -73,7 +73,7 @@ ros2 launch puzzlebot_bringup gz_sim.launch.py gui:=false
 ros2 launch puzzlebot_bringup gz_sim.launch.py slam:=false
 ```
 
-### Test Robot Movement with Teleop
+### Simulation Teleop
 
 In a **new terminal**, launch the keyboard teleop node:
 
@@ -95,6 +95,27 @@ Then use keyboard to control:
 - **k** — stop
 - **q** — quit
 
+### Simulation Checks
+
+Use these checks before changing SLAM or localization logic:
+
+```bash
+# 1. MCL sanity check: odometry prediction + lidar correction on known map
+ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mcl
+
+# 2. Clean mapping baseline: Gazebo ground-truth pose + lidar mapper
+ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping
+
+# 3. Realistic mapping stress test: wheel odometry + lidar mapper
+ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping odom_source:=dead_reckoning
+```
+
+What to watch in RViz:
+- In MCL, particles should converge near the robot and stay aligned with the maze walls.
+- During in-place rotations, `base_footprint` should rotate without large sideways jumps.
+- In mapping with wheel odometry, small yaw drift is expected until `wheel_separation` and encoder scale are tuned.
+- In mapping with ground truth, map errors usually point to lidar/model/map parameters instead of odometry.
+
 ### Simulation Architecture
 
 | Component | Purpose |
@@ -102,7 +123,8 @@ Then use keyboard to control:
 | **Gazebo Fortress** | Physics engine (ODE), sensor simulation |
 | **robot_state_publisher** | Publishes TF tree from URDF |
 | **ros_gz_bridge** | Bidirectional ROS ↔ Gazebo message bridge |
-| **dead_reckoning_debug** | Debug differential-drive odometry from joint states |
+| **odometry_node** | C++ differential-drive odometry from Gazebo joint states when `odom_source:=dead_reckoning` |
+| **dead_reckoning_debug** | Python debug odometry for comparisons only |
 | **ground_truth_odom** | Gazebo pose → `/odom` for clean mapping in simulation |
 | **slam_node** | Log-odds occupancy grid mapping from `/scan` + `/odom` |
 | **MCL (maze only)** | Monte Carlo Localization for map-based pose estimation |
@@ -125,6 +147,48 @@ ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping odom_so
 
 See [docs/slam_mapping.md](docs/slam_mapping.md) for the theory, implementation
 details, and robot-real considerations.
+
+## Running On The Physical Robot
+
+Use the physical stack when the real robot is publishing hardware topics such as
+`/velocity_enc_r`, `/velocity_enc_l`, and `/scan`. Do not use Gazebo bridge
+topics or `use_sim_time:=true` on the robot.
+
+### Physical Localization
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+# Wheel odometry -> /odom_raw, Kalman -> /odom
+ros2 launch puzzlebot_bringup localization.launch.py
+```
+
+Current status:
+- `odometry_node` reads `/velocity_enc_r` and `/velocity_enc_l` by default.
+- `odometry_node` publishes `/odom_raw`.
+- `kalman_filter_node` publishes `/odom` and owns `odom -> base_footprint`.
+- Kalman currently has limited correction value until external measurements,
+  such as ArUcos, are implemented and calibrated.
+
+### Physical SLAM
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+# Uses physical odometry and physical lidar topics
+ros2 launch puzzlebot_bringup slam.launch.py
+```
+
+Before trusting a physical SLAM run:
+- Verify encoder sign: forward command should increase x in `/odom_raw`.
+- Verify turn sign: left turn should increase yaw.
+- Measure and tune `wheel_radius` and `wheel_separation` in
+  `src/puzzlebot_bringup/config/robot_params.yaml`.
+- Confirm TF contains a stable path from `odom` to `base_footprint` and from
+  `base_footprint` to the lidar frame.
+- Move slowly at first; wheel slip and fast rotations make the map accumulate yaw error.
 
 ### Map Generation (Maze World)
 
