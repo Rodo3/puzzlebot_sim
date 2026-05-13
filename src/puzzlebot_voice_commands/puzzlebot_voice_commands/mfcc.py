@@ -57,23 +57,29 @@ def extract_mfcc_frames(signal: np.ndarray, config: MFCCConfig) -> np.ndarray:
             delta2 = _compute_delta(_compute_delta(mfccs))
         mfccs = np.concatenate([mfccs, delta2], axis=1)
 
+    if config.cmvn:
+        mfccs = _apply_cmvn(mfccs)
+
     return mfccs.astype(np.float32)
 
 
 def extract_mfcc_summary(signal: np.ndarray, config: MFCCConfig) -> np.ndarray:
-    """Return fixed-length MFCC summary vector (mean + std across frames).
+    """Return fixed-length MFCC summary vector across frames.
 
-    Output shape:
-      - (n_mfcc * 2,)             when both deltas are disabled
-      - (n_mfcc * 4,)             when include_delta only
-      - (n_mfcc * 6,)             when both deltas enabled
+    Stats per feature coefficient (F = n_mfcc * n_delta_multiplier):
+      - always:              mean (F,) + std (F,)          → 2F
+      - include_min_max:     + min (F,) + max (F,)         → 4F
+
+    n_delta_multiplier: 1 (no delta), 2 (delta), 3 (delta+delta2).
+    CMVN is applied inside extract_mfcc_frames before stats are computed.
 
     Used by GaussianNaiveBayesClassifier.
     """
-    frames_mfcc = extract_mfcc_frames(signal, config)  # (n_frames, features)
-    mean = frames_mfcc.mean(axis=0)
-    std = frames_mfcc.std(axis=0)
-    return np.concatenate([mean, std]).astype(np.float32)
+    frames = extract_mfcc_frames(signal, config)  # (n_frames, F)
+    parts = [frames.mean(axis=0), frames.std(axis=0)]
+    if config.include_min_max:
+        parts.extend([frames.min(axis=0), frames.max(axis=0)])
+    return np.concatenate(parts).astype(np.float32)
 
 
 def build_mel_filterbank(
@@ -208,6 +214,17 @@ def _compute_delta(features: np.ndarray, N: int = 2) -> np.ndarray:
             delta[t] += n * (padded[t + N + n] - padded[t + N - n])
         delta[t] /= denom
     return delta.astype(np.float32)
+
+
+def _apply_cmvn(frames: np.ndarray) -> np.ndarray:
+    """Per-utterance cepstral mean-variance normalization.
+
+    Subtracts the per-coefficient mean and divides by std across time,
+    making the representation independent of absolute channel/speaker level.
+    """
+    mean = frames.mean(axis=0, keepdims=True)
+    std = frames.std(axis=0, keepdims=True)
+    return ((frames - mean) / (std + 1e-8)).astype(np.float32)
 
 
 def _hz_to_mel(hz: float) -> float:

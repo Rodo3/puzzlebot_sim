@@ -40,6 +40,8 @@ setup(
                 'puzzlebot_voice_commands.scripts.speaker_test:main',
             'train_hmm_models = '
                 'puzzlebot_voice_commands.scripts.train_hmm:main',
+            'tune_hmm_models = '
+                'puzzlebot_voice_commands.scripts.tune_hmm:main',
         ],
     },
 )

@@ -2,20 +2,22 @@
 
 Offline voice command recognition package for the Puzzlebot ROS 2 workspace.
 
-**Current phase:** 7 complete — HMM classifier implemented from scratch.
-**Status:** Full pipeline functional. Dataset collection in progress (2/4 speakers recorded).
-Recommended model: **GaussianNB** (98.1% accuracy, 0 safety errors, 0.17 ms inference).
+**Current phase:** 8 complete — feature engineering (delta MFCCs, CMVN, min/max stats, per-model configs).
+**Status:** Full pipeline functional. Dataset collection in progress (3/4 speakers recorded).
+Recommended model: **GaussianNB** (97.7% CV accuracy, 0 safety errors, 0.17 ms inference).
 
 ## Purpose
 
 Train and evaluate voice command classifiers using `.wav` audio files and
 hand-crafted MFCC features. Two models are implemented from scratch:
 
-| Model | Feature input | Approach |
-|-------|---------------|----------|
-| `KMeansCodebookClassifier` | Frame-level MFCCs | One K-Means codebook per class (VQ-style) |
-| `GaussianNaiveBayesClassifier` | MFCC summary vector | Gaussian log-likelihood + class prior |
-| `HiddenMarkovModelClassifier` | Frame-level MFCCs | Left-to-right HMM per class, Baum-Welch + Viterbi |
+| Model | Feature input | Approach | Config flag |
+|-------|---------------|----------|-------------|
+| `KMeansCodebookClassifier` | Frame-level MFCCs | One K-Means codebook per class (VQ-style) | `--kmeans-delta --kmeans-cmvn` |
+| `GaussianNaiveBayesClassifier` | MFCC summary vector | Gaussian log-likelihood + class prior | `--delta --min-max` |
+| `HiddenMarkovModelClassifier` | Frame-level MFCCs | Left-to-right HMM per class, Baum-Welch + Viterbi | `--cmvn` |
+
+Each model uses its own MFCC feature configuration, stored independently in `artifacts/`.
 
 This package is **offline only** — it does not connect to the robot or publish
 to `/cmd_vel`. Integration with the Puzzlebot control stack is a future phase.
@@ -44,11 +46,13 @@ python -m puzzlebot_voice_commands.scripts.merge_datasets `
   --inputs  datasets\data_jorge datasets\data_valeria ... `
   --output  datasets\voice_commands_dataset
 
-# 3. Train both models
+# 3. Train both models (independent feature configs per model)
 python -m puzzlebot_voice_commands.scripts.train_models `
   --dataset    datasets\voice_commands_dataset `
   --model      both `
-  --output-dir artifacts
+  --output-dir artifacts `
+  --delta --min-max `
+  --kmeans-delta --kmeans-cmvn
 
 # 4. Evaluate and generate reports
 python -m puzzlebot_voice_commands.scripts.evaluate_models `
@@ -73,19 +77,26 @@ python -m puzzlebot_voice_commands.scripts.speaker_test `
   --mode       all-train `
   --output-dir reports
 
-# 8. Train HMM
+# 8. (Optional) Grid search for best HMM hyperparameters
+python -m puzzlebot_voice_commands.scripts.tune_hmm `
+  --dataset   datasets\voice_commands_dataset `
+  --n-states  5 8 10 --n-symbols 32 64 --n-iter 20 50 `
+  --k 3 --cmvn
+
+# 9. Train HMM with best config (default: n_states=8, n_symbols=64, n_iter=50)
 python -m puzzlebot_voice_commands.scripts.train_hmm `
   --dataset    datasets\voice_commands_dataset `
-  --output-dir artifacts
+  --output-dir artifacts `
+  --n-states 8 --n-symbols 64 --n-iter 50 --cmvn
 
-# 9. Evaluate HMM (or all three: --model all)
+# 10. Evaluate all three models
 python -m puzzlebot_voice_commands.scripts.evaluate_models `
   --dataset      datasets\voice_commands_dataset `
   --artifact-dir artifacts `
   --output-dir   reports `
-  --model        hmm
+  --model        all
 
-# 10. Predict a single file
+# 11. Predict a single file
 python -m puzzlebot_voice_commands.scripts.predict_file `
   --model-type gnb `
   --model-path artifacts\gnb_model.pkl `
@@ -134,15 +145,19 @@ puzzlebot_voice_commands/
 │       ├── grabar.py           — CLI: record samples interactively
 │       ├── merge_datasets.py   — CLI: merge per-person folders into one dataset
 │       ├── prepare_dataset.py  — CLI: prepare_voice_dataset
-│       ├── train_models.py     — CLI: train_voice_models
-│       ├── train_hmm.py        — CLI: train_hmm_models
-│       ├── evaluate_models.py  — CLI: evaluate_voice_models
+│       ├── train_models.py     — CLI: train_voice_models  (--delta --min-max --kmeans-delta --kmeans-cmvn)
+│       ├── train_hmm.py        — CLI: train_hmm_models    (--cmvn --n-states --n-symbols --n-iter)
+│       ├── tune_hmm.py         — CLI: tune_hmm_models     (grid search over HMM hyperparameters)
+│       ├── evaluate_models.py  — CLI: evaluate_voice_models (loads per-model MFCC configs)
 │       ├── predict_file.py     — CLI: predict_voice_file
-│       ├── cross_validate.py   — CLI: k-fold cross-validation
+│       ├── cross_validate.py   — CLI: k-fold cross-validation (--delta --min-max --kmeans-delta --kmeans-cmvn)
 │       ├── learning_curve.py   — CLI: accuracy vs training size curve
 │       └── speaker_test.py     — CLI: per-speaker evaluation
 ├── datasets/               — Per-person folders + merged dataset (not committed)
 ├── artifacts/              — Trained models and configs (not committed)
+│   ├── feature_config.json         — GNB MFCC config (delta + min/max)
+│   ├── kmeans_feature_config.json  — KMeans MFCC config (delta + cmvn)
+│   └── hmm_config.json             — HMM params + MFCC config (cmvn)
 └── reports/                — Evaluation outputs (not committed)
 ```
 
@@ -159,7 +174,7 @@ Each team member records using `grabar.py` (20 clips per command):
 datasets/
 ├── data_jorge/       — 15 clips/class (needs 5 more per class)
 ├── data_valeria/     — 15 clips/class (needs 5 more per class)
-├── data_<person3>/   — pending
+├── data_rodo/        — 20 clips/class ✓
 ├── data_<person4>/   — pending
 └── voice_commands_dataset/  — merged output (auto-generated by merge_datasets)
 ```
@@ -168,45 +183,35 @@ datasets/
 After recording all 4, run `speaker_test --mode leave-one-out` to check if any
 person needs more recordings (target: recall ≥ 0.90 per class per speaker).
 
-## Evaluation results (2 speakers, 2026-04-28)
+## Evaluation results (3 speakers, 2026-05-12)
 
-Dataset: Jorge + Valeria, 30 clips/class, 6 classes, 180 total samples.
+Dataset: Jorge + Valeria + Rodo, 50 clips/class, 6 classes, 300 total samples.
+Each model uses its own MFCC feature config (see Phase 8).
 
 ### Model comparison
 
-| Metric | KMeans | GaussianNB |
-|--------|--------|------------|
-| Global accuracy | 92.6% | **98.1%** |
-| Macro recall | 92.6% | **98.1%** |
-| Macro F1 | 92.8% | **98.1%** |
-| Top-2 accuracy | 96.3% | **100%** |
-| Safety errors (`alto`) | 1 | **0** |
-| Avg inference | 0.58 ms | **0.17 ms** |
-| Artifact size | 5.5 KB | 3.3 KB |
+| Metric | KMeans | **GaussianNB** | HMM |
+|--------|--------|----------------|-----|
+| Test accuracy | **100%** | **100%** | 70.0% |
+| Macro recall | **100%** | **100%** | 70.0% |
+| Macro F1 | **100%** | **100%** | 70.3% |
+| Top-2 accuracy | **100%** | **100%** | 81.1% |
+| Safety errors (`alto`) | **0** | **0** | 5 |
+| Avg inference | 0.46 ms | **0.17 ms** | 39.7 ms |
+| Artifact size | 10.3 KB | 10.6 KB | 31.9 KB |
+| Feature config | delta + cmvn | delta + min/max | cmvn |
 
 ### Cross-validation (k=5)
 
-| Metric | KMeans | GaussianNB |
-|--------|--------|------------|
-| Acc mean ± std | 92.8% ± 3.3% | **97.2% ± 5.6%** |
-| Macro recall mean | 93.7% | **98.5%** |
-| Safety errors (total) | 3 | **0** |
+| Metric | KMeans | **GaussianNB** |
+|--------|--------|----------------|
+| Acc mean ± std | **99.7% ± 0.7%** | 97.7% ± 2.0% |
+| Macro recall mean | **99.7%** | 97.6% |
+| Safety errors (total) | **0** | **0** |
 
-High std on GNB (5.6%) is expected with only 2 speakers — will decrease with 4.
+Std on GNB (2.0%) is expected with only 3 speakers — will decrease with 4.
 
-### Learning curve
-
-- **KMeans:** large train/test gap at all fractions → memorises, needs more data.
-- **GaussianNB:** plateaus at ~50% of training data → sufficient data per speaker.
-
-### Per-speaker test (all-train mode)
-
-| Speaker | KMeans acc | GNB acc | KMeans safety err | GNB safety err |
-|---------|-----------|---------|-------------------|----------------|
-| Jorge | 98.9% | **100%** | 0 | 0 |
-| Valeria | 98.9% | **100%** | 1 (`alto`) | **0** |
-
-**GaussianNB is the recommended model for ROS 2 integration.**
+**GaussianNB is the recommended model for ROS 2 integration** (fastest inference, 0 safety errors).
 
 ## Phase 7 — HMM (Hidden Markov Model)
 
@@ -244,18 +249,68 @@ scripts/
 `evaluate_models.py`, `predict_file.py`, `cross_validate.py`, `learning_curve.py`,
 and `speaker_test.py` now support `--model hmm` and `--model all`.
 
-### Initial results (2 speakers, default params)
+### Results (3 speakers, tuned params: n_states=8, n_symbols=64, n_iter=50, --cmvn)
 
 | Metric | KMeans | GaussianNB | HMM |
 |--------|--------|------------|-----|
-| Global accuracy | 92.6% | **98.1%** | 63.0% |
-| Macro recall | 92.6% | **98.1%** | 63.0% |
-| Safety errors | 1 | **0** | 3 |
-| Avg inference | 0.58 ms | **0.17 ms** | 26.45 ms |
+| Test accuracy | 100% | **100%** | 70.0% |
+| Safety errors | 0 | **0** | 5 |
+| Avg inference | 0.46 ms | **0.17 ms** | 39.7 ms |
 
-HMM underperforms with only 2 speakers and default hyperparameters.
-Expected to improve significantly with 4 speakers and tuned `n_states`/`n_symbols`.
-Use `--n-states` and `--n-symbols` flags in `train_hmm` to experiment.
+HMM still underperforms; the primary bottleneck is the 4th speaker (more training diversity).
+Use `tune_hmm_models` to find the best `n_states`/`n_symbols`/`n_iter` for your dataset.
+
+## Phase 8 — Feature engineering
+
+Per-model MFCC configurations and new feature options implemented in this phase.
+
+### New MFCCConfig flags
+
+| Flag | Affects | Effect |
+|------|---------|--------|
+| `--delta` / `--kmeans-delta` | GNB / KMeans | Append velocity (Δ) coefficients to MFCC frames |
+| `--delta-delta` / `--kmeans-delta-delta` | GNB / KMeans | Append acceleration (ΔΔ) coefficients |
+| `--cmvn` / `--kmeans-cmvn` | GNB / KMeans | Per-utterance cepstral mean-variance normalization |
+| `--min-max` | GNB only | Append per-coefficient min and max to summary vector |
+
+### Why separate configs?
+
+CMVN normalizes each utterance to zero mean — useful for frame-level models (KMeans, HMM)
+where speaker-level offsets cause codebook mismatch. For GNB, which classifies from a
+summary vector of [mean, std, min, max], CMVN collapses mean≈0 and std≈1 for all classes,
+destroying discriminative signal.
+
+### Per-model optimal config (3 speakers)
+
+| Model | Flags | Feature dim | CV acc (k=5) |
+|-------|-------|-------------|-------------|
+| **GNB** | `--delta --min-max` | 104 (mean+std+min+max × 26) | 97.7% ± 2.0% |
+| **KMeans** | `--kmeans-delta --kmeans-cmvn` | 26 frames | 99.7% ± 0.7% |
+| **HMM** | `--cmvn` | 13 frames | — |
+
+### Artifact files
+
+Each model's config is saved independently so `evaluate_models` uses the right features:
+
+```
+artifacts/
+├── feature_config.json         — GNB MFCC config
+├── kmeans_feature_config.json  — KMeans MFCC config (may differ from GNB)
+└── hmm_config.json             — HMM params + embedded MFCC config
+```
+
+### New script: `tune_hmm_models`
+
+Grid search over `n_states × n_symbols × n_iter` using k-fold CV:
+
+```powershell
+python -m puzzlebot_voice_commands.scripts.tune_hmm `
+  --dataset   datasets\voice_commands_dataset `
+  --n-states  5 8 10 --n-symbols 32 64 --n-iter 20 50 `
+  --k 3 --cmvn
+```
+
+Prints results sorted by mean accuracy and shows the exact `train_hmm` command for the best config.
 
 ## Implementation phases
 
@@ -267,8 +322,9 @@ Use `--n-states` and `--n-symbols` flags in `train_hmm` to experiment.
 | 4 | GaussianNaiveBayesClassifier + training script | **Done** |
 | 5 | Full metrics, report generation, model comparison | **Done** |
 | 6 | Documentation cleanup, validation checklist | **Done** |
-| 7  | Hidden Markov Model (HMM) classifier from scratch        | **Done**    |
-| 8+ | ROS 2 inference node, Puzzlebot integration              | Future      |
+| 7 | Hidden Markov Model (HMM) classifier from scratch | **Done** |
+| 8 | Feature engineering: delta, CMVN, min/max, per-model configs, HMM grid search | **Done** |
+| 9+ | ROS 2 inference node, Puzzlebot integration | Future |
 
 ## CLI scripts
 
@@ -277,10 +333,11 @@ Use `--n-states` and `--n-symbols` flags in `train_hmm` to experiment.
 | `grabar` | standalone | Record 20 clips per command interactively |
 | `merge_voice_datasets` | standalone | Merge per-person folders into one dataset |
 | `prepare_voice_dataset` | ROS 2 / standalone | Discover → split → extract MFCCs → JSON |
-| `train_voice_models` | ROS 2 / standalone | Train KMeans and/or GNB, save artifacts |
-| `evaluate_voice_models` | ROS 2 / standalone | Evaluate on test split, generate 7 reports |
+| `train_voice_models` | ROS 2 / standalone | Train KMeans and/or GNB with independent feature configs |
+| `train_hmm_models` | ROS 2 / standalone | Train HMM classifiers, save `hmm_model.pkl` and MFCC config |
+| `tune_hmm_models` | standalone | Grid search over n_states × n_symbols × n_iter via k-fold CV |
+| `evaluate_voice_models` | ROS 2 / standalone | Evaluate all models, each with its own MFCC config |
 | `predict_voice_file` | ROS 2 / standalone | Single-file inference with ranked output |
-| `cross_validate_voice` | standalone | K-fold CV: mean/std of accuracy and recall |
+| `cross_validate_voice` | standalone | K-fold CV with independent KMeans/GNB feature flags |
 | `learning_curve_voice` | standalone | Accuracy vs training size, detects overfitting |
 | `speaker_test_voice` | standalone | Per-speaker recall, all-train or leave-one-out |
-| `train_hmm_models` | ROS 2 / standalone | Train HMM classifiers, save `hmm_model.pkl` |

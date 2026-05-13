@@ -17,6 +17,8 @@ class MFCCConfig:
     n_mfcc: int = 13
     include_delta: bool = False
     include_delta_delta: bool = False
+    cmvn: bool = False              # per-utterance cepstral mean-variance normalization
+    include_min_max: bool = False   # append per-coefficient min and max to summary vector
 
 
 @dataclass

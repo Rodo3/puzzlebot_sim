@@ -95,6 +95,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=16000,
         help='Expected audio sample rate in Hz (default: 16000).',
     )
+    # GNB feature flags
+    gnb = parser.add_argument_group('GNB feature flags')
+    gnb.add_argument('--delta', action='store_true', default=False,
+                     help='Append delta coefficients to GNB MFCC frames.')
+    gnb.add_argument('--delta-delta', action='store_true', default=False,
+                     help='Append delta-delta coefficients to GNB frames.')
+    gnb.add_argument('--cmvn', action='store_true', default=False,
+                     help='Apply CMVN normalization for GNB.')
+    gnb.add_argument('--min-max', action='store_true', default=False,
+                     help='Append per-coefficient min and max to the GNB summary vector.')
+
+    # KMeans feature flags (independent from GNB)
+    km = parser.add_argument_group('KMeans feature flags')
+    km.add_argument('--kmeans-delta', action='store_true', default=False,
+                    help='Append delta coefficients to KMeans MFCC frames.')
+    km.add_argument('--kmeans-delta-delta', action='store_true', default=False,
+                    help='Append delta-delta coefficients to KMeans frames.')
+    km.add_argument('--kmeans-cmvn', action='store_true', default=False,
+                    help='Apply CMVN normalization for KMeans.')
     return parser
 
 
@@ -106,10 +125,24 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # GNB config (summary-vector model — CMVN hurts mean/std stats)
     mfcc_cfg = MFCCConfig(
         sample_rate=args.sample_rate,
         n_mfcc=args.n_mfcc,
         n_filters=args.n_filters,
+        include_delta=args.delta,
+        include_delta_delta=args.delta_delta,
+        cmvn=args.cmvn,
+        include_min_max=args.min_max,
+    )
+    # KMeans config (frame-level model — CMVN normalises inter-speaker distances)
+    kmeans_mfcc_cfg = MFCCConfig(
+        sample_rate=args.sample_rate,
+        n_mfcc=args.n_mfcc,
+        n_filters=args.n_filters,
+        include_delta=args.kmeans_delta,
+        include_delta_delta=args.kmeans_delta_delta,
+        cmvn=args.kmeans_cmvn,
     )
     dataset_cfg = DatasetConfig(
         test_ratio=args.test_ratio,
@@ -142,18 +175,23 @@ def main() -> None:
     labels_path = output_dir / 'labels.json'
     save_json(split.labels, labels_path)
 
+    def _cfg_to_dict(c: MFCCConfig) -> dict:
+        return {
+            'sample_rate': c.sample_rate, 'pre_emphasis': c.pre_emphasis,
+            'frame_size': c.frame_size, 'frame_stride': c.frame_stride,
+            'n_fft': c.n_fft, 'n_filters': c.n_filters, 'n_mfcc': c.n_mfcc,
+            'include_delta': c.include_delta,
+            'include_delta_delta': c.include_delta_delta,
+            'cmvn': c.cmvn, 'include_min_max': c.include_min_max,
+        }
+
+    # GNB config (used by evaluate_models as the default feature_config)
     feature_config_path = output_dir / 'feature_config.json'
-    save_json({
-        'sample_rate': mfcc_cfg.sample_rate,
-        'pre_emphasis': mfcc_cfg.pre_emphasis,
-        'frame_size': mfcc_cfg.frame_size,
-        'frame_stride': mfcc_cfg.frame_stride,
-        'n_fft': mfcc_cfg.n_fft,
-        'n_filters': mfcc_cfg.n_filters,
-        'n_mfcc': mfcc_cfg.n_mfcc,
-        'include_delta': mfcc_cfg.include_delta,
-        'include_delta_delta': mfcc_cfg.include_delta_delta,
-    }, feature_config_path)
+    save_json(_cfg_to_dict(mfcc_cfg), feature_config_path)
+
+    # KMeans config (separate — may differ from GNB config)
+    kmeans_feature_config_path = output_dir / 'kmeans_feature_config.json'
+    save_json(_cfg_to_dict(kmeans_mfcc_cfg), kmeans_feature_config_path)
 
     train_metadata_path = output_dir / 'train_metadata.json'
     save_json(split.to_metadata_dict(dataset_cfg), train_metadata_path)
@@ -165,7 +203,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     if train_kmeans:
         print("\n[train_voice_models] Training KMeansCodebookClassifier ...")
-        frames_by_class, load_errors = _load_frames(split, mfcc_cfg, dataset_root)
+        frames_by_class, load_errors = _load_frames(split, kmeans_mfcc_cfg, dataset_root)
 
         if not frames_by_class:
             print("ERROR: No frames extracted — check dataset audio files.", file=sys.stderr)
@@ -176,7 +214,7 @@ def main() -> None:
         # Log frame counts per class
         total_frames = 0
         for label in split.labels:
-            n = frames_by_class.get(label, np.empty((0, mfcc_cfg.n_mfcc))).shape[0]
+            n = frames_by_class.get(label, np.empty((0, kmeans_mfcc_cfg.n_mfcc))).shape[0]
             total_frames += n
             print(f"  {label:15s}  {n} frames")
         print(f"  Total frames: {total_frames}")
@@ -213,7 +251,8 @@ def main() -> None:
             n = sum(1 for yi in y_train if yi == label)
             print(f"  {label:15s}  {n} samples")
         print(f"  Total samples : {len(X_train)}")
-        print(f"  Feature dim   : {X_train.shape[1]}  (n_mfcc={mfcc_cfg.n_mfcc} × 2 mean+std)")
+        stats = 'mean+std' + ('+min+max' if mfcc_cfg.include_min_max else '')
+        print(f"  Feature dim   : {X_train.shape[1]}  ({stats})")
 
         gnb_cfg = GNBConfig()
         t0 = time.perf_counter()

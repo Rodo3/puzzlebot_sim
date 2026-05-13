@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help='Codebook size for observation quantization (default: 32).')
     parser.add_argument('--n-iter',      type=int,   default=20,
                         help='Baum-Welch EM iterations (default: 20).')
+    parser.add_argument('--cmvn',        action='store_true', default=False,
+                        help='Apply per-utterance cepstral mean-variance normalization.')
+    parser.add_argument('--delta',       action='store_true', default=False,
+                        help='Append delta coefficients to MFCC frames.')
+    parser.add_argument('--delta-delta', action='store_true', default=False,
+                        help='Append delta-delta coefficients (requires --delta).')
     return parser
 
 
@@ -83,7 +89,10 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     mfcc_cfg    = MFCCConfig(sample_rate=args.sample_rate,
-                              n_mfcc=args.n_mfcc, n_filters=args.n_filters)
+                              n_mfcc=args.n_mfcc, n_filters=args.n_filters,
+                              cmvn=args.cmvn,
+                              include_delta=args.delta,
+                              include_delta_delta=args.delta_delta)
     dataset_cfg = DatasetConfig(test_ratio=args.test_ratio,
                                 random_state=args.random_state)
     hmm_cfg     = HMMConfig(
@@ -123,13 +132,25 @@ def main() -> None:
     print(f"  Model saved : {model_path}")
 
     cfg_dict = {
-        'n_states':       hmm_cfg.n_states,
-        'n_symbols':      hmm_cfg.n_symbols,
-        'n_iter':         hmm_cfg.n_iter,
+        'n_states':        hmm_cfg.n_states,
+        'n_symbols':       hmm_cfg.n_symbols,
+        'n_iter':          hmm_cfg.n_iter,
         'kmeans_max_iter': hmm_cfg.kmeans_max_iter,
-        'kmeans_tol':     hmm_cfg.kmeans_tol,
-        'random_state':   hmm_cfg.random_state,
-        'log_zero':       hmm_cfg.log_zero,
+        'kmeans_tol':      hmm_cfg.kmeans_tol,
+        'random_state':    hmm_cfg.random_state,
+        'log_zero':        hmm_cfg.log_zero,
+        'mfcc': {
+            'sample_rate':         mfcc_cfg.sample_rate,
+            'pre_emphasis':        mfcc_cfg.pre_emphasis,
+            'frame_size':          mfcc_cfg.frame_size,
+            'frame_stride':        mfcc_cfg.frame_stride,
+            'n_fft':               mfcc_cfg.n_fft,
+            'n_filters':           mfcc_cfg.n_filters,
+            'n_mfcc':              mfcc_cfg.n_mfcc,
+            'include_delta':       mfcc_cfg.include_delta,
+            'include_delta_delta': mfcc_cfg.include_delta_delta,
+            'cmvn':                mfcc_cfg.cmvn,
+        },
     }
     save_json(cfg_dict, output_dir / 'hmm_config.json')
     print(f"  Config saved: {output_dir / 'hmm_config.json'}")

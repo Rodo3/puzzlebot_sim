@@ -183,8 +183,9 @@ def main() -> None:
         else:
             print("[evaluate_voice_models] Evaluating KMeansCodebookClassifier ...")
             model = KMeansCodebookClassifier.load(kmeans_path)
+            kmeans_mfcc_cfg = _load_kmeans_mfcc_config(artifact_dir)
             kmeans_metrics_dict = _evaluate_kmeans(
-                model, split, mfcc_cfg, split.labels
+                model, split, kmeans_mfcc_cfg, split.labels
             )
             kmeans_metrics_dict['artifact_size_kb'] = round(
                 artifact_size_kb(kmeans_path), 2
@@ -240,8 +241,9 @@ def main() -> None:
         else:
             print("\n[evaluate_voice_models] Evaluating HiddenMarkovModelClassifier ...")
             model = HiddenMarkovModelClassifier.load(hmm_path)
+            hmm_mfcc_cfg = _load_hmm_mfcc_config(artifact_dir)
             hmm_metrics_dict = _evaluate_hmm(
-                model, split, mfcc_cfg, split.labels
+                model, split, hmm_mfcc_cfg, split.labels
             )
             hmm_metrics_dict['artifact_size_kb'] = round(
                 artifact_size_kb(hmm_path), 2
@@ -497,7 +499,52 @@ def _load_mfcc_config(artifact_dir: Path) -> MFCCConfig:
         n_mfcc=data.get('n_mfcc', 13),
         include_delta=data.get('include_delta', False),
         include_delta_delta=data.get('include_delta_delta', False),
+        cmvn=data.get('cmvn', False),
+        include_min_max=data.get('include_min_max', False),
     )
+
+
+def _load_kmeans_mfcc_config(artifact_dir: Path) -> MFCCConfig:
+    """Load MFCC config for KMeans from kmeans_feature_config.json, fallback to feature_config.json."""
+    cfg_path = artifact_dir / 'kmeans_feature_config.json'
+    if not cfg_path.exists():
+        return _load_mfcc_config(artifact_dir)
+    data = load_json(cfg_path)
+    return MFCCConfig(
+        sample_rate=data.get('sample_rate', 16000),
+        pre_emphasis=data.get('pre_emphasis', 0.97),
+        frame_size=data.get('frame_size', 0.025),
+        frame_stride=data.get('frame_stride', 0.010),
+        n_fft=data.get('n_fft', 512),
+        n_filters=data.get('n_filters', 26),
+        n_mfcc=data.get('n_mfcc', 13),
+        include_delta=data.get('include_delta', False),
+        include_delta_delta=data.get('include_delta_delta', False),
+        cmvn=data.get('cmvn', False),
+        include_min_max=data.get('include_min_max', False),
+    )
+
+
+def _load_hmm_mfcc_config(artifact_dir: Path) -> MFCCConfig:
+    """Load MFCC config from hmm_config.json['mfcc'], fallback to feature_config.json."""
+    hmm_cfg_path = artifact_dir / 'hmm_config.json'
+    if hmm_cfg_path.exists():
+        data = load_json(hmm_cfg_path)
+        if 'mfcc' in data:
+            m = data['mfcc']
+            return MFCCConfig(
+                sample_rate=m.get('sample_rate', 16000),
+                pre_emphasis=m.get('pre_emphasis', 0.97),
+                frame_size=m.get('frame_size', 0.025),
+                frame_stride=m.get('frame_stride', 0.010),
+                n_fft=m.get('n_fft', 512),
+                n_filters=m.get('n_filters', 26),
+                n_mfcc=m.get('n_mfcc', 13),
+                include_delta=m.get('include_delta', False),
+                include_delta_delta=m.get('include_delta_delta', False),
+                cmvn=m.get('cmvn', False),
+            )
+    return _load_mfcc_config(artifact_dir)
 
 
 def _load_or_rebuild_split(

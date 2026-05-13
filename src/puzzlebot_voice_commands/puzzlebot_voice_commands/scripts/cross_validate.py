@@ -36,12 +36,13 @@ from ..models.kmeans_codebook import KMeansCodebookClassifier
 def _load_all_samples(
     samples: List[Sample],
     mfcc_cfg: MFCCConfig,
+    kmeans_mfcc_cfg: MFCCConfig,
 ) -> Tuple[List[np.ndarray], List[np.ndarray], List[str]]:
-    """Load frames and summary vectors for every sample.
+    """Load frames (KMeans config) and summary vectors (GNB config) for every sample.
 
     Returns:
-        frames_list:   one (n_frames, n_mfcc) array per sample
-        summaries:     one (n_mfcc*2,) array per sample
+        frames_list:   one (n_frames, n_feats) array per sample  — KMeans config
+        summaries:     one (n_summary,) array per sample          — GNB config
         labels:        string label per sample
     """
     frames_list = []
@@ -52,7 +53,7 @@ def _load_all_samples(
         try:
             signal, _ = load_wav(sample.path, target_sr=mfcc_cfg.sample_rate)
             signal = normalize(signal)
-            frames_list.append(extract_mfcc_frames(signal, mfcc_cfg))
+            frames_list.append(extract_mfcc_frames(signal, kmeans_mfcc_cfg))
             summaries.append(extract_mfcc_summary(signal, mfcc_cfg))
             labels.append(sample.label)
         except Exception as exc:
@@ -219,6 +220,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--sample-rate', type=int, default=16000)
     parser.add_argument('--n-mfcc', type=int, default=13)
     parser.add_argument('--n-filters', type=int, default=26)
+    # GNB feature flags
+    gnb = parser.add_argument_group('GNB feature flags')
+    gnb.add_argument('--delta', action='store_true', default=False,
+                     help='Append delta coefficients to GNB MFCC frames.')
+    gnb.add_argument('--delta-delta', action='store_true', default=False,
+                     help='Append delta-delta coefficients to GNB frames.')
+    gnb.add_argument('--cmvn', action='store_true', default=False,
+                     help='Apply CMVN normalization for GNB.')
+    gnb.add_argument('--min-max', action='store_true', default=False,
+                     help='Append per-coefficient min and max to the GNB summary vector.')
+
+    # KMeans feature flags (independent)
+    km = parser.add_argument_group('KMeans feature flags')
+    km.add_argument('--kmeans-delta', action='store_true', default=False,
+                    help='Append delta coefficients to KMeans MFCC frames.')
+    km.add_argument('--kmeans-delta-delta', action='store_true', default=False,
+                    help='Append delta-delta coefficients to KMeans frames.')
+    km.add_argument('--kmeans-cmvn', action='store_true', default=False,
+                    help='Apply CMVN normalization for KMeans.')
     return parser
 
 
@@ -231,6 +251,18 @@ def main() -> None:
         sample_rate=args.sample_rate,
         n_mfcc=args.n_mfcc,
         n_filters=args.n_filters,
+        include_delta=args.delta,
+        include_delta_delta=args.delta_delta,
+        cmvn=args.cmvn,
+        include_min_max=args.min_max,
+    )
+    kmeans_mfcc_cfg = MFCCConfig(
+        sample_rate=args.sample_rate,
+        n_mfcc=args.n_mfcc,
+        n_filters=args.n_filters,
+        include_delta=args.kmeans_delta,
+        include_delta_delta=args.kmeans_delta_delta,
+        cmvn=args.kmeans_cmvn,
     )
     run_kmeans = args.model in ('kmeans', 'both', 'all')
     run_gnb    = args.model in ('gnb',    'both', 'all')
@@ -255,7 +287,7 @@ def main() -> None:
     print(f"  Samples : {len(all_samples)}")
     print(f"\n  Loading features ...")
     t0 = time.perf_counter()
-    frames_list, summaries, labels = _load_all_samples(all_samples, mfcc_cfg)
+    frames_list, summaries, labels = _load_all_samples(all_samples, mfcc_cfg, kmeans_mfcc_cfg)
     print(f"  Done in {time.perf_counter()-t0:.2f}s  ({len(labels)} loaded)")
 
     results = _run_cv(
