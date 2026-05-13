@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'mock_encoders = puzzlebot_bringup.mock_encoders:main',
             'smoke_test    = puzzlebot_bringup.smoke_test:main',
+            'teleop        = puzzlebot_bringup.teleop_node:main',
         ],
     },
 )

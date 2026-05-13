@@ -29,6 +29,11 @@ install(TARGETS
   kalman_filter_node
   DESTINATION lib/${PROJECT_NAME})
 
+install(PROGRAMS
+  scripts/dead_reckoning_debug
+  scripts/ground_truth_odom
+  DESTINATION lib/${PROJECT_NAME})
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
