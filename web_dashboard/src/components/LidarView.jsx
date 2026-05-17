@@ -52,7 +52,7 @@ export default function LidarView({ scanData }) {
     // Robot body.
     ctx.beginPath();
     ctx.arc(cx, cy, ROBOT_RADIUS, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ff6f00';
+    ctx.fillStyle = '#2979ff';
     ctx.fill();
 
     // Min distance label.

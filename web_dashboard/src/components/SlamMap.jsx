@@ -76,7 +76,7 @@ export default function SlamMap({ mapData, robotPose, trajectory }) {
     // Robot.
     if (robotPose) {
       const { px, py } = worldToPx(robotPose.x, robotPose.y);
-      drawCircle(ctx, px, py, ROBOT_RADIUS_PX, '#ff6f00');
+      drawCircle(ctx, px, py, ROBOT_RADIUS_PX, '#2979ff');
       drawArrow(ctx, px, py, robotPose.theta, ROBOT_RADIUS_PX * 3, '#ffcc02');
     }
   }, [robotPose, trajectory]);
