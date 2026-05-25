@@ -150,45 +150,124 @@ details, and robot-real considerations.
 
 ## Running On The Physical Robot
 
-Use the physical stack when the real robot is publishing hardware topics such as
-`/velocity_enc_r`, `/velocity_enc_l`, and `/scan`. Do not use Gazebo bridge
-topics or `use_sim_time:=true` on the robot.
+Architecture: the Jetson publishes sensors only. All computation (odometry,
+SLAM, control, perception) runs on the operator PC. Both machines must be on
+the same WiFi network and share the same `ROS_DOMAIN_ID`.
 
-### Physical Localization
-
-```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-
-# Wheel odometry -> /odom_raw, Kalman -> /odom
-ros2 launch puzzlebot_bringup localization.launch.py
-```
-
-Current status:
-- `odometry_node` reads `/velocity_enc_r` and `/velocity_enc_l` by default.
-- `odometry_node` publishes `/odom_raw`.
-- `kalman_filter_node` publishes `/odom` and owns `odom -> base_footprint`.
-- Kalman currently has limited correction value until external measurements,
-  such as ArUcos, are implemented and calibrated.
-
-### Physical SLAM
+### Prerequisites (once per session)
 
 ```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+# 1. Same ROS_DOMAIN_ID on both machines (add to ~/.bashrc on each):
+export ROS_DOMAIN_ID=42
 
-# Uses physical odometry and physical lidar topics
-ros2 launch puzzlebot_bringup slam.launch.py
+# 2. Sync Jetson clock before launching (critical for SLAM timestamp matching):
+#    SSH into Jetson, then:
+sudo chronyc makestep
+
+# 3. Verify clocks differ by less than 0.1 s:
+#    PC:     date +%s%N
+#    Jetson: date +%s%N
 ```
 
-Before trusting a physical SLAM run:
-- Verify encoder sign: forward command should increase x in `/odom_raw`.
-- Verify turn sign: left turn should increase yaw.
-- Measure and tune `wheel_radius` and `wheel_separation` in
-  `src/puzzlebot_bringup/config/robot_params.yaml`.
-- Confirm TF contains a stable path from `odom` to `base_footprint` and from
-  `base_footprint` to the lidar frame.
-- Move slowly at first; wheel slip and fast rotations make the map accumulate yaw error.
+### Step 1 — Launch sensors on the Jetson (via SSH)
+
+Open three SSH terminals (or use tmux):
+
+**Terminal 1 — micro-ROS agent** (bridges MCU encoders + motor commands to ROS 2):
+```bash
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 921600
+# If the port differs: ls /dev/tty* to find ttyUSB0 or ttyACM0
+```
+
+Published topics from the MCU:
+| Topic | Type | Description |
+|---|---|---|
+| `/VelocityEncR` | `std_msgs/Float32` | Right wheel angular velocity (rad/s) |
+| `/VelocityEncL` | `std_msgs/Float32` | Left wheel angular velocity (rad/s) |
+| `/cmd_vel` | `geometry_msgs/Twist` | Motor command input |
+
+**Terminal 2 — LiDAR** (workspace: `~/sllidar_ros2-main` on the Jetson):
+```bash
+cd ~/sllidar_ros2-main
+source install/setup.bash
+ros2 launch sllidar_ros2 sllidar_a1_launch.py frame_id:=lidar_link
+# Published topic: /scan  (sensor_msgs/LaserScan)
+# Note: do NOT use this launch when the micro-ROS agent is running —
+# the MCU already reads the LiDAR and publishes it as /Lidar.
+```
+
+**Terminal 3 — Camera** (workspace: `~/ros2_ws` on the Jetson):
+```bash
+cd ~/ros2_ws
+source install/setup.bash
+# Run the camera publisher script (provided by the Puzzlebot kit):
+ros2 run <camera_package> <camera_node>
+# Published topic: /camera/image/compressed  (sensor_msgs/CompressedImage, JPEG ~30 Hz)
+```
+
+To view the camera feed from the PC:
+```bash
+ros2 run puzzlebot_perception image_viewer_node
+```
+
+### Step 2 — Launch the PC stack
+
+```bash
+cd ~/Documents/puzzlebot_sim
+source install/setup.bash
+
+# Full stack: odometry + SLAM + PD controller + obstacle avoidance + RViz
+ros2 launch puzzlebot_bringup real_robot.launch.py rviz:=true
+
+# Mapping only (no controller — drive with teleop):
+ros2 launch puzzlebot_bringup real_robot.launch.py avoidance:=false rviz:=true
+
+# LiDAR test (sllidar_ros2 direct, no micro-ROS agent):
+ros2 launch puzzlebot_bringup real_robot.launch.py lidar_topic:=/scan rviz:=true
+```
+
+**Launch arguments:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `slam` | `true` | Enable `slam_node` (builds `/map`) |
+| `avoidance` | `true` | Enable obstacle avoidance node |
+| `rviz` | `true` | Open RViz |
+| `lidar_topic` | `/Lidar` | LiDAR source topic; use `/scan` when running sllidar directly |
+
+**Terminal for teleop during mapping:**
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+    --ros-args --remap cmd_vel:=/cmd_vel
+```
+
+Mapping tips:
+- Drive at < 0.15 m/s to reduce encoder drift.
+- Prefer long straight lines over in-place rotations.
+- Scan matching activates after 8 scans and corrects angular drift automatically.
+
+### Topic map (physical robot)
+
+```
+Jetson                              PC
+──────                              ──
+/VelocityEncR  ──────────────────→  odometry_node  →  /odom
+/VelocityEncL  ──────────────────→
+/Lidar (or /scan) ───────────────→  slam_node      →  /map
+/camera/image/compressed  ───────→  aruco_node (future)
+                                    image_viewer_node
+
+PC → Jetson:
+/cmd_vel  ───────────────────────→  micro-ROS agent  →  MCU motors
+```
+
+### Physical SLAM notes
+
+- `odometry_node` reads `/VelocityEncR` and `/VelocityEncL` (remapped automatically by the launch).
+- `slam_node` subscribes to `/Lidar` (remapped to `/scan` internally).
+- Scan matching (angular search ±12°) is enabled by default to correct yaw drift during turns.
+- Measure the real `wheel_separation` physically and update `src/puzzlebot_bringup/config/robot_params.yaml` — the default 0.19 m may differ from your unit.
+- Kalman filter (`kalman_filter_node`) is not active until ArUco landmarks are implemented.
 
 ### Map Generation (Maze World)
 
