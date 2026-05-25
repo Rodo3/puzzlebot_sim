@@ -34,14 +34,41 @@ Reusable TF utilities to be shared across homework packages. When you write a he
 General-purpose Python helpers with no ROS dependency assumption. Math, geometry,
 file I/O helpers, etc.
 
+### `puzzlebot_voice_commands`
+Offline voice command recognition package. **Phase 2 complete.**
+
+Purpose: train and evaluate spoken-command classifiers using `.wav` audio files.
+Does **not** connect to the robot or publish to `/cmd_vel` — offline training and
+evaluation only for this phase.
+
+Key modules:
+- `audio_io.py` — WAV loading, mono conversion, resampling, normalization (SciPy only)
+- `mfcc.py` — full manual MFCC pipeline (pre-emphasis → framing → Hamming → FFT → Mel filterbank → log → DCT)
+- `dataset.py` — auto-discovers classes from subfolders, stratified train/test split without sklearn
+- `serialization.py` — pickle and JSON save/load helpers
+- `models/kmeans_codebook.py` — KMeansCodebookClassifier (stub, Phase 3)
+- `models/gaussian_nb.py` — GaussianNaiveBayesClassifier (stub, Phase 4)
+- `metrics.py` — all metrics from scratch: accuracy, confusion matrix, F1, safety-critical errors (stub, Phase 5)
+- `reports.py` — CSV, JSON, Markdown report writers (stub, Phase 5)
+
+CLI entry points (all registered in `setup.py`):
+- `prepare_voice_dataset` — extract MFCCs and save to JSON artifact (**implemented**)
+- `train_voice_models` — train KMeans and/or GNB (stub, Phases 3–4)
+- `evaluate_voice_models` — evaluate and generate reports (stub, Phase 5)
+- `predict_voice_file` — single-file inference (stub, Phases 3–4)
+
+Allowed libraries: NumPy, SciPy, Matplotlib (optional). No scikit-learn, PyTorch, or TensorFlow.
+
 ## Dependency Graph
 
 ```
 puzzlebot_bringup
-├── puzzlebot_description   (URDF + meshes)
-└── homework_01_transforms  (TF publisher node)
-    └── puzzlebot_tf_tools  (reusable TF helpers, optional)
-        └── shared_utils    (pure Python helpers, optional)
+├── puzzlebot_description          (URDF + meshes)
+└── homework_01_transforms         (TF publisher node)
+    └── puzzlebot_tf_tools         (reusable TF helpers, optional)
+        └── shared_utils           (pure Python helpers, optional)
+
+puzzlebot_voice_commands           (standalone offline ML package — no robot deps yet)
 ```
 
 ## Scalability
