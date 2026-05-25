@@ -14,6 +14,7 @@ export default function StatusPanel({ connected, lastUpdate, topicStatus }) {
     { key: 'scan',    label: '/scan' },
     { key: 'map',     label: '/map' },
     { key: 'cmdVel',  label: '/cmd_vel' },
+    { key: 'camera',  label: '/camera/image/compressed' },
     { key: 'voice',   label: '/voice/*' },
   ];
 

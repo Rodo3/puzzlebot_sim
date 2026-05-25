@@ -203,6 +203,33 @@ hr {
   display: block;
 }
 
+/* ── Bottom row: LiDAR + Camera side by side ──────────── */
+.col-left-bottom {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.col-left-bottom > * { flex: 1; min-width: 0; }
+
+/* ── Camera panel ─────────────────────────────────────── */
+.camera-panel { display: flex; flex-direction: column; }
+
+.camera-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.camera-placeholder {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 8px 0;
+  text-align: center;
+}
+
 /* ── Badges ───────────────────────────────────────────── */
 .badge {
   display: inline-block;

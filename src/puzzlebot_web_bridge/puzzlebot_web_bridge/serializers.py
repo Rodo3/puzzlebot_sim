@@ -1,5 +1,6 @@
 """Convert ROS 2 messages to JSON-serializable dicts."""
 
+import base64
 import math
 import time
 from typing import Any, Dict, List, Optional
@@ -87,6 +88,14 @@ def twist_to_json(msg, source: str) -> Dict[str, Any]:
         'source': source,
         'linear_x': round(msg.linear.x, 4),
         'angular_z': round(msg.angular.z, 4),
+    }
+
+
+def camera_to_json(msg) -> Dict[str, Any]:
+    return {
+        'type': 'camera_frame',
+        'timestamp': _stamp_to_float(msg.header),
+        'data': base64.b64encode(bytes(msg.data)).decode('ascii'),
     }
 
 

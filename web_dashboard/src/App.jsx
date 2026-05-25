@@ -3,11 +3,12 @@ import { createWebSocketClient } from './services/websocketClient.js';
 import StatusPanel       from './components/StatusPanel.jsx';
 import SlamMap           from './components/SlamMap.jsx';
 import LidarView         from './components/LidarView.jsx';
+import CameraPanel       from './components/CameraPanel.jsx';
 import VelocityPanel     from './components/VelocityPanel.jsx';
 import VoiceCommandPanel from './components/VoiceCommandPanel.jsx';
 import LogsPanel         from './components/LogsPanel.jsx';
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000/ws';
+const WS_URL = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
 const MAX_TRAJECTORY = 500;
 const MAX_LOGS = 50;
 const MAX_VOICE_HISTORY = 20;
@@ -25,6 +26,7 @@ export default function App() {
   const [cmdVel,      setCmdVel]      = useState(null);
   const [cmdVelIn,    setCmdVelIn]    = useState(null);
   const [voiceData,   setVoiceData]   = useState(null);
+  const [cameraData,  setCameraData]  = useState(null);
   const [trajectory,  setTrajectory]  = useState([]);
   const [voiceHistory, setVoiceHistory] = useState([]);
   const [logs,        setLogs]        = useState([]);
@@ -34,6 +36,7 @@ export default function App() {
     scan:   !!scanData,
     map:    !!mapData,
     cmdVel: !!cmdVel,
+    camera: !!cameraData,
     voice:  !!voiceData,
   };
 
@@ -75,6 +78,10 @@ export default function App() {
         }
         break;
 
+      case 'camera_frame':
+        setCameraData(msg);
+        break;
+
       default:
         break;
     }
@@ -110,7 +117,10 @@ export default function App() {
             robotPose={robotState?.pose}
             trajectory={trajectory}
           />
-          <LidarView scanData={scanData} />
+          <div className="col-left-bottom">
+            <LidarView scanData={scanData} />
+            <CameraPanel cameraData={cameraData} />
+          </div>
         </section>
 
         <aside className="col-right">

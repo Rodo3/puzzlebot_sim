@@ -13,11 +13,12 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import CompressedImage, LaserScan
 from std_msgs.msg import Float32, String
 
 from .rate_limiter import RateLimiter
 from .serializers import (
+    camera_to_json,
     map_to_json,
     odom_to_json,
     scan_to_json,
@@ -51,6 +52,7 @@ class BridgeNode(Node):
         self.declare_parameter('voice_status_topic',            DEFAULT_TOPICS['voice_status'])
         self.declare_parameter('voice_ranked_predictions_topic', DEFAULT_TOPICS['voice_ranked_predictions'])
         self.declare_parameter('voice_inference_time_topic',    DEFAULT_TOPICS['voice_inference_time'])
+        self.declare_parameter('camera_topic',                  DEFAULT_TOPICS['camera'])
         self.declare_parameter('websocket_host',                WEBSOCKET_HOST_DEFAULT)
         self.declare_parameter('websocket_port',                WEBSOCKET_PORT_DEFAULT)
 
@@ -127,6 +129,17 @@ class BridgeNode(Node):
             self.get_parameter('voice_inference_time_topic').get_parameter_value().string_value,
             self._voice_inference_cb, 10)
 
+        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
+        _cam_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.create_subscription(
+            CompressedImage,
+            self.get_parameter('camera_topic').get_parameter_value().string_value,
+            self._camera_cb, _cam_qos)
+
         self.get_logger().info('puzzlebot_web_bridge ready — WebSocket at ws://%s:%d/ws', host, port)
 
     # ------------------------------------------------------------------ #
@@ -144,6 +157,10 @@ class BridgeNode(Node):
     def _map_cb(self, msg: OccupancyGrid):
         if self._rl['map'].should_send():
             self._ws.broadcast_sync(map_to_json(msg))
+
+    def _camera_cb(self, msg: CompressedImage):
+        if self._rl['camera'].should_send():
+            self._ws.broadcast_sync(camera_to_json(msg))
 
     def _twist_cb(self, msg: Twist, source: str):
         key = 'cmd_vel' if source == 'cmd_vel' else 'cmd_vel_in'
