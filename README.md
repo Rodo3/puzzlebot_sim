@@ -1,323 +1,318 @@
-# Puzzlebot Simulation — ROS 2 Humble Workspace
+# Puzzlebot — ROS 2 Humble Workspace
 
-ROS 2 Humble workspace for Puzzlebot with Gazebo Fortress (ignition-gazebo 6) physics simulation, SLAM mapping, MCL localization, and weekly homework assignments.
+ROS 2 Humble workspace for a differential-drive Puzzlebot with:
+- **Gazebo Fortress** (ignition-gazebo 6) physics simulation
+- **SLAM** occupancy-grid mapping + **MCL** Monte Carlo Localization
+- **Camera calibration** pipeline (intrinsic distortion correction)
+- **ArUco** marker detection with **EKF** pose fusion
+- **PD controller** + obstacle avoidance
+- Path planning (A\*)
+
+---
 
 ## Workspace Structure
 
 ```
 puzzlebot_sim/
 ├── src/
-│   ├── puzzlebot_description/      # URDF, SDF, meshes, RViz configs, worlds
-│   ├── puzzlebot_bringup/          # Gazebo Fortress launch files
-│   ├── puzzlebot_localization/     # Odometry, EKF, sim/debug pose sources
-│   ├── puzzlebot_slam/             # Lidar mapping, scan matching, MCL
-│   ├── homework_01_transforms/     # HW1: TF transforms + circular trajectory
-│   ├── puzzlebot_tf_tools/         # Reusable TF utilities (shared)
-│   └── shared_utils/               # General Python helpers (shared)
-├── docs/                           # Setup, workflow, architecture guides
-└── scripts/                        # Build and run helper scripts
+│   ├── puzzlebot_description/    # URDF, SDF, meshes, RViz configs, worlds
+│   ├── puzzlebot_bringup/        # Launch files + YAML configs (entry point)
+│   ├── puzzlebot_localization/   # C++: odometry_node, kalman_filter_node (EKF)
+│   ├── puzzlebot_slam/           # Python: slam_node (log-odds grid), mcl (particles)
+│   ├── puzzlebot_perception/     # Python: aruco_node, image_viewer_node, calib pipeline
+│   ├── puzzlebot_controller/     # C++: pd_controller_node (steering)
+│   ├── puzzlebot_planning/       # Python: path_planner_node, obstacle_avoidance_node
+│   ├── puzzlebot_control/        # Python: state_machine_node
+│   ├── puzzlebot_msgs/           # Custom ROS 2 message definitions
+│   └── shared_utils/             # Shared Python helpers
+├── docs/                         # Technical guides (SLAM, setup, workflow)
+└── scripts/                      # Build and run helper scripts
 ```
 
-## Quick Start
+---
 
-### Ubuntu 22.04 / WSL2
+## Quick Start
 
 ```bash
 # Install ROS dependencies
 rosdep install --from-paths src --ignore-src -r -y
 
-# Install Gazebo Fortress (if not already installed)
-sudo apt install ros-humble-ros-gz
+# Build all packages
+colcon build --symlink-install
 
-# Build
-make build
-
-# Source the workspace (every new terminal)
+# Source workspace (every new terminal)
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-
-# Launch simulation in RViz
-make rviz
 ```
 
-See [docs/setup.md](docs/setup.md) for detailed setup instructions.
+---
 
-## Running In Simulation
+## Simulation (Gazebo Fortress)
 
-The workspace includes a complete Gazebo Fortress (ignition-gazebo 6) simulation stack with two worlds: flat plane and maze.
-
-### Gazebo Fortress
-
-Start the simulation (choose one):
+### Launch commands
 
 ```bash
-# Flat plane world
+# Flat plane — basic motion testing
 ros2 launch puzzlebot_bringup gz_sim.launch.py
 
-# Maze world with MCL localization against the known map
+# Maze — MCL localization against pre-built map
 ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze
 
-# Maze world — build a map from lidar scans
+# Maze — build a new map from LiDAR scans
 ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping
 
-# Mapping with wheel odometry instead of Gazebo ground truth
+# Realistic mapping stress test (wheel odometry instead of Gazebo ground-truth)
 ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping odom_source:=dead_reckoning
 
-# Without RViz visualization
-ros2 launch puzzlebot_bringup gz_sim.launch.py rviz:=false
-
-# Headless (no GUI)
+# Headless (no Gazebo GUI)
 ros2 launch puzzlebot_bringup gz_sim.launch.py gui:=false
-
-# Disable SLAM/localization extras
-ros2 launch puzzlebot_bringup gz_sim.launch.py slam:=false
 ```
 
-### Simulation Teleop
+### Simulation architecture
 
-In a **new terminal**, launch the keyboard teleop node:
+| Node | Package | Purpose |
+|------|---------|---------|
+| `gz_sim` | `ros_gz_sim` | Gazebo Fortress physics + sensors |
+| `robot_state_publisher` | `robot_state_publisher` | TF tree from URDF |
+| `ros_gz_bridge` | `ros_gz_bridge` | ROS ↔ Gazebo message bridge |
+| `odometry_node` | `puzzlebot_localization` | C++ differential-drive odometry |
+| `ground_truth_odom` | `puzzlebot_localization` | Gazebo pose → `/odom` (mapping mode) |
+| `slam_node` | `puzzlebot_slam` | Log-odds occupancy-grid mapping |
+| `mcl` | `puzzlebot_slam` | Monte Carlo Localization (maze mode) |
+| `rviz2` | `rviz2` | Visualization (15 s delayed start) |
+
+### Teleop (in a separate terminal)
 
 ```bash
-# Source your workspace first
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-
-# Start teleop_twist_keyboard
 ros2 run teleop_twist_keyboard teleop_twist_keyboard \
   --ros-args --remap cmd_vel:=/model/puzzlebot/cmd_vel
 ```
 
-Then use keyboard to control:
-- **i** — forward
-- **,** — backward
-- **j** — turn left
-- **l** — turn right
-- **k** — stop
-- **q** — quit
+Keys: **i** forward · **,** backward · **j** left · **l** right · **k** stop
 
-### Simulation Checks
+### What to watch in RViz
 
-Use these checks before changing SLAM or localization logic:
+- **MCL**: particles converge near the robot and stay aligned with maze walls.
+- **Mapping (ground truth)**: map errors point to LiDAR/model parameters, not odometry.
+- **Mapping (dead reckoning)**: small yaw drift is expected; tune `wheel_separation` in `robot_params.yaml`.
 
-```bash
-# 1. MCL sanity check: odometry prediction + lidar correction on known map
-ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mcl
+---
 
-# 2. Clean mapping baseline: Gazebo ground-truth pose + lidar mapper
-ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping
+## Physical Robot
 
-# 3. Realistic mapping stress test: wheel odometry + lidar mapper
-ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping odom_source:=dead_reckoning
-```
+Architecture: the Jetson Orin publishes raw sensor data. All computation runs on the operator PC. Both machines share the same WiFi and `ROS_DOMAIN_ID`.
 
-What to watch in RViz:
-- In MCL, particles should converge near the robot and stay aligned with the maze walls.
-- During in-place rotations, `base_footprint` should rotate without large sideways jumps.
-- In mapping with wheel odometry, small yaw drift is expected until `wheel_separation` and encoder scale are tuned.
-- In mapping with ground truth, map errors usually point to lidar/model/map parameters instead of odometry.
-
-### Simulation Architecture
-
-| Component | Purpose |
-|---|---|
-| **Gazebo Fortress** | Physics engine (ODE), sensor simulation |
-| **robot_state_publisher** | Publishes TF tree from URDF |
-| **ros_gz_bridge** | Bidirectional ROS ↔ Gazebo message bridge |
-| **odometry_node** | C++ differential-drive odometry from Gazebo joint states when `odom_source:=dead_reckoning` |
-| **dead_reckoning_debug** | Python debug odometry for comparisons only |
-| **ground_truth_odom** | Gazebo pose → `/odom` for clean mapping in simulation |
-| **slam_node** | Log-odds occupancy grid mapping from `/scan` + `/odom` |
-| **MCL (maze only)** | Monte Carlo Localization for map-based pose estimation |
-| **RViz** | Visualization (delayed 15s to stabilize clock) |
-
-### SLAM Mapping
-
-The live mapper publishes `/map` as an `OccupancyGrid` using a log-odds inverse
-sensor model and Bresenham ray tracing. In Gazebo mapping mode, `odom_source`
-defaults to `ground_truth`, so the map quality is not dominated by simulated
-wheel slip or encoder integration error.
+### Step 1 — Sensors on the Jetson (via SSH)
 
 ```bash
-# Recommended: clean map in Gazebo using simulator pose
-ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping
-
-# Realistic drift test: use wheel odometry
-ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping odom_source:=dead_reckoning
-```
-
-See [docs/slam_mapping.md](docs/slam_mapping.md) for the theory, implementation
-details, and robot-real considerations.
-
-## Running On The Physical Robot
-
-Architecture: the Jetson publishes sensors only. All computation (odometry,
-SLAM, control, perception) runs on the operator PC. Both machines must be on
-the same WiFi network and share the same `ROS_DOMAIN_ID`.
-
-### Prerequisites (once per session)
-
-```bash
-# 1. Same ROS_DOMAIN_ID on both machines (add to ~/.bashrc on each):
+# On both machines — add to ~/.bashrc:
 export ROS_DOMAIN_ID=42
 
-# 2. Sync Jetson clock before launching (critical for SLAM timestamp matching):
-#    SSH into Jetson, then:
+# Sync Jetson clock (critical for SLAM timestamp matching):
 sudo chronyc makestep
-
-# 3. Verify clocks differ by less than 0.1 s:
-#    PC:     date +%s%N
-#    Jetson: date +%s%N
 ```
 
-### Step 1 — Launch sensors on the Jetson (via SSH)
-
-Open three SSH terminals (or use tmux):
-
-**Terminal 1 — micro-ROS agent** (bridges MCU encoders + motor commands to ROS 2):
+**Terminal 1 — micro-ROS agent** (encoders + motor bridge):
 ```bash
 ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 921600
-# If the port differs: ls /dev/tty* to find ttyUSB0 or ttyACM0
 ```
 
-Published topics from the MCU:
-| Topic | Type | Description |
-|---|---|---|
-| `/VelocityEncR` | `std_msgs/Float32` | Right wheel angular velocity (rad/s) |
-| `/VelocityEncL` | `std_msgs/Float32` | Left wheel angular velocity (rad/s) |
-| `/cmd_vel` | `geometry_msgs/Twist` | Motor command input |
+| Topic published by MCU | Type | Rate |
+|------------------------|------|------|
+| `/VelocityEncR` | `std_msgs/Float32` | ~50 Hz |
+| `/VelocityEncL` | `std_msgs/Float32` | ~50 Hz |
+| `/Lidar` | `sensor_msgs/LaserScan` | ~10 Hz |
 
-**Terminal 2 — LiDAR** (workspace: `~/sllidar_ros2-main` on the Jetson):
+**Terminal 2 — Camera**:
 ```bash
-cd ~/sllidar_ros2-main
-source install/setup.bash
-ros2 launch sllidar_ros2 sllidar_a1_launch.py frame_id:=lidar_link
-# Published topic: /scan  (sensor_msgs/LaserScan)
-# Note: do NOT use this launch when the micro-ROS agent is running —
-# the MCU already reads the LiDAR and publishes it as /Lidar.
-```
-
-**Terminal 3 — Camera** (workspace: `~/ros2_ws` on the Jetson):
-```bash
-cd ~/ros2_ws
-source install/setup.bash
-# Run the camera publisher script (provided by the Puzzlebot kit):
+cd ~/ros2_ws && source install/setup.bash
 ros2 run <camera_package> <camera_node>
-# Published topic: /camera/image/compressed  (sensor_msgs/CompressedImage, JPEG ~30 Hz)
+# Publishes: /camera/image/compressed  (CompressedImage, JPEG ~30 Hz)
 ```
 
-To view the camera feed from the PC:
-```bash
-ros2 run puzzlebot_perception image_viewer_node
-```
+> **Note:** If `sllidar_ros2` runs directly on the Jetson instead of micro-ROS, use `lidar_topic:=/scan` in the PC launch.
 
-### Step 2 — Launch the PC stack
+### Step 2 — PC stack
 
 ```bash
 cd ~/Documents/puzzlebot_sim
 source install/setup.bash
 
-# Full stack: odometry + SLAM + PD controller + obstacle avoidance + RViz
-ros2 launch puzzlebot_bringup real_robot.launch.py rviz:=true
+# Full stack (default): odometry + EKF + ArUco + SLAM + controller + RViz
+ros2 launch puzzlebot_bringup real_robot.launch.py
 
-# Mapping only (no controller — drive with teleop):
-ros2 launch puzzlebot_bringup real_robot.launch.py avoidance:=false rviz:=true
+# Mapping only — drive with teleop, no autonomous controller:
+ros2 launch puzzlebot_bringup real_robot.launch.py avoidance:=false aruco:=false
 
-# LiDAR test (sllidar_ros2 direct, no micro-ROS agent):
-ros2 launch puzzlebot_bringup real_robot.launch.py lidar_topic:=/scan rviz:=true
+# No ArUco (pure wheel odometry through EKF):
+ros2 launch puzzlebot_bringup real_robot.launch.py aruco:=false
+
+# Enable live camera viewer with distortion correction:
+ros2 launch puzzlebot_bringup real_robot.launch.py viewer:=true
+
+# LiDAR from sllidar direct (not micro-ROS agent):
+ros2 launch puzzlebot_bringup real_robot.launch.py lidar_topic:=/scan
 ```
 
-**Launch arguments:**
+### Launch arguments
 
 | Argument | Default | Description |
-|---|---|---|
-| `slam` | `true` | Enable `slam_node` (builds `/map`) |
-| `avoidance` | `true` | Enable obstacle avoidance node |
-| `rviz` | `true` | Open RViz |
-| `lidar_topic` | `/Lidar` | LiDAR source topic; use `/scan` when running sllidar directly |
+|----------|---------|-------------|
+| `slam` | `true` | `slam_node` builds `/map` from `/scan` + `/odom` |
+| `avoidance` | `true` | `obstacle_avoidance_node` stops robot near obstacles |
+| `aruco` | `true` | `aruco_node` + `kalman_filter_node` for ArUco pose fusion |
+| `viewer` | `false` | `image_viewer_node` with distortion correction |
+| `rviz` | `true` | Open RViz2 |
+| `lidar_topic` | `/Lidar` | LiDAR source topic |
 
-**Terminal for teleop during mapping:**
+### Physical robot node graph
+
+```
+Jetson                          PC
+──────                          ──
+/VelocityEncR ─────────────→  odometry_node ──→ /odom_raw
+/VelocityEncL ─────────────→                          │
+                                                       ↓
+/aruco/poses (from aruco) ──→  kalman_filter_node ──→ /odom + TF odom→base
+                                                       │
+/Lidar ────────────────────→  slam_node ────────────→ /map
+
+/camera/image/compressed ──→  aruco_node ───────────→ /aruco/poses
+                          └→  image_viewer_node (optional, rectified)
+
+/odom + /goal_pose ────────→  pd_controller_node ──→ /cmd_vel_in
+/scan  ────────────────────→  obstacle_avoidance ──→ /cmd_vel ──→ Jetson MCU
+```
+
+### Teleop for manual mapping
+
 ```bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard \
     --ros-args --remap cmd_vel:=/cmd_vel
 ```
 
-Mapping tips:
-- Drive at < 0.15 m/s to reduce encoder drift.
-- Prefer long straight lines over in-place rotations.
-- Scan matching activates after 8 scans and corrects angular drift automatically.
+Mapping tips: drive < 0.15 m/s · prefer long straight lines · avoid fast in-place rotations.
 
-### Topic map (physical robot)
+---
 
-```
-Jetson                              PC
-──────                              ──
-/VelocityEncR  ──────────────────→  odometry_node  →  /odom
-/VelocityEncL  ──────────────────→
-/Lidar (or /scan) ───────────────→  slam_node      →  /map
-/camera/image/compressed  ───────→  aruco_node (future)
-                                    image_viewer_node
+## Camera Calibration
 
-PC → Jetson:
-/cmd_vel  ───────────────────────→  micro-ROS agent  →  MCU motors
+One-time procedure to compute intrinsic parameters (K matrix + distortion D).
+
+### Step 1 — Capture images (chessboard 9×6 internal corners, 2.6 cm squares)
+
+```bash
+# Auto-capture mode (default): captures automatically when board moves
+ros2 run puzzlebot_perception calib_capture_node
+
+# Manual mode: press SPACE to capture each image
+ros2 run puzzlebot_perception calib_capture_node --ros-args -p auto_capture:=false
 ```
 
-### Physical SLAM notes
+Images are saved to `~/calib_images/`. Target: 50 images with varied angles, distances, and positions in the frame.
 
-- `odometry_node` reads `/VelocityEncR` and `/VelocityEncL` (remapped automatically by the launch).
-- `slam_node` subscribes to `/Lidar` (remapped to `/scan` internally).
-- Scan matching (angular search ±12°) is enabled by default to correct yaw drift during turns.
-- Measure the real `wheel_separation` physically and update `src/puzzlebot_bringup/config/robot_params.yaml` — the default 0.19 m may differ from your unit.
-- Kalman filter (`kalman_filter_node`) is not active until ArUco landmarks are implemented.
+### Step 2 — Compute calibration parameters
 
-### Map Generation (Maze World)
+```bash
+ros2 run puzzlebot_perception calib_compute_node
+```
 
-The maze map used by MCL is generated from the SDF world geometry:
+Reads all PNGs, detects the chessboard in each, and runs OpenCV calibration.
+Output: `~/calib_images/camera_calibration.yaml`.
 
+Quality guide:
+- RMS < 0.5 px — excellent
+- RMS 0.5–1.0 px — acceptable
+- RMS > 1.0 px — retake images (the node lists the worst ones)
+
+### Step 3 — Install calibration
+
+```bash
+cp ~/calib_images/camera_calibration.yaml \
+   src/puzzlebot_bringup/config/camera_calibration.yaml
+colcon build --packages-select puzzlebot_bringup
+source install/setup.bash
+```
+
+### Step 4 — View rectified camera (optional verification)
+
+```bash
+ros2 run puzzlebot_perception image_viewer_node --ros-args -p rectify:=true
+```
+
+Straight lines in the real world should appear straight in the image.
+
+---
+
+## EKF + ArUco Localization
+
+The `kalman_filter_node` (C++ EKF) fuses wheel odometry with ArUco marker pose measurements:
+
+- **Prediction**: differential-drive kinematics from `/odom_raw`
+- **Update**: pose corrections from `aruco_node` via `/aruco/poses`
+- **Output**: filtered `/odom` + TF `odom → base_footprint`
+
+ArUco markers must be registered in `src/puzzlebot_bringup/config/aruco_map.yaml`:
+
+```yaml
+aruco_markers:
+  1: {x: 0.50, y: 2.10, z: 0.25, roll: 0.0, pitch: 0.0, yaw: 3.14159}
+  2: {x: 2.80, y: 0.30, z: 0.25, roll: 0.0, pitch: 0.0, yaw: 0.0}
+```
+
+Camera mount position is defined in `src/puzzlebot_bringup/config/camera_extrinsics.yaml`.
+Tune `x/y/z/roll/pitch/yaw` to match the physical mount on your unit.
+
+---
+
+## SLAM Mapping
+
+```bash
+# Recommended: clean map using Gazebo ground-truth pose
+ros2 launch puzzlebot_bringup gz_sim.launch.py world:=maze mode:=mapping
+
+# Physical robot: build map while teleopating
+ros2 launch puzzlebot_bringup real_robot.launch.py avoidance:=false aruco:=false slam:=true
+```
+
+Save a completed map (navigate to the package folder):
 ```bash
 cd src/puzzlebot_slam/puzzlebot_slam
-python3 generate_maze_map.py
+# The map PNG is updated live at maze_map.png
 ```
 
-This creates `maze_map.png` (206×221 px) with free cells in white and obstacles in black, matching the walls and boxes in `worlds/maze.sdf`.
+See [docs/slam_mapping.md](docs/slam_mapping.md) for the algorithm details.
 
-## Homework Organization
+---
 
-| Package | Assignment |
-|---|---|
-| `homework_01_transforms` | TF frames, circular trajectory, joint states |
+## Configuration Files
 
-### Adding a new homework package
+All configuration lives in `src/puzzlebot_bringup/config/`:
 
-**Python (rclpy):**
-```bash
-cd src
-ros2 pkg create --build-type ament_python --dependencies rclpy homework_02_<topic>
-```
+| File | Description |
+|------|-------------|
+| `robot_params.yaml` | Wheel radius, wheel separation, odometry frame names |
+| `controller_params.yaml` | PD gains, lookahead distance, obstacle stop distance |
+| `slam_params.yaml` | Grid size, log-odds probabilities, scan matching |
+| `kalman_params.yaml` | EKF process noise Q and measurement noise R |
+| `camera_calibration.yaml` | Intrinsic matrix K and distortion coefficients D |
+| `camera_extrinsics.yaml` | Camera mount pose relative to `base_link` |
+| `aruco_map.yaml` | Known ArUco marker poses in the map frame |
 
-**C++ (rclcpp):**
-```bash
-cd src
-ros2 pkg create --build-type ament_cmake --dependencies rclcpp homework_02_<topic>
-```
+---
 
-After creating the package, rebuild from the repo root:
-```bash
-cd ..
-make build
-```
-
-## Build Commands
+## Build Reference
 
 ```bash
-make build    # colcon build
-make clean    # remove build/install/log
-make source   # print source command
-make rviz     # launch puzzlebot simulation
-make help     # list all commands
+# Full build
+colcon build --symlink-install
+
+# Specific packages only
+colcon build --packages-select puzzlebot_bringup puzzlebot_perception
+
+# Clean build artifacts
+rm -rf build/ install/ log/
+
+# Source workspace
+source install/setup.bash
 ```
-
-## Contributing
-
-- No direct push to `main`
-- Open a PR with at least 1 review
-- See [docs/workflow.md](docs/workflow.md) for branch naming and commit conventions
