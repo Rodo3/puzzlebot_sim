@@ -32,6 +32,7 @@ install(TARGETS
 install(PROGRAMS
   scripts/dead_reckoning_debug
   scripts/ground_truth_odom
+  scripts/scan_restamper
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

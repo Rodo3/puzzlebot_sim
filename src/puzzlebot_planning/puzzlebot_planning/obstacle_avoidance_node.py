@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 
@@ -24,8 +25,8 @@ class ObstacleAvoidanceNode(Node):
 
         self.min_front = float('inf')
 
-        self.sub_scan_ = self.create_subscription(LaserScan, '/scan',
-                          self.scan_cb, 10)
+        self.sub_scan_ = self.create_subscription(
+            LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
         self.sub_cmd_  = self.create_subscription(Twist, '/cmd_vel_in',
                           self.cmd_cb, 10)
         self.pub_cmd_  = self.create_publisher(Twist, '/cmd_vel', 10)

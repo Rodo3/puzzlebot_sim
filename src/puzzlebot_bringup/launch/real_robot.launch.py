@@ -95,11 +95,11 @@ def generate_launch_description():
     # ── Argumentos del launch ─────────────────────────────────────────────
     arg_slam        = DeclareLaunchArgument('slam',        default_value='true',
                           description='Enable SLAM: slam_node builds /map from /scan + /odom')
-    arg_avoidance   = DeclareLaunchArgument('avoidance',   default_value='true',
+    arg_avoidance   = DeclareLaunchArgument('avoidance',   default_value='false',
                           description='Enable obstacle_avoidance_node (needs LiDAR)')
     arg_aruco       = DeclareLaunchArgument('aruco',       default_value='true',
                           description='Enable aruco_node + kalman_filter_node for ArUco pose corrections')
-    arg_viewer      = DeclareLaunchArgument('viewer',      default_value='false',
+    arg_viewer      = DeclareLaunchArgument('viewer',      default_value='true',
                           description='Enable image_viewer_node with distortion correction')
     arg_rviz        = DeclareLaunchArgument('rviz',        default_value='true',
                           description='Open RViz2 for visualization')
@@ -124,17 +124,26 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ── 2. TF estático: base_link → camera_link ───────────────────────────
-    # Valores desde camera_extrinsics.yaml (x=8cm adelante, z=12cm alto).
-    # Si se ajusta el montaje físico, actualizar camera_extrinsics.yaml
-    # y cambiar los argumentos aquí de forma consistente.
+    # ── 2. TF estáticos ───────────────────────────────────────────────────
     camera_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='camera_tf',
-        arguments=['0.08', '0.00', '0.12',   # x y z  (metros)
-                   '0.0',  '0.0',  '0.0',    # roll pitch yaw (radianes)
+        arguments=['0.08', '0.00', '0.12',
+                   '0.0',  '0.0',  '0.0',
                    'base_link', 'camera_link'],
+        output='screen',
+    )
+
+    # El sllidar publica con frame_id='laser' por default.
+    # Este TF conecta 'laser' con 'lidar_link' (que está en el URDF).
+    laser_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='laser_tf',
+        arguments=['0.0', '0.0', '0.0',
+                   '0.0', '0.0', '0.0',
+                   'lidar_link', 'laser'],
         output='screen',
     )
 
@@ -206,16 +215,31 @@ def generate_launch_description():
         condition=IfCondition(viewer_en),
     )
 
-    # ── 7. SLAM mapping ───────────────────────────────────────────────────
-    # Construye /map desde /scan + /odom. El remap permite cambiar la fuente
-    # del LiDAR entre micro-ROS (/Lidar) y sllidar directo (/scan).
+    # ── 7. Scan restamper ────────────────────────────────────────────────
+    # Lee el LiDAR de la Jetson (timestamp incorrecto) y publica
+    # /scan_stamped con el reloj del PC y frame_id=lidar_link.
+    # Usar un topic de salida distinto evita conflictos si el LiDAR
+    # ya publica en /scan.
+    scan_restamper = Node(
+        package='puzzlebot_localization',
+        executable='scan_restamper',
+        name='scan_restamper',
+        output='screen',
+        parameters=[{
+            'input_topic':  lidar_topic,   # /scan o /Lidar desde la Jetson
+            'target_frame': 'lidar_link',  # frame correcto del URDF
+        }],
+    )
+
+    # ── 8. SLAM mapping ───────────────────────────────────────────────────
+    # Suscribe /scan_stamped (re-sellado por scan_restamper).
     slam = Node(
         package='puzzlebot_slam',
         executable='slam_node',
         name='slam_node',
         output='screen',
         parameters=[slam_cfg, {'use_sim_time': False}],
-        remappings=[('/scan', lidar_topic)],
+        remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(slam_en),
     )
 
@@ -243,14 +267,13 @@ def generate_launch_description():
     )
 
     # ── 9. Obstacle Avoidance ─────────────────────────────────────────────
-    # Lee /cmd_vel_in + /scan, publica /cmd_vel (salida final a motores).
-    # Desactivar con avoidance:=false si no hay LiDAR conectado.
     obstacle_avoidance = Node(
         package='puzzlebot_planning',
         executable='obstacle_avoidance_node',
         name='obstacle_avoidance_node',
         output='screen',
         parameters=[controller_cfg, {'use_sim_time': False}],
+        remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(avoidance_en),
     )
 
@@ -261,6 +284,7 @@ def generate_launch_description():
         name='rviz2',
         arguments=['-d', rviz_cfg],
         parameters=[{'use_sim_time': False}],
+        remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(rviz_en),
         output='screen',
     )
@@ -276,6 +300,8 @@ def generate_launch_description():
         # Infraestructura base (siempre activos)
         rsp,
         camera_tf,
+        laser_tf,
+        scan_restamper,
         odometry,
         kalman,
         # Percepción (condicional)

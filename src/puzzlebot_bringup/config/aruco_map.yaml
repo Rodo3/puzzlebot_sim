@@ -1,59 +1,63 @@
-# Mapa de marcadores ArUco conocidos
-# Cada marcador está fijo en el frame "map" con pose (x, y, z, roll, pitch, yaw).
+# Mapa de marcadores ArUco — Pista física
 #
-# Convención de pose:
-#   x, y, z   — posición del centro del marcador en metros
-#   roll      — rotación alrededor de X en radianes
-#   pitch     — rotación alrededor de Y en radianes
-#   yaw       — rotación alrededor de Z en radianes
-#                 0.0    = marcador apuntando en dirección +X del mapa
-#                 1.5708 = marcador apuntando en dirección +Y del mapa
-#                 3.1416 = marcador apuntando en dirección -X del mapa
+# Origen (0,0) = esquina inferior izquierda de la pista
+# Unidades: metros
 #
-# El frame del marcador sigue la convención ArUco de OpenCV:
-#   origen en el centro del marcador
-#   X apunta a la derecha del marcador
-#   Y apunta hacia arriba del marcador
-#   Z sale hacia la cámara (fuera del plano del marcador)
+# Convención de yaw (dirección en que apunta la cara del marker = hacia dónde mira la cámara):
+#   0.0    = marker apunta en +X (este)
+#   1.5708 = marker apunta en +Y (norte)
+#  -1.5708 = marker apunta en -Y (sur)
+#   3.1416 = marker apunta en -X (oeste)
 #
-# Cómo medir la posición de un marcador en la pista:
-#   1. Define el origen del mapa (0,0,0) — usualmente la posición inicial del robot.
-#   2. Mide x, y con cinta métrica desde el origen hasta el centro del marcador.
-#   3. Mide z = altura desde el piso hasta el centro del marcador.
-#   4. Determina yaw: el ángulo que "mira hacia dónde está la cámara" cuando
-#      el robot está frente al marcador.
+# Dimensiones de la pista:
+#   Ancho: 3.76 m (eje X)
+#   Alto:  4.86 m (eje Y)
+#   Marker size: 0.10 m (10 cm)
 #
-# Para usar DICT_4X4_50 los IDs válidos son 0–49.
+# Para DICT_4X4_50, IDs válidos: 0–49
 
 aruco_markers:
-  # Marcador 1: pared norte, mirando hacia el sur (-Y del mapa)
+  # ID 1 — Pared norte (top), centro, mirando al sur
   1:
-    x:     0.50
-    y:     2.10
-    z:     0.25
-    roll:  0.0
-    pitch: 0.0
-    yaw:   3.1416   # marcador apunta en -X, es decir cámara lo ve desde -X
+    x:      1.88
+    y:      4.86
+    z:      0.15
+    roll:   0.0
+    pitch:  0.0
+    yaw:   -1.5708   # facing south (-Y)
 
-  # Marcador 2: pared este, mirando hacia el oeste (-X del mapa)
+  # ID 0 — Pared oeste (izquierda), parte alta, mirando al este
+  0:
+    x:      0.0
+    y:      3.90      # 4.86 - 1.01 + 0.05
+    z:      0.18
+    roll:   0.0
+    pitch:  0.0
+    yaw:    0.0       # facing east (+X)
+
+  # ID 4 — Pared oeste (izquierda), parte baja, mirando al este
+  4:
+    x:      0.0
+    y:      1.04      # 0.99 + 0.05
+    z:      0.18
+    roll:   0.0
+    pitch:  0.0
+    yaw:    0.0       # facing east (+X)
+
+  # ID 2 — Pared este (derecha), parte alta, mirando al oeste
   2:
-    x:     2.80
-    y:     0.30
-    z:     0.25
-    roll:  0.0
-    pitch: 0.0
-    yaw:   0.0
+    x:      3.76
+    y:      3.90      # 4.86 - 1.01 + 0.05
+    z:      0.18
+    roll:   0.0
+    pitch:  0.0
+    yaw:    3.1416    # facing west (-X)
 
-  # Marcador 3: pared sur, mirando hacia el norte (+Y del mapa)
+  # ID 3 — Pared este (derecha), parte baja, mirando al oeste
   3:
-    x:     1.20
-    y:     0.10
-    z:     0.25
-    roll:  0.0
-    pitch: 0.0
-    yaw:   1.5708
-
-# Parámetros de la pista (referencia)
-# track_origin:
-#   x: 0.0    # esquina suroeste de la pista
-#   y: 0.0
+    x:      3.76
+    y:      1.04      # 0.99 + 0.05
+    z:      0.18
+    roll:   0.0
+    pitch:  0.0
+    yaw:    3.1416    # facing west (-X)

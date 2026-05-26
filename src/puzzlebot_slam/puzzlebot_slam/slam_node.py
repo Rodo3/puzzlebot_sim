@@ -20,7 +20,12 @@ import rclpy
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import LaserScan
 import tf2_ros
 
@@ -72,7 +77,8 @@ class SlamNode(Node):
         self._tf = tf2_ros.TransformBroadcaster(self)
 
         self.create_subscription(Odometry, '/odom', self._odom_cb, 10)
-        self.create_subscription(LaserScan, '/scan', self._scan_cb, 10)
+        self.create_subscription(
+            LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
 
         self.create_timer(1.0 / 30.0, self._broadcast_tf)
         self.create_timer(0.5, self._publish_map)

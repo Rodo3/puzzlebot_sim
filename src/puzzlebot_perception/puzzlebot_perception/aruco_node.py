@@ -32,7 +32,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, Image
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, Pose
+from std_msgs.msg import Int32MultiArray
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -264,6 +265,11 @@ class ArucoNode(Node):
     def _setup_comms(self):
         self.pub_pose  = self.create_publisher(
             PoseWithCovarianceStamped, '/aruco/pose', 10)
+        # PoseArray para compatibilidad con kalman_filter_node (C++)
+        self.pub_poses = self.create_publisher(
+            PoseArray, '/aruco/poses', 10)
+        self.pub_ids   = self.create_publisher(
+            Int32MultiArray, '/aruco/detected_ids', 10)
         self.pub_debug = self.create_publisher(
             Image, '/aruco/debug_image', 10) if self._pub_debug_en else None
 
@@ -305,9 +311,14 @@ class ArucoNode(Node):
         corners, ids, _ = self.detect_markers(gray)
 
         if ids is None:
+            self.pub_ids.publish(Int32MultiArray(data=[]))
             if self.pub_debug:
                 self._publish_debug_image(frame, [], [], None, stamp)
             return
+
+        # Publicar todos los IDs visibles (sin filtrar) para identificación física
+        raw_ids = ids.flatten().tolist()
+        self.pub_ids.publish(Int32MultiArray(data=[int(i) for i in raw_ids]))
 
         candidates = []
         for i, mid in enumerate(ids.flatten().tolist()):
@@ -334,6 +345,7 @@ class ArucoNode(Node):
 
         x, y, yaw, cov = self.fuse_multiple_marker_poses(valid)
         self.publish_pose(x, y, yaw, cov, stamp)
+        self.publish_pose_array(x, y, yaw, stamp)
         self.last_pose = (x, y, yaw)
 
     # ------------------------------------------------------------------
@@ -462,6 +474,21 @@ class ArucoNode(Node):
         msg.pose.pose.orientation.w = qw
         msg.pose.covariance = cov
         self.pub_pose.publish(msg)
+
+    def publish_pose_array(self, x, y, yaw, stamp):
+        p = Pose()
+        p.position.x = x
+        p.position.y = y
+        qx, qy, qz, qw = _rot_to_quat(_euler_to_rot(0.0, 0.0, yaw))
+        p.orientation.x = qx
+        p.orientation.y = qy
+        p.orientation.z = qz
+        p.orientation.w = qw
+        arr = PoseArray()
+        arr.header.stamp    = stamp
+        arr.header.frame_id = self.map_frame
+        arr.poses           = [p]
+        self.pub_poses.publish(arr)
 
     # ------------------------------------------------------------------
     # Debug image
