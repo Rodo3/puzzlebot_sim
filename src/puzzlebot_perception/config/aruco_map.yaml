@@ -1,0 +1,62 @@
+# ArUco Marker Map — Pista física
+# Origen (0,0) = esquina inferior izquierda de la pista
+# Unidades: metros
+# IDs por asignar — reemplaza null con el ID real del marker físico
+#
+# Distribución según diagrama:
+#   Ancho pista:  3.76 m  (eje X)
+#   Alto pista:   4.86 m  (eje Y)
+#   Marker size:  0.10 m  (10 cm)
+#
+# Las medidas 101cm y 99cm son distancia horizontal desde la esquina
+# hasta el INICIO del marker (borde del marker, no su centro).
+# Centro del marker = distancia_esquina + 0.05 (mitad del marker)
+#
+# Alturas:
+#   markers laterales y top: 0.18 m (18 cm)
+#   marker top_center:       0.15 m (15 cm)
+
+markers:
+  - id: null                  # ← asignar ID físico
+    name: top_center
+    x: 1.88                   # mitad del ancho (centro de la pista)
+    y: 4.86                   # pared superior
+    z: 0.15                   # altura 15 cm
+    facing: south             # apunta hacia el interior
+
+  - id: null                  # ← asignar ID físico
+    name: left_top
+    x: 0.0                    # pared izquierda
+    y: 4.86 - 1.01 + 0.05     # desde esquina superior: 4.86 - 1.01 + centro = 3.90
+    z: 0.18                   # altura 18 cm
+    facing: east              # apunta hacia el interior
+
+  - id: null                  # ← asignar ID físico
+    name: left_bottom
+    x: 0.0                    # pared izquierda
+    y: 0.99 + 0.05            # desde esquina inferior: 99cm + centro = 1.04
+    z: 0.18                   # altura 18 cm
+    facing: east              # apunta hacia el interior
+
+  - id: null                  # ← asignar ID físico
+    name: right_top
+    x: 3.76                   # pared derecha
+    y: 4.86 - 1.01 + 0.05     # desde esquina superior: 3.90
+    z: 0.18                   # altura 18 cm
+    facing: west              # apunta hacia el interior
+
+  - id: null                  # ← asignar ID físico
+    name: right_bottom
+    x: 3.76                   # pared derecha
+    y: 0.99 + 0.05            # desde esquina inferior: 1.04
+    z: 0.18                   # altura 18 cm
+    facing: west              # apunta hacia el interior
+
+# Tamaño físico del marker (metros)
+marker_size: 0.10
+
+# Referencia del mundo
+world:
+  width:  3.76   # metros (eje X)
+  height: 4.86   # metros (eje Y)
+  origin: bottom_left

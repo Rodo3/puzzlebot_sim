@@ -22,6 +22,7 @@ setup(
             'camera_node = puzzlebot_perception.camera_node:main',
             'aruco_node  = puzzlebot_perception.aruco_node:main',
             'yolo_node   = puzzlebot_perception.yolo_node:main',
+	        'kalman_node = puzzlebot_perception.kalman_node:main',
         ],
     },
 )
