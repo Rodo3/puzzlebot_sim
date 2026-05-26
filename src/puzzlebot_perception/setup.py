@@ -19,6 +19,15 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
+            'camera_node        = puzzlebot_perception.camera_node:main',
+            'camera_publisher   = puzzlebot_perception.camera_publisher:main',
+            'aruco_node         = puzzlebot_perception.aruco_node:main',
+            'yolo_node          = puzzlebot_perception.yolo_node:main',
+            'image_viewer_node  = puzzlebot_perception.image_viewer_node:main',
+            # Calibración de cámara (3 nodos en secuencia)
+            'calib_capture_node = puzzlebot_perception.calib_capture_node:main',
+            'calib_compute_node = puzzlebot_perception.calib_compute_node:main',
+            'calib_apply_node   = puzzlebot_perception.calib_apply_node:main',
             'camera_node = puzzlebot_perception.camera_node:main',
             'aruco_node  = puzzlebot_perception.aruco_node:main',
             'yolo_node   = puzzlebot_perception.yolo_node:main',

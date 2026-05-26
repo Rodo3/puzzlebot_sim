@@ -1,0 +1,47 @@
+# Calibración extrínseca cámara–robot
+# Define la pose fija de camera_link respecto a base_link.
+#
+# Cómo medir con regla (aproximación inicial):
+#   x     — distancia frontal desde el centro de la base del robot hasta la cámara (+ = adelante)
+#   y     — desplazamiento lateral (+ = izquierda)
+#   z     — altura desde el piso hasta la cámara (en metros)
+#   roll  — rotación alrededor de X (0 si la cámara está nivelada)
+#   pitch — rotación alrededor de Y (+ = apunta hacia abajo)
+#   yaw   — rotación alrededor de Z (0 si apunta al frente del robot)
+#
+# Todos los ángulos en RADIANES.
+#
+# Después de una calibración inicial con regla, ajusta estos valores si la pose
+# estimada del robot con ArUco queda desplazada respecto a la pose real.
+# Un desplazamiento en x/y constante suele indicar error en x/y/z.
+# Una rotación consistente indica error en yaw/pitch.
+#
+# Árbol TF resultante:
+#   map
+#    └── odom
+#         └── base_link
+#              ├── lidar_link
+#              └── camera_link
+
+camera_extrinsics:
+  parent_frame: base_link
+  child_frame:  camera_link
+  x:     0.08     # 8 cm adelante del centro
+  y:     0.00     # centrado lateralmente
+  z:     0.12     # 12 cm de altura
+  roll:  0.0
+  pitch: 0.0
+  yaw:   0.0
+
+# Para publicar este TF en tu launch file, agrega:
+#
+#   from launch_ros.actions import Node as LaunchNode
+#
+#   static_tf = LaunchNode(
+#       package='tf2_ros',
+#       executable='static_transform_publisher',
+#       name='camera_tf',
+#       arguments=['0.08', '0.00', '0.12',   # x y z
+#                  '0.0',  '0.0',  '0.0',    # roll pitch yaw
+#                  'base_link', 'camera_link'],
+#   )
