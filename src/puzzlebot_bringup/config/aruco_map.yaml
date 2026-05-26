@@ -1,0 +1,59 @@
+# Mapa de marcadores ArUco conocidos
+# Cada marcador está fijo en el frame "map" con pose (x, y, z, roll, pitch, yaw).
+#
+# Convención de pose:
+#   x, y, z   — posición del centro del marcador en metros
+#   roll      — rotación alrededor de X en radianes
+#   pitch     — rotación alrededor de Y en radianes
+#   yaw       — rotación alrededor de Z en radianes
+#                 0.0    = marcador apuntando en dirección +X del mapa
+#                 1.5708 = marcador apuntando en dirección +Y del mapa
+#                 3.1416 = marcador apuntando en dirección -X del mapa
+#
+# El frame del marcador sigue la convención ArUco de OpenCV:
+#   origen en el centro del marcador
+#   X apunta a la derecha del marcador
+#   Y apunta hacia arriba del marcador
+#   Z sale hacia la cámara (fuera del plano del marcador)
+#
+# Cómo medir la posición de un marcador en la pista:
+#   1. Define el origen del mapa (0,0,0) — usualmente la posición inicial del robot.
+#   2. Mide x, y con cinta métrica desde el origen hasta el centro del marcador.
+#   3. Mide z = altura desde el piso hasta el centro del marcador.
+#   4. Determina yaw: el ángulo que "mira hacia dónde está la cámara" cuando
+#      el robot está frente al marcador.
+#
+# Para usar DICT_4X4_50 los IDs válidos son 0–49.
+
+aruco_markers:
+  # Marcador 1: pared norte, mirando hacia el sur (-Y del mapa)
+  1:
+    x:     0.50
+    y:     2.10
+    z:     0.25
+    roll:  0.0
+    pitch: 0.0
+    yaw:   3.1416   # marcador apunta en -X, es decir cámara lo ve desde -X
+
+  # Marcador 2: pared este, mirando hacia el oeste (-X del mapa)
+  2:
+    x:     2.80
+    y:     0.30
+    z:     0.25
+    roll:  0.0
+    pitch: 0.0
+    yaw:   0.0
+
+  # Marcador 3: pared sur, mirando hacia el norte (+Y del mapa)
+  3:
+    x:     1.20
+    y:     0.10
+    z:     0.25
+    roll:  0.0
+    pitch: 0.0
+    yaw:   1.5708
+
+# Parámetros de la pista (referencia)
+# track_origin:
+#   x: 0.0    # esquina suroeste de la pista
+#   y: 0.0
