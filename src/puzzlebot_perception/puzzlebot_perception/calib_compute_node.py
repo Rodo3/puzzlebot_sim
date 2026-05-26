@@ -42,11 +42,11 @@ class CalibComputeNode(Node):
 
         self.declare_parameter('save_dir',        os.path.expanduser('~/calib_images'))
         self.declare_parameter('output_yaml',     os.path.expanduser('~/calib_images/camera_calibration.yaml'))
-        self.declare_parameter('board_type',      'charuco')
-        self.declare_parameter('board_cols',       7)
-        self.declare_parameter('board_rows',       5)
-        self.declare_parameter('square_size',      0.030)
-        self.declare_parameter('marker_length',    0.022)
+        self.declare_parameter('board_type',      'checkerboard')  # checkerboard | charuco
+        self.declare_parameter('board_cols',       9)    # esquinas internas en X
+        self.declare_parameter('board_rows',       6)    # esquinas internas en Y
+        self.declare_parameter('square_size',      0.026)  # 2.6 cm
+        self.declare_parameter('marker_length',    0.019)  # solo ChArUco
         self.declare_parameter('aruco_dict',       'DICT_4X4_50')
         self.declare_parameter('show_results',     True)
         self.declare_parameter('image_width',      640)

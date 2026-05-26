@@ -2,7 +2,7 @@
 Nodo 1/3 — Captura de imágenes para calibración intrínseca.
 
 Modos de captura:
-  auto_capture=true  (default) — captura sola cuando:
+  auto_capture=true  — captura sola cuando:
     • El tablero está detectado
     • Pasaron >= capture_interval segundos desde la última captura
     • El tablero se movió >= min_corner_displacement px (diversidad)
@@ -10,15 +10,18 @@ Modos de captura:
 
 El preview se publica como tópico /calib/preview (Image) para verlo con:
   ros2 run rqt_image_view rqt_image_view /calib/preview
-También intenta abrir ventana local (funciona si tienes display).
+También abre ventana local si hay display disponible.
 
-Uso:
-  ros2 run puzzlebot_perception calib_capture_node \\
-    --ros-args -p square_length:=0.026 -p target_captures:=50
+Uso (Checkerboard 9×6 esquinas internas, cuadro 2.6 cm):
+  ros2 run puzzlebot_perception calib_capture_node
 
-  # Para checkerboard:
+  # Modo manual:
   ros2 run puzzlebot_perception calib_capture_node \\
-    --ros-args -p board_type:=checkerboard \\
+    --ros-args -p auto_capture:=false
+
+  # ChArUco (alternativa):
+  ros2 run puzzlebot_perception calib_capture_node \\
+    --ros-args -p board_type:=charuco \\
                -p board_cols:=7 -p board_rows:=5 \\
                -p square_length:=0.026
 """
@@ -27,7 +30,7 @@ import os
 import time
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import CompressedImage, Image
 from cv_bridge import CvBridge
 import cv2
@@ -53,68 +56,93 @@ class CalibCaptureNode(Node):
 
         self.declare_parameter('image_topic',             '/camera/image/compressed')
         self.declare_parameter('save_dir',                os.path.expanduser('~/calib_images'))
-        self.declare_parameter('board_type',              'charuco')
-        self.declare_parameter('board_cols',               7)
-        self.declare_parameter('board_rows',               5)
-        self.declare_parameter('square_length',            0.026)   # 2.6 cm
-        self.declare_parameter('marker_length',            0.019)   # ~73% de sq para ChArUco
+        self.declare_parameter('board_type',              'checkerboard')  # checkerboard | charuco
+        self.declare_parameter('board_cols',               9)    # esquinas internas en X
+        self.declare_parameter('board_rows',               6)    # esquinas internas en Y
+        self.declare_parameter('square_length',            0.026)  # 2.6 cm
+        self.declare_parameter('marker_length',            0.019)  # solo ChArUco
         self.declare_parameter('aruco_dict',               'DICT_4X4_50')
         self.declare_parameter('min_captures',             30)
         self.declare_parameter('target_captures',          50)
         self.declare_parameter('auto_capture',             True)
-        self.declare_parameter('capture_interval',         2.0)     # segundos entre capturas
-        self.declare_parameter('min_corner_displacement',  30.0)    # px mínimo de movimiento
+        self.declare_parameter('capture_interval',         2.0)
+        self.declare_parameter('min_corner_displacement',  30.0)
+        self.declare_parameter('window_width',             960)
+        self.declare_parameter('window_height',            540)
 
-        self.save_dir           = self.get_parameter('save_dir').value
-        self.image_topic        = self.get_parameter('image_topic').value
-        board_type              = self.get_parameter('board_type').value
-        cols                    = self.get_parameter('board_cols').value
-        rows                    = self.get_parameter('board_rows').value
-        sq_len                  = self.get_parameter('square_length').value
-        mk_len                  = self.get_parameter('marker_length').value
-        dict_name               = self.get_parameter('aruco_dict').value
-        self.min_captures       = self.get_parameter('min_captures').value
-        self.target_captures    = self.get_parameter('target_captures').value
-        self.auto_capture       = self.get_parameter('auto_capture').value
-        self.capture_interval   = self.get_parameter('capture_interval').value
-        self.min_displacement   = self.get_parameter('min_corner_displacement').value
+        self.save_dir         = self.get_parameter('save_dir').value
+        self.image_topic      = self.get_parameter('image_topic').value
+        board_type            = self.get_parameter('board_type').value
+        cols                  = self.get_parameter('board_cols').value
+        rows                  = self.get_parameter('board_rows').value
+        sq_len                = self.get_parameter('square_length').value
+        mk_len                = self.get_parameter('marker_length').value
+        dict_name             = self.get_parameter('aruco_dict').value
+        self.min_captures     = self.get_parameter('min_captures').value
+        self.target_captures  = self.get_parameter('target_captures').value
+        self.auto_capture     = self.get_parameter('auto_capture').value
+        self.capture_interval = self.get_parameter('capture_interval').value
+        self.min_displacement = self.get_parameter('min_corner_displacement').value
+        win_w                 = self.get_parameter('window_width').value
+        win_h                 = self.get_parameter('window_height').value
 
         os.makedirs(self.save_dir, exist_ok=True)
 
-        self.use_charuco      = (board_type == 'charuco')
-        self.board_size       = (cols, rows)
-        self.bridge           = CvBridge()
-        self.frame            = None
-        self.count            = 0
-        self.last_capture_t   = 0.0
+        self.use_charuco       = (board_type == 'charuco')
+        self.board_size        = (cols, rows)
+        self.bridge            = CvBridge()
+        self.frame             = None
+        self._vis_frame        = None   # frame listo para mostrar, escrito por _tick
+        self.count             = 0
+        self.last_capture_t    = 0.0
         self.last_corners_mean = None
-        self.has_display      = True   # se desactiva si cv2.imshow falla
+        self._manual_trigger   = False  # activado por SPACE en _poll_window
+        self.has_display       = False
+        self._no_frame_warned  = False
 
         if self.use_charuco:
             self._init_charuco(cols, rows, sq_len, mk_len, dict_name)
             self.get_logger().info(
-                f'ChArUco {cols}x{rows}  cuadro={sq_len*100:.1f}cm  '
+                f'ChArUco {cols}×{rows}  cuadro={sq_len*100:.1f}cm  '
                 f'marker={mk_len*100:.1f}cm  dict={dict_name}  '
                 f'OpenCV {cv2.__version__} ({"legacy" if _LEGACY else "nueva"} API)'
             )
         else:
             self.get_logger().info(
-                f'Checkerboard {cols}x{rows} esquinas internas  '
-                f'cuadro={sq_len*100:.1f}cm'
+                f'Checkerboard {cols}×{rows} esquinas internas  '
+                f'cuadro={sq_len*100:.1f}cm  OpenCV {cv2.__version__}'
             )
 
+        # QoS idéntico al image_viewer_node: BEST_EFFORT, depth=1
+        qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         if 'compressed' in self.image_topic.lower():
             self.sub = self.create_subscription(
-                CompressedImage, self.image_topic, self._cb_compressed,
-                qos_profile_sensor_data)
+                CompressedImage, self.image_topic, self._cb_compressed, qos)
         else:
             self.sub = self.create_subscription(
-                Image, self.image_topic, self._cb_raw,
-                qos_profile_sensor_data)
+                Image, self.image_topic, self._cb_raw, qos)
 
-        self.pub_preview   = self.create_publisher(Image, '/calib/preview', 10)
-        self._no_frame_warned = False
-        self.create_timer(1.0 / 15.0, self._tick)   # 15 Hz es suficiente para preview
+        self.pub_preview = self.create_publisher(Image, '/calib/preview', 10)
+
+        # Crear ventana al inicio (como image_viewer_node)
+        self._window_title = 'Calibracion  |  Q=salir  SPACE=captura manual'
+        try:
+            cv2.namedWindow(self._window_title, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(self._window_title, win_w, win_h)
+            self.has_display = True
+        except Exception:
+            self.get_logger().warn(
+                'Sin display local. Usa rqt_image_view para ver el preview:\n'
+                '  ros2 run rqt_image_view rqt_image_view /calib/preview'
+            )
+
+        # Timer de lógica (15 Hz) + timer de ventana separado (30 Hz, igual que image_viewer)
+        self.create_timer(1.0 / 15.0, self._tick)
+        self.create_timer(1.0 / 30.0, self._poll_window)
 
         mode = 'AUTO' if self.auto_capture else 'MANUAL (SPACE)'
         self.get_logger().info(
@@ -122,7 +150,7 @@ class CalibCaptureNode(Node):
             f'intervalo={self.capture_interval:.1f}s  '
             f'desplaz_min={self.min_displacement:.0f}px\n'
             f'Preview: ros2 run rqt_image_view rqt_image_view /calib/preview\n'
-            f'dir={self.save_dir}'
+            f'Guardando en: {self.save_dir}'
         )
 
     # ------------------------------------------------------------------
@@ -146,7 +174,7 @@ class CalibCaptureNode(Node):
         self.frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
     # ------------------------------------------------------------------
-    # Tick principal: detectar, decidir captura, publicar preview
+    # Timer principal: detección + decisión de captura + publicar preview
     # ------------------------------------------------------------------
     def _tick(self):
         if self.frame is None:
@@ -154,109 +182,140 @@ class CalibCaptureNode(Node):
                 self._no_frame_warned = True
                 self.get_logger().warn(
                     f'Sin frames de {self.image_topic}. '
-                    'Verifica que la Jetson está publicando y que '
+                    'Verifica que la cámara está publicando y que '
                     'ROS_DOMAIN_ID coincide en ambas máquinas.')
             return
 
         found, vis, corners_mean = self._detect(self.frame)
         now = time.time()
 
-        # --- decidir si capturar ---
         do_capture = False
         reason_no  = ''
 
         if found:
             time_ok = (now - self.last_capture_t) >= self.capture_interval
             if not time_ok:
-                remain = self.capture_interval - (now - self.last_capture_t)
+                remain    = self.capture_interval - (now - self.last_capture_t)
                 reason_no = f'espera {remain:.1f}s'
 
             move_ok = True
             if self.last_corners_mean is not None and corners_mean is not None:
                 disp = float(np.linalg.norm(corners_mean - self.last_corners_mean))
                 if disp < self.min_displacement:
-                    move_ok = False
+                    move_ok   = False
                     reason_no = f'mueve el tablero ({disp:.0f}/{self.min_displacement:.0f}px)'
 
             if self.auto_capture:
                 do_capture = time_ok and move_ok
-            # Manual: do_capture se activa por teclado en _show_window
+            elif self._manual_trigger:
+                # Modo manual: respetar solo el intervalo mínimo
+                do_capture           = time_ok
+                self._manual_trigger = False
 
-        # --- overlay de estado ---
-        vis = self._draw_overlay(vis, found, do_capture, reason_no, now)
+        vis = self._draw_overlay(vis, found, do_capture, reason_no)
 
-        # --- capturar si aplica ---
         if do_capture:
             self._save_frame(corners_mean)
 
-        # --- publicar preview como tópico ---
+        # Publicar preview como tópico ROS
         try:
-            msg        = self.bridge.cv2_to_imgmsg(vis, encoding='bgr8')
-            self.pub_preview.publish(msg)
+            preview_msg = self.bridge.cv2_to_imgmsg(vis, encoding='bgr8')
+            self.pub_preview.publish(preview_msg)
         except Exception:
             pass
 
-        # --- ventana local (opcional, puede fallar en WSL2 sin display) ---
-        self._show_window(vis, found, corners_mean)
+        # Compartir frame con _poll_window (timer separado, como image_viewer_node)
+        self._vis_frame = vis
+
+    # ------------------------------------------------------------------
+    # Timer de ventana: separado del timer de lógica (patrón image_viewer_node)
+    # ------------------------------------------------------------------
+    def _poll_window(self):
+        if not self.has_display:
+            return
+
+        if self._vis_frame is not None:
+            try:
+                cv2.imshow(self._window_title, self._vis_frame)
+            except cv2.error:
+                self.has_display = False
+                self.get_logger().warn(
+                    'Sin display local. Usa rqt_image_view:\n'
+                    '  ros2 run rqt_image_view rqt_image_view /calib/preview'
+                )
+                return
+
+        key = cv2.waitKey(1) & 0xFF
+        if key in (ord('q'), ord('Q'), 27):
+            self.get_logger().info('Saliendo...')
+            cv2.destroyAllWindows()
+            rclpy.shutdown()
+        elif key == ord(' ') and not self.auto_capture:
+            self._manual_trigger = True
 
     # ------------------------------------------------------------------
     def _detect(self, frame):
-        """Devuelve (found, vis_frame, corners_mean_px)."""
-        gray         = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        vis          = frame.copy()
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        vis  = frame.copy()
+        if self.use_charuco:
+            return self._detect_charuco(gray, vis)
+        return self._detect_checkerboard(gray, vis)
+
+    def _detect_checkerboard(self, gray, vis):
+        flags = (cv2.CALIB_CB_ADAPTIVE_THRESH |
+                 cv2.CALIB_CB_NORMALIZE_IMAGE  |
+                 cv2.CALIB_CB_FAST_CHECK)
+        ret, corners = cv2.findChessboardCorners(gray, self.board_size, flags)
+        corners_mean = None
+        if ret:
+            # Refinar a nivel sub-pixel: imprescindible para buena calibración
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+            corners  = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            cv2.drawChessboardCorners(vis, self.board_size, corners, ret)
+            corners_mean = corners.reshape(-1, 2).mean(axis=0)
+        return ret, vis, corners_mean
+
+    def _detect_charuco(self, gray, vis):
         found        = False
         corners_mean = None
-
-        if self.use_charuco:
-            if _LEGACY:
-                m_c, m_i, _ = cv2.aruco.detectMarkers(
-                    gray, self.aruco_dict, parameters=self.aruco_params)
-                if m_i is not None and len(m_i) >= 4:
-                    _, ch_c, ch_i = cv2.aruco.interpolateCornersCharuco(
-                        m_c, m_i, gray, self.board)
-                    if ch_i is not None and len(ch_i) >= 4:
-                        found = True
-                        cv2.aruco.drawDetectedMarkers(vis, m_c, m_i)
-                        cv2.aruco.drawDetectedCornersCharuco(vis, ch_c, ch_i)
-                        corners_mean = ch_c.reshape(-1, 2).mean(axis=0)
-            else:
-                ch_c, ch_i, _, _ = self.charuco_det.detectBoard(gray)
+        if _LEGACY:
+            m_c, m_i, _ = cv2.aruco.detectMarkers(
+                gray, self.aruco_dict, parameters=self.aruco_params)
+            if m_i is not None and len(m_i) >= 4:
+                _, ch_c, ch_i = cv2.aruco.interpolateCornersCharuco(
+                    m_c, m_i, gray, self.board)
                 if ch_i is not None and len(ch_i) >= 4:
                     found = True
+                    cv2.aruco.drawDetectedMarkers(vis, m_c, m_i)
                     cv2.aruco.drawDetectedCornersCharuco(vis, ch_c, ch_i)
                     corners_mean = ch_c.reshape(-1, 2).mean(axis=0)
         else:
-            ret, corners = cv2.findChessboardCorners(gray, self.board_size, None)
-            if ret:
+            ch_c, ch_i, _, _ = self.charuco_det.detectBoard(gray)
+            if ch_i is not None and len(ch_i) >= 4:
                 found = True
-                cv2.drawChessboardCorners(vis, self.board_size, corners, ret)
-                corners_mean = corners.reshape(-1, 2).mean(axis=0)
-
+                cv2.aruco.drawDetectedCornersCharuco(vis, ch_c, ch_i)
+                corners_mean = ch_c.reshape(-1, 2).mean(axis=0)
         return found, vis, corners_mean
 
     # ------------------------------------------------------------------
-    def _draw_overlay(self, vis, found, do_capture, reason_no, now):
-        h, w = vis.shape[:2]
-
-        # Barra de estado superior
+    def _draw_overlay(self, vis, found, do_capture, reason_no):
+        h, w  = vis.shape[:2]
         label = 'ChArUco' if self.use_charuco else 'Checkerboard'
+
         if found:
             if do_capture:
-                txt   = f'{label} — CAPTURANDO!'
-                color = (0, 255, 255)
+                txt, color = f'{label} — CAPTURANDO!', (0, 255, 255)
             elif reason_no:
-                txt   = f'{label} OK — {reason_no}'
-                color = (0, 200, 255)
+                txt, color = f'{label} OK — {reason_no}', (0, 200, 255)
             else:
-                txt   = f'{label} DETECTADO'
-                color = (0, 255, 0)
+                txt, color = f'{label} DETECTADO', (0, 255, 0)
         else:
-            txt   = f'Buscando {label}...'
-            color = (0, 50, 255)
+            txt, color = f'Buscando {label}...', (0, 50, 255)
+
         cv2.putText(vis, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
 
-        # Contador de capturas con barra de progreso
-        pct  = min(self.count / max(self.target_captures, 1), 1.0)
+        # Barra de progreso inferior
+        pct   = min(self.count / max(self.target_captures, 1), 1.0)
         bar_w = int((w - 20) * pct)
         cv2.rectangle(vis, (10, h - 35), (w - 10, h - 20), (60, 60, 60), -1)
         cv2.rectangle(vis, (10, h - 35), (10 + bar_w, h - 20), (0, 200, 80), -1)
@@ -264,16 +323,10 @@ class CalibCaptureNode(Node):
                     f'{self.count}/{self.target_captures} capturas  (min {self.min_captures})',
                     (10, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                     (0, 255, 100) if self.count >= self.min_captures else (200, 200, 200), 1)
+        cv2.putText(vis,
+                    'Variar: inclinado, rotado, esquinas del frame, cerca, lejos',
+                    (10, h - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (180, 180, 180), 1)
 
-        # Consejos en la parte inferior
-        tips = [
-            'Variar: inclinado, rotado, esquinas del frame, cerca, lejos',
-        ]
-        for i, tip in enumerate(tips):
-            cv2.putText(vis, tip, (10, h - 5 - 15 * i),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, (180, 180, 180), 1)
-
-        # Flash verde al capturar
         if do_capture:
             overlay = vis.copy()
             cv2.rectangle(overlay, (0, 0), (w, h), (0, 255, 0), -1)
@@ -299,26 +352,6 @@ class CalibCaptureNode(Node):
                 'Presiona Ctrl+C o cierra el nodo.')
 
     # ------------------------------------------------------------------
-    def _show_window(self, vis, found, corners_mean):
-        """Intenta mostrar ventana local; desactiva silenciosamente si falla."""
-        if not self.has_display:
-            return
-        try:
-            cv2.imshow('Calibracion (Q=salir)', vis)
-            key = cv2.waitKey(1) & 0xFF
-            if key in (ord('q'), ord('Q'), 27):
-                cv2.destroyAllWindows()
-                self.get_logger().info('Saliendo...')
-                rclpy.shutdown()
-            elif key == ord(' ') and not self.auto_capture and found:
-                self._save_frame(corners_mean)
-        except cv2.error:
-            self.has_display = False
-            self.get_logger().warn(
-                'Sin display local. Usa rqt_image_view para ver el preview:\n'
-                '  ros2 run rqt_image_view rqt_image_view /calib/preview'
-            )
-
     def destroy_node(self):
         if self.has_display:
             cv2.destroyAllWindows()

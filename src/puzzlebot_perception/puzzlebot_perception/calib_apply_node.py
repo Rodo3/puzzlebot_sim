@@ -11,9 +11,13 @@ calibración sin necesidad de leer el YAML directamente.
 
 Uso:
   ros2 run puzzlebot_perception calib_apply_node
-  ros2 run puzzlebot_perception calib_apply_node \\
-    --ros-args -p calib_yaml:=src/puzzlebot_bringup/config/camera_calibration.yaml \\
-               -p show_preview:=true
+
+  # Ver side-by-side original vs rectificada:
+  ros2 run puzzlebot_perception calib_apply_node --ros-args -p show_preview:=true
+
+  # Imagen rectificada en image_viewer_node:
+  ros2 run puzzlebot_perception image_viewer_node \\
+      --ros-args -p topic:=/cam_img_rect -p window_title:='Camara Rectificada'
 """
 
 import os
@@ -23,6 +27,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, Image, CameraInfo
 from cv_bridge import CvBridge
+from ament_index_python.packages import get_package_share_directory
 import cv2
 import numpy as np
 
@@ -31,10 +36,12 @@ class CalibApplyNode(Node):
     def __init__(self):
         super().__init__('calib_apply_node')
 
-        self.declare_parameter('image_topic',
-                               '/camera/image/compressed')
-        self.declare_parameter('calib_yaml',
-                               os.path.expanduser('~/calib_images/camera_calibration.yaml'))
+        _default_yaml = os.path.join(
+            get_package_share_directory('puzzlebot_bringup'),
+            'config', 'camera_calibration.yaml')
+
+        self.declare_parameter('image_topic', '/camera/image/compressed')
+        self.declare_parameter('calib_yaml',  _default_yaml)
         self.declare_parameter('frame_id',      'camera_link')
         self.declare_parameter('show_preview',  False)
 
