@@ -3,9 +3,12 @@
 <package format="3">
   <name>puzzlebot_voice_commands</name>
   <version>0.1.0</version>
-  <description>Offline voice command recognition using MFCC features and from-scratch ML models (KMeans codebook + Gaussian Naive Bayes). Training and evaluation only — no robot integration yet.</description>
+  <description>Offline voice command recognition using MFCC features and from-scratch ML models (KMeans codebook + HMM). Includes a ROS 2 inference node that subscribes to a trigger topic, records audio, and publishes predictions to /voice/* topics.</description>
   <maintainer email="rpz.dar14@gmail.com">rpzda</maintainer>
   <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
