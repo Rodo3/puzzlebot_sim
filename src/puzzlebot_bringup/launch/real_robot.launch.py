@@ -5,47 +5,6 @@ Corre completamente en el PC del operador. La Jetson solo publica sensores;
 todo el cómputo (odometría, SLAM, percepción, control) ocurre en el PC.
 
 ════════════════════════════════════════════════════════════════
- PASO 1 — EN LA JETSON (via SSH, una terminal por servicio)
-════════════════════════════════════════════════════════════════
-
-  # Mismo ROS_DOMAIN_ID en Jetson y PC (añadir al ~/.bashrc de ambas):
-  export ROS_DOMAIN_ID=42
-
-── Terminal 1: micro-ROS agent ───────────────────────────────
-  ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 921600
-
-── Terminal 2: LiDAR (sllidar directo, sin micro-ROS) ────────
-  cd ~/sllidar_ros2-main && source install/setup.bash
-  ros2 launch sllidar_ros2 sllidar_a1_launch.py frame_id:=lidar_link
-
-── Terminal 3: Cámara ────────────────────────────────────────
-  cd ~/ros2_ws && source install/setup.bash
-  ros2 run <camera_package> <camera_node>
-
-════════════════════════════════════════════════════════════════
- PASO 2 — EN EL PC
-════════════════════════════════════════════════════════════════
-
-  cd ~/Documents/puzzlebot_sim && source install/setup.bash
-
-  ── SESIÓN 1: Mapeo (sin scan_matching) ─────────────────────
-  ros2 launch puzzlebot_bringup real_robot.launch.py \\
-    avoidance:=false viewer:=false lidar_topic:=/scan
-
-  Cuando el mapa esté bien (RViz), guárdalo desde otra terminal:
-    ros2 run nav2_map_server map_saver_cli -f ~/puzzlebot_map
-  Convierte a PNG para MCL:
-    python3 -c "
-    from PIL import Image
-    Image.open('/home/jesus/puzzlebot_map.pgm').save('/home/jesus/puzzlebot_map.png')
-    print('Mapa guardado')"
-  Copia map_origin_x/y y map_resolution del .yaml al mcl_params.yaml.
-
-  ── SESIÓN 2: Localización con MCL ──────────────────────────
-  ros2 launch puzzlebot_bringup real_robot.launch.py \\
-    slam:=false mcl:=true avoidance:=false viewer:=false lidar_topic:=/scan
-
-════════════════════════════════════════════════════════════════
  ARGUMENTOS
 ════════════════════════════════════════════════════════════════
 
