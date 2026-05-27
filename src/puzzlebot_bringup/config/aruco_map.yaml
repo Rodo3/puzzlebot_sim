@@ -1,63 +1,63 @@
 # Mapa de marcadores ArUco — Pista física
 #
 # Origen (0,0) = esquina inferior izquierda de la pista
-# Unidades: metros
+# Unidades: metros / radianes
 #
-# Convención de yaw (dirección en que apunta la cara del marker = hacia dónde mira la cámara):
-#   0.0    = marker apunta en +X (este)
-#   1.5708 = marker apunta en +Y (norte)
-#  -1.5708 = marker apunta en -Y (sur)
-#   3.1416 = marker apunta en -X (oeste)
+# CONVENCIÓN DE EJES (obj_pts: Y+ = arriba del marker, Z+ hacia cámara):
 #
-# Dimensiones de la pista:
-#   Ancho: 3.76 m (eje X)
-#   Alto:  4.86 m (eje Y)
-#   Marker size: 0.10 m (10 cm)
+#   Para markers montados rectos en pared, siempre roll=π/2.
+#   Con roll=π/2, la dirección Z en el mapa = [sin(yaw), -cos(yaw), 0]:
+#       yaw =  0     → Z apunta al sur  (-Y)  ← pared norte
+#       yaw =  π/2   → Z apunta al este (+X)  ← pared oeste (izq)
+#       yaw = -π/2   → Z apunta al oeste(-X)  ← pared este (der)
+#       yaw =  π     → Z apunta al norte(+Y)  ← pared sur
 #
-# Para DICT_4X4_50, IDs válidos: 0–49
+# Dimensiones de la pista: 3.76 m (X) × 4.86 m (Y)
+# Marker size físico: 0.10 m
 
 aruco_markers:
-  # ID 1 — Pared norte (top), centro, mirando al sur
+
+  # ── ID 1 — Pared norte, centro, mirando al sur ────────────────────────
   1:
     x:      1.88
     y:      4.86
     z:      0.15
-    roll:   0.0
+    roll:   1.5708    # π/2
     pitch:  0.0
-    yaw:   -1.5708   # facing south (-Y)
+    yaw:    0.0       # Z → sur (-Y)
 
-  # ID 0 — Pared oeste (izquierda), parte alta, mirando al este
+  # ── ID 0 — Pared oeste (izq), parte alta, mirando al este ────────────
   0:
     x:      0.0
     y:      3.90      # 4.86 - 1.01 + 0.05
     z:      0.18
-    roll:   0.0
+    roll:   1.5708
     pitch:  0.0
-    yaw:    0.0       # facing east (+X)
+    yaw:    1.5708    # π/2 → Z apunta al este (+X)
 
-  # ID 4 — Pared oeste (izquierda), parte baja, mirando al este
+  # ── ID 4 — Pared oeste (izq), parte baja, mirando al este ────────────
   4:
     x:      0.0
     y:      1.04      # 0.99 + 0.05
     z:      0.18
-    roll:   0.0
+    roll:   1.5708
     pitch:  0.0
-    yaw:    0.0       # facing east (+X)
+    yaw:    1.5708    # π/2 → Z apunta al este (+X)
 
-  # ID 2 — Pared este (derecha), parte alta, mirando al oeste
+  # ── ID 2 — Pared este (der), parte alta, mirando al oeste ────────────
   2:
     x:      3.76
-    y:      3.90      # 4.86 - 1.01 + 0.05
+    y:      3.90
     z:      0.18
-    roll:   0.0
+    roll:   1.5708
     pitch:  0.0
-    yaw:    3.1416    # facing west (-X)
+    yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)
 
-  # ID 3 — Pared este (derecha), parte baja, mirando al oeste
+  # ── ID 3 — Pared este (der), parte baja, mirando al oeste ────────────
   3:
     x:      3.76
-    y:      1.04      # 0.99 + 0.05
+    y:      1.04
     z:      0.18
-    roll:   0.0
+    roll:   1.5708
     pitch:  0.0
-    yaw:    3.1416    # facing west (-X)
+    yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)

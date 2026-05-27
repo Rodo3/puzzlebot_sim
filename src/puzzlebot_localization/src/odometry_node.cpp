@@ -14,8 +14,8 @@ public:
   OdometryNode() : Node("odometry_node"), x_(0.0), y_(0.0), theta_(0.0),
                    vr_(0.0), vl_(0.0), have_input_(false)
   {
-    declare_parameter("wheel_radius", 0.05);
-    declare_parameter("wheel_separation", 0.19);
+    declare_parameter("wheel_radius", 0.0425);
+    declare_parameter("wheel_separation", 0.172);
     declare_parameter("input_source", "encoders");
     declare_parameter("odom_topic", "odom_raw");
     declare_parameter("odom_frame", "odom");
@@ -41,15 +41,17 @@ public:
         "joint_states", 10,
         std::bind(&OdometryNode::joint_states_cb, this, std::placeholders::_1));
     } else if (input_source_ == "encoders") {
+      // micro-ROS siempre publica BEST_EFFORT — usar SensorDataQoS para compatibilidad
+      auto enc_qos = rclcpp::SensorDataQoS();
       sub_r_ = create_subscription<std_msgs::msg::Float32>(
-        "velocity_enc_r", 10,
+        "velocity_enc_r", enc_qos,
         [this](const std_msgs::msg::Float32::SharedPtr msg) {
           vr_ = msg->data;
           mark_input();
         });
 
       sub_l_ = create_subscription<std_msgs::msg::Float32>(
-        "velocity_enc_l", 10,
+        "velocity_enc_l", enc_qos,
         [this](const std_msgs::msg::Float32::SharedPtr msg) {
           vl_ = msg->data;
           mark_input();
@@ -60,14 +62,15 @@ public:
         "Unknown input_source '%s'; falling back to encoder topics",
         input_source_.c_str());
       input_source_ = "encoders";
+      auto enc_qos = rclcpp::SensorDataQoS();
       sub_r_ = create_subscription<std_msgs::msg::Float32>(
-        "velocity_enc_r", 10,
+        "velocity_enc_r", enc_qos,
         [this](const std_msgs::msg::Float32::SharedPtr msg) {
           vr_ = msg->data;
           mark_input();
         });
       sub_l_ = create_subscription<std_msgs::msg::Float32>(
-        "velocity_enc_l", 10,
+        "velocity_enc_l", enc_qos,
         [this](const std_msgs::msg::Float32::SharedPtr msg) {
           vl_ = msg->data;
           mark_input();
@@ -155,12 +158,14 @@ private:
     double v     = (vR + vL) / 2.0;
     double omega = (vR - vL) / l_;
 
-    // Discrete integration
+    // Integración de punto medio (arco de círculo exacto para drive diferencial).
+    // Euler puro acumula error O(delta_theta²) en curvas; el punto medio lo reduce a O(delta_theta³).
     double delta_d     = v * dt;
     double delta_theta = omega * dt;
+    double theta_mid   = theta_ + delta_theta * 0.5;
 
-    x_     += delta_d * std::cos(theta_);
-    y_     += delta_d * std::sin(theta_);
+    x_     += delta_d * std::cos(theta_mid);
+    y_     += delta_d * std::sin(theta_mid);
     theta_ += delta_theta;
 
     // Normalise angle to [-π, π]

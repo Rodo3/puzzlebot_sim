@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from puzzlebot_testing.odometry_validator import main
+main()

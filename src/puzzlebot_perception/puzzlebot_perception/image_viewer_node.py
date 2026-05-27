@@ -85,6 +85,8 @@ class ImageViewerNode(Node):
         self.fps_display = 0.0
         self.frame_count = 0
 
+        self._latest_frame = None   # frame más reciente; imshow ocurre en el timer
+
         cv2.namedWindow(self.title, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(self.title, win_w, win_h)
 
@@ -170,10 +172,18 @@ class ImageViewerNode(Node):
                         (8, 68), cv2.FONT_HERSHEY_SIMPLEX,
                         0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
-        cv2.imshow(self.title, frame)
+        # No llamar cv2.imshow aquí: ejecutar imshow desde el callback de imagen
+        # bloquea el executor (GIL + operaciones de ventana Qt) y retrasa todos
+        # los demás callbacks.  Solo almacenamos el frame; el timer lo muestra.
+        self._latest_frame = frame
 
     # ------------------------------------------------------------------
     def _poll_window(self):
+        # imshow + waitKey se hacen juntos en el timer (~30 Hz) para no
+        # bloquear el executor durante el procesamiento de imágenes.
+        if self._latest_frame is not None:
+            cv2.imshow(self.title, self._latest_frame)
+            self._latest_frame = None
         key = cv2.waitKey(1) & 0xFF
         if key in (ord('q'), ord('Q'), 27):
             self.get_logger().info('Cerrando viewer...')

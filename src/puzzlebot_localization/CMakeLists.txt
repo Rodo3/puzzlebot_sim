@@ -30,6 +30,7 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
+  scripts/aruco_map_odom
   scripts/dead_reckoning_debug
   scripts/ground_truth_odom
   scripts/scan_restamper

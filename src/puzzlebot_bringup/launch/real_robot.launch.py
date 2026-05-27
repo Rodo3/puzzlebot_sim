@@ -11,57 +11,54 @@ todo el cómputo (odometría, SLAM, percepción, control) ocurre en el PC.
   # Mismo ROS_DOMAIN_ID en Jetson y PC (añadir al ~/.bashrc de ambas):
   export ROS_DOMAIN_ID=42
 
-  # Sincronizar reloj (crítico para SLAM):
-  sudo chronyc makestep
-
-── Terminal 1: micro-ROS agent (MCU ↔ ROS 2) ────────────────
+── Terminal 1: micro-ROS agent ───────────────────────────────
   ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 921600
-  # Publica: /VelocityEncR, /VelocityEncL  (std_msgs/Float32)
-  # Recibe:  /cmd_vel                       (geometry_msgs/Twist)
 
-── Terminal 2: LiDAR (RPLIDAR A1) ────────────────────────────
-  # SOLO si micro-ROS agent NO está corriendo (el MCU ya lee el LiDAR):
+── Terminal 2: LiDAR (sllidar directo, sin micro-ROS) ────────
   cd ~/sllidar_ros2-main && source install/setup.bash
   ros2 launch sllidar_ros2 sllidar_a1_launch.py frame_id:=lidar_link
-  # Publica: /scan  (sensor_msgs/LaserScan, ~10 Hz)
 
 ── Terminal 3: Cámara ────────────────────────────────────────
   cd ~/ros2_ws && source install/setup.bash
   ros2 run <camera_package> <camera_node>
-  # Publica: /camera/image/compressed  (CompressedImage, JPEG ~30 Hz)
 
 ════════════════════════════════════════════════════════════════
- PASO 2 — EN EL PC (workspace local)
+ PASO 2 — EN EL PC
 ════════════════════════════════════════════════════════════════
 
-  cd ~/Documents/puzzlebot_sim
-  source install/setup.bash
+  cd ~/Documents/puzzlebot_sim && source install/setup.bash
 
-  # Stack completo (default):
-  ros2 launch puzzlebot_bringup real_robot.launch.py
+  ── SESIÓN 1: Mapeo (sin scan_matching) ─────────────────────
+  ros2 launch puzzlebot_bringup real_robot.launch.py \\
+    avoidance:=false viewer:=false lidar_topic:=/scan
 
-  # Solo mapeo con teleop (sin controlador autónomo):
-  ros2 launch puzzlebot_bringup real_robot.launch.py avoidance:=false aruco:=false
+  Cuando el mapa esté bien (RViz), guárdalo desde otra terminal:
+    ros2 run nav2_map_server map_saver_cli -f ~/puzzlebot_map
+  Convierte a PNG para MCL:
+    python3 -c "
+    from PIL import Image
+    Image.open('/home/jesus/puzzlebot_map.pgm').save('/home/jesus/puzzlebot_map.png')
+    print('Mapa guardado')"
+  Copia map_origin_x/y y map_resolution del .yaml al mcl_params.yaml.
 
-  # Sin ArUco / sin Kalman (odometría pura):
-  ros2 launch puzzlebot_bringup real_robot.launch.py aruco:=false
-
-  # Con viewer de cámara rectificada:
-  ros2 launch puzzlebot_bringup real_robot.launch.py viewer:=true
-
-  # LiDAR directo desde sllidar (sin micro-ROS agent):
-  ros2 launch puzzlebot_bringup real_robot.launch.py lidar_topic:=/scan
+  ── SESIÓN 2: Localización con MCL ──────────────────────────
+  ros2 launch puzzlebot_bringup real_robot.launch.py \\
+    slam:=false mcl:=true avoidance:=false viewer:=false lidar_topic:=/scan
 
 ════════════════════════════════════════════════════════════════
  ARGUMENTOS
 ════════════════════════════════════════════════════════════════
 
-  slam        [true]   slam_node: construye /map desde /scan + /odom
-  avoidance   [true]   obstacle_avoidance_node: frena ante obstáculos < 0.3 m
-  aruco       [true]   aruco_node + kalman_filter_node: corrección de pose con marcadores
-  viewer      [false]  image_viewer_node con corrección de distorsión integrada
-  rviz        [true]   Abre RViz con la config del robot
-  lidar_topic [/Lidar] Tópico LiDAR; usa /scan si sllidar corre directo en Jetson
+  slam        [true]   slam_node: construye /map en tiempo real
+  mcl         [false]  MCL: localización con mapa PNG guardado
+                       (usa slam:=false mcl:=true en sesión 2)
+  avoidance   [false]  obstacle_avoidance_node
+  aruco       [true]   aruco_node + aruco_map_odom (publica map→odom)
+  viewer      [false]  image_viewer_node con corrección de distorsión
+  rviz        [true]   RViz2
+  lidar_topic [/Lidar] /Lidar (micro-ROS) o /scan (sllidar directo)
+  invert_lidar [false] Invierte izquierda/derecha si el LiDAR está espejeado
+  lidar_yaw_offset [3.14159265359] Rota el scan; π corrige frente/atrás invertido
 """
 
 import os
@@ -72,6 +69,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -82,7 +80,7 @@ def generate_launch_description():
     controller_cfg  = os.path.join(bringup_pkg, 'config', 'controller_params.yaml')
     robot_cfg       = os.path.join(bringup_pkg, 'config', 'robot_params.yaml')
     slam_cfg        = os.path.join(bringup_pkg, 'config', 'slam_params.yaml')
-    kalman_cfg      = os.path.join(bringup_pkg, 'config', 'kalman_params.yaml')
+    mcl_cfg         = os.path.join(bringup_pkg, 'config', 'mcl_params.yaml')
     calib_yaml      = os.path.join(bringup_pkg, 'config', 'camera_calibration.yaml')
     extrinsics_yaml = os.path.join(bringup_pkg, 'config', 'camera_extrinsics.yaml')
     aruco_map_yaml  = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
@@ -94,24 +92,39 @@ def generate_launch_description():
 
     # ── Argumentos del launch ─────────────────────────────────────────────
     arg_slam        = DeclareLaunchArgument('slam',        default_value='true',
-                          description='Enable SLAM: slam_node builds /map from /scan + /odom')
+                          description='Enable slam_node (mapeo). Usa slam:=false con mcl:=true.')
+    arg_mcl         = DeclareLaunchArgument('mcl',         default_value='false',
+                          description='Enable MCL (localización con mapa PNG). Usa slam:=false mcl:=true.')
     arg_avoidance   = DeclareLaunchArgument('avoidance',   default_value='false',
-                          description='Enable obstacle_avoidance_node (needs LiDAR)')
+                          description='Enable obstacle_avoidance_node')
     arg_aruco       = DeclareLaunchArgument('aruco',       default_value='true',
-                          description='Enable aruco_node + kalman_filter_node for ArUco pose corrections')
-    arg_viewer      = DeclareLaunchArgument('viewer',      default_value='true',
-                          description='Enable image_viewer_node with distortion correction')
+                          description='Enable aruco_node + aruco_map_odom')
+    arg_viewer      = DeclareLaunchArgument('viewer',      default_value='false',
+                          description='Enable image_viewer_node con corrección de distorsión')
     arg_rviz        = DeclareLaunchArgument('rviz',        default_value='true',
-                          description='Open RViz2 for visualization')
+                          description='Open RViz2')
     arg_lidar_topic = DeclareLaunchArgument('lidar_topic', default_value='/Lidar',
-                          description='LiDAR source topic (/Lidar via micro-ROS, /scan via sllidar direct)')
+                          description='Tópico LiDAR: /Lidar (micro-ROS) o /scan (sllidar directo)')
+    arg_invert_lidar = DeclareLaunchArgument('invert_lidar', default_value='false',
+                          description='Invert LaserScan angles when left/right are mirrored')
+    arg_lidar_yaw_offset = DeclareLaunchArgument('lidar_yaw_offset', default_value='3.14159265359',
+                          description='LaserScan angular offset in radians; pi flips front/back')
 
     slam_en      = LaunchConfiguration('slam')
+    mcl_en       = LaunchConfiguration('mcl')
     avoidance_en = LaunchConfiguration('avoidance')
     aruco_en     = LaunchConfiguration('aruco')
     viewer_en    = LaunchConfiguration('viewer')
     rviz_en      = LaunchConfiguration('rviz')
     lidar_topic  = LaunchConfiguration('lidar_topic')
+    invert_lidar = LaunchConfiguration('invert_lidar')
+    lidar_yaw_offset = LaunchConfiguration('lidar_yaw_offset')
+    slam_publishes_map_odom = ParameterValue(
+        PythonExpression([
+            "'", aruco_en, "' == 'false' and '", mcl_en, "' == 'false'"
+        ]),
+        value_type=bool,
+    )
 
     # ── 1. Robot State Publisher ──────────────────────────────────────────
     rsp = Node(
@@ -125,18 +138,25 @@ def generate_launch_description():
     )
 
     # ── 2. TF estáticos ───────────────────────────────────────────────────
-    camera_tf = Node(
+    # camera_optical_tf: camera_link (ROS: x frente, y izquierda, z arriba)
+    # → camera_optical_frame (OpenCV: x derecha, y abajo, z frente).
+    # aruco_node usa esta misma conversión internamente para solvePnP.
+    camera_optical_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        name='camera_tf',
-        arguments=['0.08', '0.00', '0.12',
-                   '0.0',  '0.0',  '0.0',
-                   'base_link', 'camera_link'],
+        name='camera_optical_tf',
+        arguments=['0.0', '0.0', '0.0',
+                   '-1.57079632679', '0.0', '-1.57079632679',
+                   'camera_link', 'camera_optical_frame'],
         output='screen',
     )
 
-    # El sllidar publica con frame_id='laser' por default.
-    # Este TF conecta 'laser' con 'lidar_link' (que está en el URDF).
+    # laser_tf: lidar_link → laser
+    #   El driver sllidar_ros2 publica scans con frame_id='laser' por default.
+    #   Este TF conecta ese frame con lidar_link (que viene del URDF).
+    #   scan_restamper reescribe el frame_id a 'lidar_link', pero el TF tree
+    #   debe contener 'laser' de todas formas para que tf2 no reporte errores.
+    #   Si el LiDAR tiene un offset rotacional (montado girado), ajustar yaw aquí.
     laser_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -148,8 +168,8 @@ def generate_launch_description():
     )
 
     # ── 3. Odometría de ruedas (C++) ──────────────────────────────────────
-    # Siempre publica a /odom_raw con publish_tf=false.
-    # El kalman_filter_node es el dueño de /odom y del TF odom→base_footprint.
+    # Dueña del frame continuo odom → base_footprint. No debe recibir
+    # correcciones globales; esas viven en map → odom.
     odometry = Node(
         package='puzzlebot_localization',
         executable='odometry_node',
@@ -158,8 +178,8 @@ def generate_launch_description():
         parameters=[robot_cfg, {
             'use_sim_time': False,
             'input_source': 'encoders',
-            'odom_topic':   '/odom_raw',
-            'publish_tf':   False,
+            'odom_topic':   '/odom',
+            'publish_tf':   True,
         }],
         remappings=[
             ('velocity_enc_r', '/VelocityEncR'),
@@ -167,21 +187,33 @@ def generate_launch_description():
         ],
     )
 
-    # ── 4. Kalman Filter EKF (C++) ────────────────────────────────────────
-    # Suscribe: /odom_raw (predicción) + /aruco/poses (corrección, opcional).
-    # Publica:  /odom + TF odom→base_footprint.
-    # Sin aruco activo degrada a dead-reckoning, lo cual es correcto.
-    kalman = Node(
+    # ── 4. ArUco map→odom correction ─────────────────────────────────────
+    # Convierte /aruco/pose (pose absoluta en map) + /odom (ruedas) en una
+    # corrección global map → odom. Se desactiva automáticamente en modo MCL,
+    # porque MCL también publica map → odom.
+    aruco_map_odom = Node(
         package='puzzlebot_localization',
-        executable='kalman_filter_node',
-        name='kalman_filter_node',
+        executable='aruco_map_odom',
+        name='aruco_map_odom',
         output='screen',
-        parameters=[kalman_cfg, {'use_sim_time': False}],
+        parameters=[{
+            'use_sim_time': False,
+            'odom_topic': '/odom',
+            'aruco_pose_topic': '/aruco/pose',
+            'map_to_odom_topic': '/map_to_odom',
+            'correction_alpha': 0.35,
+            'map_min_x': 0.0,
+            'map_max_x': 3.76,
+            'map_min_y': 0.0,
+            'map_max_y': 4.86,
+            'map_bounds_margin': 0.25,
+        }],
+        condition=IfCondition(PythonExpression([
+            "'", aruco_en, "' == 'true' and '", mcl_en, "' == 'false'"
+        ])),
     )
 
     # ── 5. ArUco pose estimation ──────────────────────────────────────────
-    # Suscribe: /camera/image/compressed + carga camera_calibration.yaml propio.
-    # Publica:  /aruco/poses (PoseArray) → consumido por kalman_filter_node.
     aruco = Node(
         package='puzzlebot_perception',
         executable='aruco_node',
@@ -193,13 +225,19 @@ def generate_launch_description():
             'camera_info_file':  calib_yaml,
             'extrinsics_file':   extrinsics_yaml,
             'marker_map_file':   aruco_map_yaml,
+            'marker_length':     0.10,
+            'max_detection_distance': 1.8,
+            'max_incidence_angle_deg': 65.0,
+            'map_min_x': 0.0,
+            'map_max_x': 3.76,
+            'map_min_y': 0.0,
+            'map_max_y': 4.86,
+            'map_bounds_margin': 0.25,
         }],
         condition=IfCondition(aruco_en),
     )
 
-    # ── 6. Camera viewer con corrección de distorsión ─────────────────────
-    # Opcional (viewer:=true). Aplica calibración internamente — no necesita
-    # calib_apply_node corriendo en paralelo.
+    # ── 6. Camera viewer ─────────────────────────────────────────────────
     viewer = Node(
         package='puzzlebot_perception',
         executable='image_viewer_node',
@@ -212,58 +250,56 @@ def generate_launch_description():
             'calib_yaml':    calib_yaml,
             'window_title':  'Puzzlebot — Camara Rectificada',
         }],
+        additional_env={'QT_QPA_PLATFORM': 'xcb'},
         condition=IfCondition(viewer_en),
     )
 
-    # ── 7. Scan restamper ────────────────────────────────────────────────
-    # Lee el LiDAR de la Jetson (timestamp incorrecto) y publica
-    # /scan_stamped con el reloj del PC y frame_id=lidar_link.
-    # Usar un topic de salida distinto evita conflictos si el LiDAR
-    # ya publica en /scan.
+    # ── 7. Scan restamper ─────────────────────────────────────────────────
     scan_restamper = Node(
         package='puzzlebot_localization',
         executable='scan_restamper',
         name='scan_restamper',
         output='screen',
         parameters=[{
-            'input_topic':  lidar_topic,   # /scan o /Lidar desde la Jetson
-            'target_frame': 'lidar_link',  # frame correcto del URDF
+            'input_topic':  lidar_topic,
+            'target_frame': 'lidar_link',
+            'invert_angles': invert_lidar,
+            'angle_offset_rad': lidar_yaw_offset,
         }],
     )
 
-    # ── 8. SLAM mapping ───────────────────────────────────────────────────
-    # Suscribe /scan_stamped (re-sellado por scan_restamper).
+    # ── 8a. SLAM mapping (sesión 1) ───────────────────────────────────────
+    # scan_matching_enabled: false en slam_params.yaml para mapeo limpio.
+    # El nodo construye /map usando /odom continuo y la corrección externa
+    # /map_to_odom cuando ArUco está activo. No publica map→odom en real_robot
+    # cuando aruco_map_odom o MCL son los dueños de esa transformada.
     slam = Node(
         package='puzzlebot_slam',
         executable='slam_node',
         name='slam_node',
         output='screen',
-        parameters=[slam_cfg, {'use_sim_time': False}],
+        parameters=[slam_cfg, {
+            'use_sim_time': False,
+            'publish_map_odom_tf': slam_publishes_map_odom,
+        }],
         remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(slam_en),
     )
 
-    # ── 8. PD Controller ─────────────────────────────────────────────────
-    # Lee /odom + /goal_pose, publica /cmd_vel_in.
-    # Con avoidance activo: obstacle_avoidance_node filtra /cmd_vel_in → /cmd_vel.
-    # Sin avoidance: pd_controller publica directo a /cmd_vel.
-    pd_controller = Node(
-        package='puzzlebot_controller',
-        executable='pd_controller_node',
-        name='pd_controller_node',
+    # ── 8b. MCL localización (sesión 2) ──────────────────────────────────
+    # Requiere mapa PNG guardado con map_saver + convertido.
+    # Publica map→odom TF a partir de partículas contra el mapa guardado.
+    # IMPORTANTE: correr con slam:=false mcl:=true para que no haya
+    # conflicto de dos nodos publicando el TF map→odom.
+    mcl = Node(
+        package='puzzlebot_slam',
+        executable='mcl',
+        name='mcl',
         output='screen',
-        parameters=[controller_cfg, {'use_sim_time': False}],
-        condition=IfCondition(avoidance_en),
-    )
-
-    pd_controller_direct = Node(
-        package='puzzlebot_controller',
-        executable='pd_controller_node',
-        name='pd_controller_node',
-        output='screen',
-        parameters=[controller_cfg, {'use_sim_time': False}],
-        remappings=[('/cmd_vel_in', '/cmd_vel')],
-        condition=IfCondition(PythonExpression(["'", avoidance_en, "' == 'false'"])),
+        parameters=[mcl_cfg, {'use_sim_time': False}],
+        remappings=[('/scan', '/scan_stamped'),   # usa el scan re-sellado
+                    ('/odom', '/odom')],           # odom continuo de ruedas
+        condition=IfCondition(mcl_en),
     )
 
     # ── 9. Obstacle Avoidance ─────────────────────────────────────────────
@@ -292,25 +328,27 @@ def generate_launch_description():
     return LaunchDescription([
         # Argumentos
         arg_slam,
+        arg_mcl,
         arg_avoidance,
         arg_aruco,
         arg_viewer,
         arg_rviz,
         arg_lidar_topic,
+        arg_invert_lidar,
+        arg_lidar_yaw_offset,
         # Infraestructura base (siempre activos)
         rsp,
-        camera_tf,
+        camera_optical_tf,
         laser_tf,
         scan_restamper,
         odometry,
-        kalman,
+        aruco_map_odom,
         # Percepción (condicional)
         aruco,
         viewer,
-        # Navegación
+        # Navegación / SLAM
         slam,
-        pd_controller,
-        pd_controller_direct,
+        mcl,
         obstacle_avoidance,
         # Visualización
         rviz,

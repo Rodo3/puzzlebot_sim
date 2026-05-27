@@ -8,6 +8,10 @@ ya publica en /scan. El slam_node y obstacle_avoidance suscriben /scan_stamped.
 Parámetros:
   input_topic  — topic raw de la Jetson (default: /scan)
   target_frame — frame_id destino en el mensaje (default: lidar_link)
+  invert_angles — invierte izquierda/derecha cuando el driver o montaje del
+                  LiDAR publica los ángulos espejeados.
+  angle_offset_rad — rota todos los rayos del scan en radianes. Usa 3.14159
+                     cuando frente/atrás están invertidos.
 """
 
 import rclpy
@@ -22,9 +26,13 @@ class ScanRestamper(Node):
 
         self.declare_parameter('input_topic',  '/scan')
         self.declare_parameter('target_frame', 'lidar_link')
+        self.declare_parameter('invert_angles', False)
+        self.declare_parameter('angle_offset_rad', 0.0)
 
         in_topic     = self.get_parameter('input_topic').value
         self.frame   = self.get_parameter('target_frame').value
+        self.invert_angles = self.get_parameter('invert_angles').value
+        self.angle_offset = float(self.get_parameter('angle_offset_rad').value)
 
         output_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         self.pub = self.create_publisher(LaserScan, '/scan_stamped', output_qos)
@@ -33,11 +41,22 @@ class ScanRestamper(Node):
 
         self.get_logger().info(
             f'scan_restamper: {in_topic} → /scan_stamped  '
-            f'frame_id={self.frame}')
+            f'frame_id={self.frame}  invert_angles={self.invert_angles}  '
+            f'angle_offset_rad={self.angle_offset:.3f}')
 
     def _cb(self, msg: LaserScan):
         msg.header.stamp    = self.get_clock().now().to_msg()
         msg.header.frame_id = self.frame
+        if self.invert_angles:
+            msg.ranges = list(reversed(msg.ranges))
+            msg.intensities = list(reversed(msg.intensities))
+            old_min = msg.angle_min
+            old_max = msg.angle_max
+            msg.angle_min = -old_max
+            msg.angle_max = -old_min
+        if self.angle_offset != 0.0:
+            msg.angle_min += self.angle_offset
+            msg.angle_max += self.angle_offset
         self.pub.publish(msg)
 
 

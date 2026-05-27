@@ -1,11 +1,12 @@
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
-#include <geometry_msgs/msg/pose_array.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/utils.h>
 #include <array>
 #include <cmath>
+#include <string>
 
 // Simple 3x3 matrix operations (row-major)
 using Mat3 = std::array<double, 9>;
@@ -54,10 +55,21 @@ public:
     declare_parameter("meas_noise_y",        0.05);
     declare_parameter("meas_noise_theta",    0.01);
     declare_parameter("initial_covariance",  0.1);
+    declare_parameter("initial_x",     0.0);
+    declare_parameter("initial_y",     0.0);
+    declare_parameter("initial_theta", 0.0);
+    // Si true, el Kalman ignora /odom_raw hasta recibir el primer /aruco/pose
+    // válido y lo usa como estado inicial en lugar de initial_x/y/theta.
+    // Recomendado cuando el robot arranca mirando un marcador conocido.
+    declare_parameter("init_from_aruco", true);
 
     double ic = get_parameter("initial_covariance").as_double();
-    x_  = {0.0, 0.0, 0.0};
+    x_  = {get_parameter("initial_x").as_double(),
+           get_parameter("initial_y").as_double(),
+           get_parameter("initial_theta").as_double()};
     P_  = {ic,0,0, 0,ic,0, 0,0,ic};
+    init_from_aruco_ = get_parameter("init_from_aruco").as_bool();
+    initialized_     = !init_from_aruco_;   // si init_from_aruco=false, ya está listo
 
     double qx  = get_parameter("process_noise_x").as_double();
     double qy  = get_parameter("process_noise_y").as_double();
@@ -73,21 +85,35 @@ public:
       "/odom_raw", 10,
       std::bind(&KalmanFilterNode::odom_cb, this, std::placeholders::_1));
 
-    sub_aruco_ = create_subscription<geometry_msgs::msg::PoseArray>(
-      "/aruco/poses", 10,
+    sub_aruco_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      "/aruco/pose", 10,
       std::bind(&KalmanFilterNode::aruco_cb, this, std::placeholders::_1));
 
     pub_odom_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     last_time_ = now();
-    RCLCPP_INFO(get_logger(), "kalman_filter_node started");
+    if (init_from_aruco_) {
+      RCLCPP_INFO(get_logger(),
+        "kalman_filter_node iniciando — esperando primer ArUco para establecer pose...");
+    } else {
+      RCLCPP_INFO(get_logger(),
+        "kalman_filter_node started — pose inicial: x=%.3f y=%.3f theta=%.3f rad",
+        x_[0], x_[1], x_[2]);
+    }
   }
 
 private:
   void odom_cb(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
     auto t = rclcpp::Time(msg->header.stamp);
+    // Mientras esperamos el primer ArUco: actualizar last_time_ para que
+    // cuando llegue el ArUco y empecemos a fusionar, el dt no sea enorme.
+    if (!initialized_) {
+      last_time_ = t;
+      return;
+    }
+
     double dt = (t - last_time_).seconds();
     last_time_ = t;
     if (dt <= 0.0 || dt > 1.0) { publish(); return; }
@@ -113,18 +139,52 @@ private:
     publish();
   }
 
-  void aruco_cb(const geometry_msgs::msg::PoseArray::SharedPtr msg)
+  void aruco_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
   {
-    if (msg->poses.empty()) return;
-
-    // Use first detected marker as a direct pose measurement
-    const auto & p = msg->poses[0];
+    const auto & p = msg->pose.pose;
     tf2::Quaternion q(p.orientation.x, p.orientation.y,
                       p.orientation.z, p.orientation.w);
     double z[3] = {p.position.x, p.position.y, tf2::getYaw(q)};
 
-    // H = I (direct measurement), S = P + R, K = P * S^-1
-    Mat3 S = mat_add(P_, R_);
+    const auto & cov = msg->pose.covariance;
+    // Validar covarianza — si es degenerada ignorar el mensaje
+    if (cov[0] <= 1e-9 || cov[7] <= 1e-9) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+        "ArUco: covarianza degenerada — ignorando");
+      return;
+    }
+
+    // ── MODO BOOTSTRAP: primer ArUco inicializa el estado ─────────────────
+    // En lugar de fusionar (que requiere un estado previo válido), se hace
+    // un reset directo usando la pose ArUco como verdad absoluta.
+    // La covarianza inicial se toma de la covarianza del mensaje ArUco.
+    if (!initialized_) {
+      x_[0] = z[0];
+      x_[1] = z[1];
+      x_[2] = z[2];
+      P_ = {cov[0],  0.0,     0.0,
+            0.0,     cov[7],  0.0,
+            0.0,     0.0,     cov[35] > 1e-9 ? cov[35] : R_[8]};
+      initialized_ = true;
+      last_time_   = now();   // reset del reloj para el primer dt de odom
+      RCLCPP_INFO(get_logger(),
+        "✅ Pose inicial desde ArUco: x=%.3f y=%.3f theta=%.3f rad  "
+        "std=(%.3f, %.3f) m",
+        x_[0], x_[1], x_[2], std::sqrt(cov[0]), std::sqrt(cov[7]));
+      publish();
+      return;
+    }
+
+    // ── MODO NORMAL: fusión EKF con la corrección ArUco ───────────────────
+    // Construye R desde la covarianza diferenciada por eje que calculó ArUco.
+    Mat3 R = {
+      cov[0],  0.0,    0.0,
+      0.0,     cov[7], 0.0,
+      0.0,     0.0,    cov[35] > 1e-9 ? cov[35] : R_[8]
+    };
+
+    // H = I (medición directa de pose), S = P + R, K = P * S^-1
+    Mat3 S = mat_add(P_, R);
     Mat3 K = mat_mul(P_, mat_inv3(S));
 
     double inn[3] = {z[0]-x_[0], z[1]-x_[1], norm_angle(z[2]-x_[2])};
@@ -170,13 +230,15 @@ private:
   }
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr sub_aruco_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_aruco_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
   std::array<double, 3> x_;
   Mat3 P_, Q_, R_;
   rclcpp::Time last_time_;
+  bool init_from_aruco_;   // parámetro: esperar primer ArUco para inicializar
+  bool initialized_;       // true cuando el estado ya es válido
 };
 
 int main(int argc, char ** argv)

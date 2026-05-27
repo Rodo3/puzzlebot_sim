@@ -1,15 +1,23 @@
-"""Scan-to-map angular matcher for the physical robot.
+"""Scan-to-map matcher con búsqueda de rotación + traslación.
 
-Strategy: coarse + fine angular search around the odometry yaw.
-For each candidate yaw, project the scan endpoints into the grid and sum the
-log-odds values at those cells.  The candidate with the highest score wins.
+Estrategia en dos fases desacopladas (más rápido que búsqueda 3D conjunta):
 
-This directly corrects the rotation drift that causes the map to spiral when
-the robot turns — the most significant source of error with wheel odometry.
+  Fase 1 — Rotación:
+    Coarse: ±8° en pasos de 2°
+    Fine:   ±1.5° en pasos de 0.5°
+    Corrige el drift angular, que es la fuente dominante de error.
 
-Translation correction is intentionally omitted: translation drift is an order
-of magnitude smaller than rotation drift on a differential-drive robot, and
-adding a 2D search would triple the compute cost per scan.
+  Fase 2 — Traslación (nueva):
+    Con el yaw ganador de la fase 1, busca la mejor traslación en
+    una ventana ±TRANS_HALF_M en pasos de TRANS_STEP_M.
+    Coste extra: (2*TRANS_HALF/TRANS_STEP + 1)² evaluaciones adicionales.
+    Con los valores por defecto (±10 cm, paso 5 cm): 5×5 = 25 poses.
+
+Total: ~22 (rot) + 25 (tras) ≈ 47 evaluaciones por scan — manejable en Python.
+
+La búsqueda de traslación solo activa cuando el mapa tiene suficiente
+contenido (WARMUP_SCANS) y el score de la fase 1 supera un umbral mínimo,
+para evitar correcciones en zonas sin paredes cercanas.
 """
 
 import numpy as np
@@ -19,27 +27,31 @@ from sensor_msgs.msg import LaserScan
 from .occupancy_grid_map import OccupancyGridMap
 from .slam_types import Pose2D
 
-# Number of scans to integrate before matching activates.
-# The first few scans build the initial map; without any map content the
-# score function has nothing to compare against.
-_WARMUP_SCANS = 8
+# ── Warmup ───────────────────────────────────────────────────────────────
+_WARMUP_SCANS = 12
 
-# Coarse search: ±12° in 2° steps  →  13 candidates
-_COARSE_HALF_RAD = 0.209   # 12°
-_COARSE_STEP_RAD = 0.0349  # 2°
+# ── Fase 1: búsqueda angular ─────────────────────────────────────────────
+_COARSE_HALF_RAD = 0.140    # 8°
+_COARSE_STEP_RAD = 0.0349   # 2°
 
-# Fine search: ±2° around the coarse winner in 0.5° steps  →  9 candidates
-_FINE_HALF_RAD = 0.0349    # 2°
-_FINE_STEP_RAD = 0.00873   # 0.5°
+_FINE_HALF_RAD   = 0.0262   # 1.5°
+_FINE_STEP_RAD   = 0.00873  # 0.5°
 
-# Use every Nth ray for scoring (speed vs. accuracy trade-off).
-# Every 3rd ray still gives ~120 points for a 360-ray scan.
+# ── Fase 2: búsqueda de traslación ───────────────────────────────────────
+_TRANS_HALF_M  = 0.05   # ±1 celda: evita que el matcher arrastre el mapa
+_TRANS_STEP_M  = 0.05
+
+# Score mínimo de la fase 1 para activar la búsqueda de traslación.
+# Umbral bajo: activa antes cuando el mapa tiene poco contenido en la zona.
+_MIN_SCORE_FOR_TRANS = 4.0
+
+# ── Decimado de rayos ─────────────────────────────────────────────────────
 _RAY_STRIDE = 3
 
 
 class LocalScanMatcher:
     def __init__(self, enabled: bool = False):
-        self._enabled = enabled
+        self._enabled    = enabled
         self._scan_count = 0
 
     @property
@@ -69,51 +81,72 @@ class LocalScanMatcher:
         initial_pose: Pose2D,
         grid_map: OccupancyGridMap,
     ) -> Pose2D:
-        # Pre-compute range/angle arrays once
         ranges, rel_angles = self._valid_rays(scan, grid_map)
         if len(ranges) == 0:
             return initial_pose
 
-        # ── Coarse pass ──────────────────────────────────────────────────
-        best_pose = initial_pose
+        # ── Fase 1: búsqueda angular ─────────────────────────────────────
+        best_pose  = initial_pose
         best_score = -1.0
 
-        for dyaw in np.arange(-_COARSE_HALF_RAD, _COARSE_HALF_RAD + 1e-9, _COARSE_STEP_RAD):
-            candidate = Pose2D(initial_pose.x, initial_pose.y, initial_pose.yaw + dyaw)
-            score = self._score(ranges, rel_angles, candidate, grid_map)
-            if score > best_score:
-                best_score = score
-                best_pose = candidate
+        for dyaw in np.arange(-_COARSE_HALF_RAD,
+                               _COARSE_HALF_RAD + 1e-9,
+                               _COARSE_STEP_RAD):
+            c = Pose2D(initial_pose.x, initial_pose.y, initial_pose.yaw + dyaw)
+            s = self._score(ranges, rel_angles, c, grid_map)
+            if s > best_score:
+                best_score, best_pose = s, c
 
-        # ── Fine pass around coarse winner ───────────────────────────────
         coarse_yaw = best_pose.yaw
-        for yaw in np.arange(
-            coarse_yaw - _FINE_HALF_RAD,
-            coarse_yaw + _FINE_HALF_RAD + 1e-9,
-            _FINE_STEP_RAD,
-        ):
-            candidate = Pose2D(initial_pose.x, initial_pose.y, yaw)
-            score = self._score(ranges, rel_angles, candidate, grid_map)
-            if score > best_score:
-                best_score = score
-                best_pose = candidate
+        for yaw in np.arange(coarse_yaw - _FINE_HALF_RAD,
+                              coarse_yaw + _FINE_HALF_RAD + 1e-9,
+                              _FINE_STEP_RAD):
+            c = Pose2D(initial_pose.x, initial_pose.y, yaw)
+            s = self._score(ranges, rel_angles, c, grid_map)
+            if s > best_score:
+                best_score, best_pose = s, c
 
-        return best_pose
+        rot_pose  = best_pose    # yaw corregido, traslación = odometry
+        rot_score = best_score
+
+        # ── Fase 2: búsqueda de traslación ───────────────────────────────
+        # Solo si el mapa tiene contenido suficiente en esta zona
+        if rot_score < _MIN_SCORE_FOR_TRANS:
+            return rot_pose
+
+        offsets = np.arange(-_TRANS_HALF_M,
+                             _TRANS_HALF_M + 1e-9,
+                             _TRANS_STEP_M)
+
+        trans_pose  = rot_pose
+        trans_score = rot_score
+
+        for dx in offsets:
+            for dy in offsets:
+                c = Pose2D(rot_pose.x + dx, rot_pose.y + dy, rot_pose.yaw)
+                s = self._score(ranges, rel_angles, c, grid_map)
+                if s > trans_score:
+                    trans_score, trans_pose = s, c
+
+        return trans_pose
 
     # ------------------------------------------------------------------ #
 
     @staticmethod
     def _valid_rays(scan: LaserScan, grid_map: OccupancyGridMap):
-        """Return (ranges, relative_angles) arrays for valid hit rays."""
         ranges = np.array(scan.ranges, dtype=np.float32)
-        n = len(ranges)
-        angles = scan.angle_min + np.arange(n, dtype=np.float32) * scan.angle_increment
+        n      = len(ranges)
+        angles = (scan.angle_min
+                  + np.arange(n, dtype=np.float32) * scan.angle_increment)
 
-        rmin = max(float(scan.range_min), grid_map.min_useful_range)
-        rmax = float(scan.range_max) * grid_map.max_range_factor
+        rmin  = max(float(scan.range_min), grid_map.min_useful_range)
+        rmax  = float(scan.range_max)
+        if grid_map.max_mapping_range > 0.0:
+            rmax = min(rmax, grid_map.max_mapping_range)
+        rmax *= grid_map.max_range_factor
 
         valid = np.isfinite(ranges) & (ranges > rmin) & (ranges < rmax)
-        idx = np.where(valid)[0][::_RAY_STRIDE]
+        idx   = np.where(valid)[0][::_RAY_STRIDE]
 
         return ranges[idx], angles[idx]
 
@@ -124,17 +157,22 @@ class LocalScanMatcher:
         pose: Pose2D,
         grid_map: OccupancyGridMap,
     ) -> float:
-        """Sum log-odds at scan endpoint cells. Higher means better alignment."""
-        world_angles = rel_angles + pose.yaw
-        wx = pose.x + ranges * np.cos(world_angles)
-        wy = pose.y + ranges * np.sin(world_angles)
+        c = np.cos(pose.yaw)
+        s = np.sin(pose.yaw)
+        sensor_x = pose.x + grid_map.lidar_x * c - grid_map.lidar_y * s
+        sensor_y = pose.y + grid_map.lidar_x * s + grid_map.lidar_y * c
 
-        res = grid_map.resolution
-        col = ((wx - grid_map.origin_x) / res).astype(np.int32)
-        row = ((wy - grid_map.origin_y) / res).astype(np.int32)
+        world_angles = rel_angles + pose.yaw + grid_map.lidar_yaw
+        wx = sensor_x + ranges * np.cos(world_angles)
+        wy = sensor_y + ranges * np.sin(world_angles)
 
-        size = grid_map.size_pixels
-        mask = (col >= 0) & (col < size) & (row >= 0) & (row < size)
+        res  = grid_map.resolution
+        col  = ((wx - grid_map.origin_x) / res).astype(np.int32)
+        row  = ((wy - grid_map.origin_y) / res).astype(np.int32)
+        width = grid_map.width_pixels
+        height = grid_map.height_pixels
+
+        mask = (col >= 0) & (col < width) & (row >= 0) & (row < height)
         if not np.any(mask):
             return 0.0
 

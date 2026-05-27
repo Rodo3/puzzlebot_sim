@@ -102,14 +102,19 @@ private:
     last_time_ = now_t;
 
     if (dt <= 0.0 || dt > 0.5) {
-      publish_cmd(cmd, 0.0, 0.0, 0.0, 0.0);
+      // Reloj inestable: manda un stop de cortesía y cede el bus
+      if (was_active_) { was_active_ = false; pub_cmd_->publish(cmd); }
       return;
     }
 
     if (!have_pose_ || !have_goal_ || goal_reached_) {
-      publish_cmd(cmd, 0.0, 0.0, 0.0, 0.0);
+      // Sin goal activo: NO publicar — deja que teleop (u otro nodo) mande /cmd_vel
+      // Se envía un único stop al perder el goal para frenar de forma segura.
+      if (was_active_) { was_active_ = false; pub_cmd_->publish(cmd); }
       return;
     }
+
+    was_active_ = true;
 
     double dx      = goal_x_ - robot_x_;
     double dy      = goal_y_ - robot_y_;
@@ -179,6 +184,7 @@ private:
 
   // Controller state
   double prev_e_ang_{0.0};
+  bool   was_active_{false};   // true mientras hay goal activo en curso
 
   // Gains & limits
   double Kp_lin_, Kp_ang_, Kd_ang_;
