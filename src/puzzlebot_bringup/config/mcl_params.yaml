@@ -1,0 +1,57 @@
+# Parámetros del nodo MCL (Monte Carlo Localization)
+#
+# Flujo de dos sesiones:
+# ──────────────────────────────────────────────────────────────────────────────
+# SESIÓN 1 — Mapeo (slam:=true  mcl:=false  scan_matching_enabled: false):
+#   ros2 launch puzzlebot_bringup real_robot.launch.py \
+#     avoidance:=false viewer:=false lidar_topic:=/scan
+#
+#   Cuando el mapa se vea bien en RViz, guárdalo desde otra terminal:
+#     ros2 run nav2_map_server map_saver_cli -f ~/puzzlebot_map
+#   Esto genera:
+#     ~/puzzlebot_map.pgm  ← imagen del mapa (blanco=libre, negro=pared)
+#     ~/puzzlebot_map.yaml ← metadatos (resolution, origin)
+#
+#   Convierte a PNG para el MCL:
+#     python3 -c "
+#     from PIL import Image
+#     Image.open('/home/jesus/puzzlebot_map.pgm').save('/home/jesus/puzzlebot_map.png')
+#     print('OK')"
+#
+#   Copia map_resolution, map_origin_x, map_origin_y del .yaml generado a este archivo.
+#
+# SESIÓN 2 — Localización (slam:=false  mcl:=true):
+#   ros2 launch puzzlebot_bringup real_robot.launch.py \
+#     slam:=false mcl:=true avoidance:=false viewer:=false lidar_topic:=/scan
+# ──────────────────────────────────────────────────────────────────────────────
+
+mcl:
+  ros__parameters:
+    # ── Ruta al mapa PNG (rellenar tras la sesión 1) ──────────────────────────
+    map_path:        '/home/jesus/puzzlebot_map.png'
+
+    # ── Geometría del mapa (copiar de ~/puzzlebot_map.yaml tras map_saver) ────
+    map_resolution:   0.05     # metros por píxel
+    map_origin_x:   -12.5     # coordenada X del píxel (col=0, row=bottom)
+    map_origin_y:   -12.5     # coordenada Y del píxel (col=0, row=bottom)
+
+    # ── Partículas ────────────────────────────────────────────────────────────
+    num_particles:    300      # menos que 500 para ahorrar CPU
+    top_k:            100      # supervivientes por iteración
+
+    # ── Ruido de movimiento (ajustar si las partículas divergen) ─────────────
+    noise_xy:         0.03     # std-dev posición [m]
+    noise_theta:      0.03     # std-dev orientación [rad]
+
+    # ── Modelo de sensor ──────────────────────────────────────────────────────
+    score_rays:       36       # rayos evaluados por partícula (múltiplo de 360/n°)
+    ray_step:         0.025    # paso de ray-marching [m]
+    hit_sigma:        0.20     # ancho Gaussiano de la verosimilitud [m]
+
+    # ── Frames ────────────────────────────────────────────────────────────────
+    map_frame:       'map'
+    odom_frame:      'odom'
+
+    # ── Offset del LiDAR respecto a base_link (si el LiDAR no está centrado) ──
+    laser_offset_x:   0.0
+    laser_offset_y:   0.0

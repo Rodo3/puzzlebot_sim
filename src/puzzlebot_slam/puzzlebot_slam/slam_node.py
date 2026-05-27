@@ -20,7 +20,12 @@ import rclpy
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import LaserScan
 import tf2_ros
 
@@ -28,6 +33,7 @@ from .keyframe_manager import KeyframeManager
 from .occupancy_grid_map import OccupancyGridMap
 from .odometry_buffer import OdometryBuffer
 from .scan_matcher import LocalScanMatcher
+from .slam_types import Pose2D
 
 
 class SlamNode(Node):
@@ -37,10 +43,28 @@ class SlamNode(Node):
         self._declare_parameters()
         self._map_frame = self.get_parameter('map_frame').value
         self._odom_frame = self.get_parameter('odom_frame').value
+        self._publish_map_odom_tf = bool(
+            self.get_parameter('publish_map_odom_tf').value)
+        map_resolution = float(self.get_parameter('map_resolution').value)
+        map_width_meters = float(self.get_parameter('map_width_meters').value)
+        map_height_meters = float(self.get_parameter('map_height_meters').value)
+        legacy_size_pixels = int(self.get_parameter('map_size_pixels').value)
+        legacy_size_meters = float(self.get_parameter('map_size_meters').value)
+        if map_resolution > 0.0 and map_width_meters > 0.0 and map_height_meters > 0.0:
+            width_pixels = int(math.ceil(map_width_meters / map_resolution))
+            height_pixels = int(math.ceil(map_height_meters / map_resolution))
+            size_pixels = max(width_pixels, height_pixels)
+            size_meters = size_pixels * map_resolution
+        else:
+            map_resolution = legacy_size_meters / legacy_size_pixels
+            width_pixels = None
+            height_pixels = None
+            size_pixels = legacy_size_pixels
+            size_meters = legacy_size_meters
 
         self._grid_map = OccupancyGridMap(
-            size_pixels=int(self.get_parameter('map_size_pixels').value),
-            size_meters=float(self.get_parameter('map_size_meters').value),
+            size_pixels=size_pixels,
+            size_meters=size_meters,
             origin_x=float(self.get_parameter('map_origin_x').value),
             origin_y=float(self.get_parameter('map_origin_y').value),
             p_occ=float(self.get_parameter('p_occ').value),
@@ -49,6 +73,13 @@ class SlamNode(Node):
             scan_step=int(self.get_parameter('scan_step').value),
             max_range_factor=float(self.get_parameter('max_range_factor').value),
             min_useful_range=float(self.get_parameter('min_useful_range').value),
+            max_mapping_range=float(self.get_parameter('max_mapping_range').value),
+            lidar_x=float(self.get_parameter('lidar_x').value),
+            lidar_y=float(self.get_parameter('lidar_y').value),
+            lidar_yaw=float(self.get_parameter('lidar_yaw').value),
+            width_pixels=width_pixels,
+            height_pixels=height_pixels,
+            resolution=map_resolution,
         )
         self._odom_buffer = OdometryBuffer(
             buffer_sec=float(self.get_parameter('pose_buffer_sec').value),
@@ -72,23 +103,40 @@ class SlamNode(Node):
         self._tf = tf2_ros.TransformBroadcaster(self)
 
         self.create_subscription(Odometry, '/odom', self._odom_cb, 10)
-        self.create_subscription(LaserScan, '/scan', self._scan_cb, 10)
+        self.create_subscription(
+            LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
+        self.create_subscription(
+            TransformStamped, '/map_to_odom', self._map_to_odom_cb, 10)
 
-        self.create_timer(1.0 / 30.0, self._broadcast_tf)
+        self.create_timer(0.1, self._broadcast_tf)   # 10 Hz — suficiente para TF tree; 30 Hz en Python es caro
         self.create_timer(0.5, self._publish_map)
+
+        # Corrección map→odom que publica _broadcast_tf.
+        # Se actualiza en cada scan (no solo en keyframes) para que la
+        # localización mejore continuamente incluso sin integrar al mapa.
+        self._map_odom_x   = 0.0
+        self._map_odom_y   = 0.0
+        self._map_odom_yaw = 0.0
 
         self.get_logger().info(
             'slam_node ready — '
-            f'{self._grid_map.size_pixels}×{self._grid_map.size_pixels} px '
+            f'{self._grid_map.width_pixels}×{self._grid_map.height_pixels} px '
             f'@ {self._grid_map.resolution:.3f} m/px, '
+            f'size=({self._grid_map.width_meters:.2f}, {self._grid_map.height_meters:.2f}) m, '
             f'origin=({self._grid_map.origin_x:.2f}, {self._grid_map.origin_y:.2f}), '
+            f'lidar=({self._grid_map.lidar_x:.3f}, {self._grid_map.lidar_y:.3f}, '
+            f'{math.degrees(self._grid_map.lidar_yaw):.1f}deg), '
             f'l_occ={self._grid_map.l_occ:+.2f} '
             f'l_free={self._grid_map.l_free:+.2f}, '
-            f'scan_matching={self._scan_matcher.enabled}')
+            f'scan_matching={self._scan_matcher.enabled}, '
+            f'publish_map_odom_tf={self._publish_map_odom_tf}')
 
     def _declare_parameters(self) -> None:
         self.declare_parameter('map_size_pixels', 500)
         self.declare_parameter('map_size_meters', 25.0)
+        self.declare_parameter('map_width_meters', 0.0)
+        self.declare_parameter('map_height_meters', 0.0)
+        self.declare_parameter('map_resolution', 0.0)
         self.declare_parameter('map_origin_x', -12.5)
         self.declare_parameter('map_origin_y', -12.5)
 
@@ -99,9 +147,14 @@ class SlamNode(Node):
         self.declare_parameter('scan_step', 1)
         self.declare_parameter('max_range_factor', 0.95)
         self.declare_parameter('min_useful_range', 0.20)
+        self.declare_parameter('max_mapping_range', 0.0)
+        self.declare_parameter('lidar_x', 0.0)
+        self.declare_parameter('lidar_y', 0.0)
+        self.declare_parameter('lidar_yaw', 0.0)
 
         self.declare_parameter('map_frame', 'map')
         self.declare_parameter('odom_frame', 'odom')
+        self.declare_parameter('publish_map_odom_tf', True)
 
         self.declare_parameter('pose_buffer_sec', 3.0)
         self.declare_parameter('max_scan_pose_age', 0.20)
@@ -115,6 +168,16 @@ class SlamNode(Node):
     def _odom_cb(self, msg: Odometry) -> None:
         self._odom_buffer.add(msg)
 
+    def _map_to_odom_cb(self, msg: TransformStamped) -> None:
+        if msg.header.frame_id != self._map_frame or msg.child_frame_id != self._odom_frame:
+            return
+        self._map_odom_x = msg.transform.translation.x
+        self._map_odom_y = msg.transform.translation.y
+        self._map_odom_yaw = math.atan2(
+            2.0 * msg.transform.rotation.w * msg.transform.rotation.z,
+            1.0 - 2.0 * msg.transform.rotation.z * msg.transform.rotation.z,
+        )
+
     def _scan_cb(self, scan: LaserScan) -> None:
         odom_pose = self._odom_buffer.lookup(scan.header.stamp)
         if odom_pose is None:
@@ -123,7 +186,28 @@ class SlamNode(Node):
                 throttle_duration_sec=2.0)
             return
 
-        map_pose = self._scan_matcher.match(scan, odom_pose, self._grid_map)
+        # CRÍTICO: transformar odom_pose al frame map antes de pasarla al scan_matcher.
+        # El matcher trabaja en coordenadas del mapa; si recibe odom_pose busca en
+        # el área incorrecta del grid → matches basura → corrección divergente.
+        map_init = self._odom_to_map_pose(odom_pose)
+        map_pose = self._scan_matcher.match(scan, map_init, self._grid_map)
+
+        # Sanity check: si la corrección del matcher supera umbrales físicos,
+        # el match es inválido (mapa vacío, pose inicial muy mala). En ese caso
+        # usamos la pose derivada de odometría transformada al mapa, sin corregir.
+        correction_dist = math.hypot(map_pose.x - map_init.x, map_pose.y - map_init.y)
+        correction_yaw  = abs(math.atan2(math.sin(map_pose.yaw - map_init.yaw),
+                                          math.cos(map_pose.yaw - map_init.yaw)))
+        if correction_dist > 0.18 or correction_yaw > math.radians(10.0):
+            self.get_logger().warn(
+                f'Scan match rejected (dist={correction_dist:.2f}m '
+                f'yaw={math.degrees(correction_yaw):.1f}°) — usando odom',
+                throttle_duration_sec=2.0)
+            map_pose = map_init
+
+        # Actualiza map→odom en CADA scan, no solo en keyframes.
+        self._update_map_odom_tf(map_pose, odom_pose)
+
         if not self._keyframes.should_integrate(map_pose):
             return
 
@@ -131,6 +215,41 @@ class SlamNode(Node):
             self.get_logger().warn(
                 'Skipping scan: robot pose is outside the map bounds',
                 throttle_duration_sec=2.0)
+
+    def _odom_to_map_pose(self, odom_pose: Pose2D) -> Pose2D:
+        """Aplica la corrección map→odom almacenada para obtener la pose en frame map.
+
+        T_map_odom · odom_pose:
+          mx   = x_tf + odom_x·cos(yaw_tf) − odom_y·sin(yaw_tf)
+          my   = y_tf + odom_x·sin(yaw_tf) + odom_y·cos(yaw_tf)
+          myaw = yaw_tf + odom_yaw
+        """
+        c = math.cos(self._map_odom_yaw)
+        s = math.sin(self._map_odom_yaw)
+        return Pose2D(
+            self._map_odom_x + odom_pose.x * c - odom_pose.y * s,
+            self._map_odom_y + odom_pose.x * s + odom_pose.y * c,
+            math.atan2(
+                math.sin(self._map_odom_yaw + odom_pose.yaw),
+                math.cos(self._map_odom_yaw + odom_pose.yaw)),
+        )
+
+    def _update_map_odom_tf(self, map_pose: Pose2D, odom_pose: Pose2D) -> None:
+        """Calcula la corrección map→odom a partir del par (pose_en_mapa, pose_en_odom).
+
+        Derivación 2D (T_map_odom · odom_pose = map_pose):
+          yaw_tf = yaw_m − yaw_o
+          x_tf   = x_m − (x_o · cos(yaw_tf) − y_o · sin(yaw_tf))
+          y_tf   = y_m − (x_o · sin(yaw_tf) + y_o · cos(yaw_tf))
+        """
+        yaw_tf = math.atan2(
+            math.sin(map_pose.yaw - odom_pose.yaw),
+            math.cos(map_pose.yaw - odom_pose.yaw))
+        c = math.cos(yaw_tf)
+        s = math.sin(yaw_tf)
+        self._map_odom_x   = map_pose.x - (odom_pose.x * c - odom_pose.y * s)
+        self._map_odom_y   = map_pose.y - (odom_pose.x * s + odom_pose.y * c)
+        self._map_odom_yaw = yaw_tf
 
     def _publish_map(self) -> None:
         msg = self._grid_map.to_msg(
@@ -140,11 +259,16 @@ class SlamNode(Node):
         self._pub_map.publish(msg)
 
     def _broadcast_tf(self) -> None:
+        if not self._publish_map_odom_tf:
+            return
         tf = TransformStamped()
         tf.header.stamp = self.get_clock().now().to_msg()
         tf.header.frame_id = self._map_frame
         tf.child_frame_id = self._odom_frame
-        tf.transform.rotation.w = 1.0
+        tf.transform.translation.x = self._map_odom_x
+        tf.transform.translation.y = self._map_odom_y
+        tf.transform.rotation.z = math.sin(self._map_odom_yaw / 2.0)
+        tf.transform.rotation.w = math.cos(self._map_odom_yaw / 2.0)
         self._tf.sendTransform(tf)
 
 
