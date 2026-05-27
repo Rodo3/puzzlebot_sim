@@ -134,7 +134,13 @@ private:
     Mat3 F = {1,0,-delta_d*std::sin(th),
               0,1, delta_d*std::cos(th),
               0,0,1};
-    P_ = mat_add(mat_mul(mat_mul(F, P_), mat_transpose(F)), Q_);
+
+    // Q debe escalarse por dt para que la incertidumbre crezca a Q_valor/segundo
+    // independientemente de la tasa de llegada de /odom_raw.
+    // Sin escalar: a 50 Hz con Q_x=0.01 → P_xx crece 0.5 m²/s → 50 m² en 100 s.
+    Mat3 Q_dt{};
+    for (int i = 0; i < 9; ++i) Q_dt[i] = Q_[i] * dt;
+    P_ = mat_add(mat_mul(mat_mul(F, P_), mat_transpose(F)), Q_dt);
 
     publish();
   }

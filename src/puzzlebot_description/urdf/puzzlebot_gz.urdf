@@ -212,8 +212,8 @@
                     /model/puzzlebot/tf         (gz topic)
     Joint velocities are read via ros_gz_bridge JointState bridge.
 
-    Wheel separation = 0.19 m  (matches URDF joint origins: 0.095 * 2)
-    Wheel radius     = 0.0425 m
+    Wheel separation = 0.18 m  (matches URDF joint origins: 0.095 * 2)
+    Wheel radius     = 0.05 m
   -->
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system"

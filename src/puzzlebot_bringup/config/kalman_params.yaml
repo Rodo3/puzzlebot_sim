@@ -7,44 +7,46 @@ kalman_filter_node:
     meas_noise_y:        0.05
     meas_noise_theta:    0.01
     initial_covariance:  0.1
-    # ── Pose inicial del robot al arrancar (frame: map) ──────────────────
+    # ── Inicialización desde ArUco (RECOMENDADO para robot real) ─────────────
     #
-    # IMPORTANTE: el aruco_map.yaml define el origen (0,0) en la esquina
-    # inferior-izquierda (SW) de la pista. El robot SIEMPRE debe arrancar
-    # desde el mismo punto físico para que las correcciones ArUco sean válidas.
+    # init_from_aruco: true
+    #   El Kalman arranca sin estado definido y espera el primer /aruco/pose
+    #   válido. Ese mensaje inicializa x, y, theta directamente (reset duro,
+    #   ganancia K=1). initial_x/y/theta se IGNORAN.
     #
-    # Punto de arranque recomendado:
-    #   • Posición: 30 cm adentro de la esquina SW (para no quedar pegado a paredes)
-    #   • Orientación: mirando al norte (+Y) = π/2 rad
+    #   Protocolo de arranque:
+    #     1. Coloca el robot MIRANDO a cualquier marcador (< 1.8 m de distancia)
+    #     2. Lanza el sistema
+    #     3. Espera el log: "✅ Pose inicial desde ArUco: x=... y=... theta=..."
+    #     4. Ya puedes mover el robot
     #
-    # Pista vista desde arriba:
+    #   Zona de inicio recomendada: frente a ID4 (pared Oeste, Y≈1.04)
+    #   mirando al Este (+X). El robot queda en ≈(0.20, 1.04, 0.0).
     #
-    #   Y=4.86 ┌──────[ID1]──────┐
-    #          │                  │
-    #   Y=3.90 [ID0]        [ID2] │
-    #          │                  │
-    #   Y=1.04 [ID4]        [ID3] │
-    #          │                  │
-    #   Y=0.00 └──────────────────┘
-    #          X=0               X=3.76
+    # init_from_aruco: false
+    #   Arranca desde initial_x/y/theta estático (útil en simulación o cuando
+    #   el punto de partida físico es siempre el mismo y conocido).
     #
-    #   ★ = punto de arranque → (0.30, 0.30, π/2)
-    #       mirando hacia el norte (hacia ID1)
-    #
-    # SESIÓN 1 — Mapeo (slam:=true):
-    #   Coloca el robot en la esquina SW mirando al norte y usa estos valores.
-    #   El mapa se construirá con ese punto como origen.
-    #
-    # SESIÓN 2 — Localización MCL (slam:=false mcl:=true):
-    #   Coloca el robot en el mismo punto físico de siempre.
-    #   Ajusta initial_x/y/theta si usas un punto de inicio diferente.
-    initial_x:      0.30     # usado solo si init_from_aruco: false
-    initial_y:      0.30
-    initial_theta:  1.5708
-
-    # ── Inicialización desde ArUco ────────────────────────────────────────
-    # Si true: el Kalman espera el primer /aruco/pose válido y usa esa pose
-    # como estado inicial (reset directo, ganancia=1). El odómetro se ignora
-    # hasta recibir la primera detección.
-    # Si false: arranca desde initial_x/y/theta estático.
     init_from_aruco: true
+
+    # ── Pose inicial estática (solo si init_from_aruco: false) ───────────────
+    #
+    # Pista vista desde arriba — origen (0,0) = esquina SW:
+    #
+    #   Y=4.86 ┌──────[ID1 norte]──────┐
+    #          │                        │
+    #   Y=3.90 [ID0 oeste]    [ID2 este]│
+    #          │                        │
+    #   Y=1.04 [ID4 oeste]    [ID3 este]│
+    #          │                        │
+    #   Y=0.00 └────────────────────────┘
+    #          X=0                    X=3.76
+    #
+    # Punto de arranque esquina SW: (0.30, 0.30) mirando al norte (π/2 rad).
+    # Punto de arranque frente a ID4: (0.20, 1.04) mirando al este (0.0 rad).
+    #
+    # NOTA: estos valores se usan como backup en Gazebo (spawn conocido) o
+    # cuando se quiere probar la Estrategia A (solo predicción de ruedas).
+    initial_x:      0.0      # ignorado cuando init_from_aruco: true
+    initial_y:      0.0
+    initial_theta:  0.0

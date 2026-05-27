@@ -14,8 +14,8 @@ public:
   OdometryNode() : Node("odometry_node"), x_(0.0), y_(0.0), theta_(0.0),
                    vr_(0.0), vl_(0.0), have_input_(false)
   {
-    declare_parameter("wheel_radius", 0.0425);
-    declare_parameter("wheel_separation", 0.172);
+    declare_parameter("wheel_radius", 0.05);
+    declare_parameter("wheel_separation", 0.18);
     declare_parameter("input_source", "encoders");
     declare_parameter("odom_topic", "odom_raw");
     declare_parameter("odom_frame", "odom");

@@ -1,0 +1,466 @@
+<sdf version='1.9'>
+  <!--
+  ════════════════════════════════════════════════════════════════════════════
+  real_arena.sdf — Reproducción del entorno físico del Puzzlebot en Gazebo
+  ════════════════════════════════════════════════════════════════════════════
+
+  Dimensiones físicas reales:
+    Ancho (X): 3.76 m
+    Alto  (Y): 4.86 m
+    Origen (0,0) = esquina SW (inferior-izquierda)
+
+  Contenido:
+    - 4 paredes exteriores (matches slam_params.yaml origin/size)
+    - 5 marcadores ArUco en posiciones del aruco_map.yaml
+    - 3 obstáculos con posición/dimensiones CONFIGURABLES (ver sección OBSTACLES)
+
+  Convención de ejes (igual que aruco_map.yaml):
+    X+ = Este (ancho = 3.76 m)
+    Y+ = Norte (alto  = 4.86 m)
+    Z+ = Arriba
+
+  Para cambiar la posición de los obstáculos, busca la sección
+  "═══ OBSTACLE N ═══" y modifica el campo <pose>.
+
+  Gazebo Fortress (ignition-gazebo 6) — usa 'ign gazebo', no 'gz sim'.
+  ════════════════════════════════════════════════════════════════════════════
+  -->
+
+  <world name='real_arena'>
+
+    <!-- ── Physics ─────────────────────────────────────────────────────── -->
+    <physics name='1ms' type='ode'>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <!-- ── Plugins requeridos por Fortress ─────────────────────────────── -->
+    <plugin name='ignition::gazebo::systems::Physics'
+            filename='libignition-gazebo-physics-system.so'/>
+    <plugin name='ignition::gazebo::systems::UserCommands'
+            filename='libignition-gazebo-user-commands-system.so'/>
+    <plugin name='ignition::gazebo::systems::SceneBroadcaster'
+            filename='libignition-gazebo-scene-broadcaster-system.so'/>
+    <plugin name='ignition::gazebo::systems::Sensors'
+            filename='libignition-gazebo-sensors-system.so'>
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin name='ignition::gazebo::systems::Contact'
+            filename='libignition-gazebo-contact-system.so'/>
+
+    <gravity>0 0 -9.8</gravity>
+    <atmosphere type='adiabatic'/>
+
+    <scene>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <background>0.8 0.85 0.9 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <!-- ── Suelo ────────────────────────────────────────────────────────── -->
+    <model name='ground_plane'>
+      <static>true</static>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+          <surface>
+            <friction><ode><mu>1</mu><mu2>1</mu2></ode></friction>
+            <bounce/><contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.85 1</ambient>
+            <diffuse>0.85 0.85 0.85 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         PAREDES EXTERIORES
+         Pista física: 3.76 m (X) × 4.86 m (Y)
+         Origen (0,0) = esquina inferior izquierda (SW)
+         Grosor de pared: 0.15 m | Altura: 1.0 m
+         El centro de cada pared está en la cara EXTERIOR del límite de la pista.
+         ══════════════════════════════════════════════════════════════════ -->
+
+    <!-- Pared Sur (Y=0) — longitud en X incluyendo esquinas -->
+    <model name='wall_south'>
+      <static>true</static>
+      <!-- pose: x=centro_X, y=cara_exterior, z=mitad_altura | roll pitch yaw -->
+      <pose>1.88 -0.075 0.5 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>4.06 0.15 1.0</size></box></geometry>
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>4.06 0.15 1.0</size></box></geometry>
+          <material>
+            <ambient>0.88 0.78 0.58 1</ambient>
+            <diffuse>0.88 0.78 0.58 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- Pared Norte (Y=4.86) — longitud en X incluyendo esquinas -->
+    <model name='wall_north'>
+      <static>true</static>
+      <pose>1.88 4.935 0.5 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>4.06 0.15 1.0</size></box></geometry>
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>4.06 0.15 1.0</size></box></geometry>
+          <material>
+            <ambient>0.88 0.78 0.58 1</ambient>
+            <diffuse>0.88 0.78 0.58 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- Pared Oeste (X=0) — longitud en Y (solo entre paredes N/S) -->
+    <model name='wall_west'>
+      <static>true</static>
+      <pose>-0.075 2.43 0.5 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.15 4.86 1.0</size></box></geometry>
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.15 4.86 1.0</size></box></geometry>
+          <material>
+            <ambient>0.88 0.78 0.58 1</ambient>
+            <diffuse>0.88 0.78 0.58 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- Pared Este (X=3.76) — longitud en Y (solo entre paredes N/S) -->
+    <model name='wall_east'>
+      <static>true</static>
+      <pose>3.835 2.43 0.5 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.15 4.86 1.0</size></box></geometry>
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.15 4.86 1.0</size></box></geometry>
+          <material>
+            <ambient>0.88 0.78 0.58 1</ambient>
+            <diffuse>0.88 0.78 0.58 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         MARCADORES ARUCO
+         Posiciones del aruco_map.yaml (aruco_map.yaml es la fuente de verdad).
+         Representados como cajas delgadas de colores distintos por ID.
+         Sin textura ArUco real — solo marcadores visuales de posición.
+         Tamaño físico marcador: 0.10 m × 0.10 m × 0.02 m (grosor pared)
+
+         Convención de pose SDF: x y z roll pitch yaw
+         Los marcadores están empotrados en la cara interior de cada pared.
+         ══════════════════════════════════════════════════════════════════ -->
+
+    <!-- ID=1 — Pared Norte, centro (x=1.88, y=4.86), mirando al sur (yaw=0)
+                La cara visible del marcador apunta hacia -Y (interior de la pista) -->
+    <model name='aruco_id1_north'>
+      <static>true</static>
+      <!-- z=0.15 m del suelo (z en aruco_map.yaml) -->
+      <!-- pose: en cara interior de pared norte; offset -0.02 en Y para quedar visible -->
+      <pose>1.88 4.86 0.15 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.12 0.02 0.12</size></box></geometry>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.12 0.02 0.12</size></box></geometry>
+          <material>
+            <!-- Azul brillante — ID 1 -->
+            <ambient>0.0 0.3 0.9 1</ambient>
+            <diffuse>0.0 0.3 0.9 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>0.1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ID=0 — Pared Oeste, parte alta (x=0, y=3.90), mirando al este (yaw=π/2)
+                La cara visible apunta hacia +X (interior de la pista) -->
+    <model name='aruco_id0_west_high'>
+      <static>true</static>
+      <pose>0.0 3.90 0.18 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+          <material>
+            <!-- Verde — ID 0 -->
+            <ambient>0.1 0.8 0.2 1</ambient>
+            <diffuse>0.1 0.8 0.2 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>0.1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ID=4 — Pared Oeste, parte baja (x=0, y=1.04), mirando al este (yaw=π/2) -->
+    <model name='aruco_id4_west_low'>
+      <static>true</static>
+      <pose>0.0 1.04 0.18 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+          <material>
+            <!-- Naranja — ID 4 -->
+            <ambient>0.9 0.5 0.0 1</ambient>
+            <diffuse>0.9 0.5 0.0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>0.1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ID=2 — Pared Este, parte alta (x=3.76, y=3.90), mirando al oeste (yaw=-π/2) -->
+    <model name='aruco_id2_east_high'>
+      <static>true</static>
+      <pose>3.76 3.90 0.18 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+          <material>
+            <!-- Rojo — ID 2 -->
+            <ambient>0.9 0.1 0.1 1</ambient>
+            <diffuse>0.9 0.1 0.1 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>0.1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ID=3 — Pared Este, parte baja (x=3.76, y=1.04), mirando al oeste (yaw=-π/2) -->
+    <model name='aruco_id3_east_low'>
+      <static>true</static>
+      <pose>3.76 1.04 0.18 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.02 0.12 0.12</size></box></geometry>
+          <material>
+            <!-- Magenta — ID 3 -->
+            <ambient>0.8 0.1 0.8 1</ambient>
+            <diffuse>0.8 0.1 0.8 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>0.1</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         OBSTÁCULOS — POSICIÓN Y DIMENSIONES DESCONOCIDAS EN EL ROBOT REAL
+         ══════════════════════════════════════════════════════════════════
+
+         Los tres obstáculos tienen posición DESCONOCIDA en el entorno físico.
+         En Gazebo se colocan en posiciones arbitrarias plausibles para testing.
+
+         Para ajustar cada obstáculo edita únicamente el campo <pose>:
+           <pose>X Y Z roll pitch yaw</pose>
+         donde:
+           X, Y = posición en metros (dentro del rango [0.2..3.56] × [0.2..4.66])
+           Z     = altura del centro = height/2 (para que apoye en el suelo)
+           yaw   = rotación en radianes alrededor de Z
+
+         Para ajustar el tamaño edita <size>LENGTH_X LENGTH_Y HEIGHT</size>
+         en las geometrías <collision> y <visual> del obstáculo correspondiente.
+
+         Restricción: los obstáculos deben quedar completamente DENTRO de la pista.
+         Dejar al menos 0.30 m de distancia a las paredes para que el robot pase.
+         ══════════════════════════════════════════════════════════════════ -->
+
+    <!-- ═══ OBSTACLE 1 ═══════════════════════════════════════════════════
+         Posición por defecto: x=1.00, y=1.50 (zona SW-central)
+         Dimensiones: 0.30 m × 0.30 m × 0.50 m
+         Para mover: cambia la pose abajo. Para redimensionar: cambia <size>.
+         ═══════════════════════════════════════════════════════════════════ -->
+    <model name='obstacle_1'>
+      <static>true</static>
+      <!-- ▼ EDITAR AQUÍ: x y z(=height/2) roll pitch yaw -->
+      <pose>1.00 1.50 0.25 0 0 0</pose>
+      <!-- ▲ FIN EDICIÓN -->
+      <link name='link'>
+        <collision name='col'>
+          <!-- ▼ EDITAR AQUÍ: largo_x largo_y altura -->
+          <geometry><box><size>0.30 0.30 0.50</size></box></geometry>
+          <!-- ▲ FIN EDICIÓN -->
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name='vis'>
+          <!-- ▼ Mantener igual que collision -->
+          <geometry><box><size>0.30 0.30 0.50</size></box></geometry>
+          <!-- ▲ FIN EDICIÓN -->
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.4 0.4 0.4 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>5</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ═══ OBSTACLE 2 ═══════════════════════════════════════════════════
+         Posición por defecto: x=2.50, y=2.80 (zona central)
+         Dimensiones: 0.40 m × 0.25 m × 0.50 m (orientado en diagonal 30°)
+         ═══════════════════════════════════════════════════════════════════ -->
+    <model name='obstacle_2'>
+      <static>true</static>
+      <!-- ▼ EDITAR AQUÍ -->
+      <pose>2.50 2.80 0.25 0 0 0.5236</pose>
+      <!-- ▲ FIN EDICIÓN (yaw=0.5236 rad ≈ 30°) -->
+      <link name='link'>
+        <collision name='col'>
+          <!-- ▼ EDITAR AQUÍ -->
+          <geometry><box><size>0.40 0.25 0.50</size></box></geometry>
+          <!-- ▲ -->
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name='vis'>
+          <!-- ▼ EDITAR AQUÍ -->
+          <geometry><box><size>0.40 0.25 0.50</size></box></geometry>
+          <!-- ▲ -->
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.4 0.4 0.4 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>5</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- ═══ OBSTACLE 3 ═══════════════════════════════════════════════════
+         Posición por defecto: x=1.50, y=3.50 (zona NW-central)
+         Dimensiones: 0.35 m × 0.35 m × 0.50 m
+         ═══════════════════════════════════════════════════════════════════ -->
+    <model name='obstacle_3'>
+      <static>true</static>
+      <!-- ▼ EDITAR AQUÍ -->
+      <pose>1.50 3.50 0.25 0 0 0</pose>
+      <!-- ▲ FIN EDICIÓN -->
+      <link name='link'>
+        <collision name='col'>
+          <!-- ▼ EDITAR AQUÍ -->
+          <geometry><box><size>0.35 0.35 0.50</size></box></geometry>
+          <!-- ▲ -->
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction><bounce/><contact/></surface>
+        </collision>
+        <visual name='vis'>
+          <!-- ▼ EDITAR AQUÍ -->
+          <geometry><box><size>0.35 0.35 0.50</size></box></geometry>
+          <!-- ▲ -->
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.4 0.4 0.4 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial><pose>0 0 0 0 0 0</pose><mass>5</mass>
+          <inertia><ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1</iyy><iyz>0</iyz><izz>1</izz></inertia>
+        </inertial>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+
+  </world>
+</sdf>

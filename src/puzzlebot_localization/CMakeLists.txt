@@ -31,6 +31,7 @@ install(TARGETS
 
 install(PROGRAMS
   scripts/aruco_map_odom
+  scripts/aruco_oracle
   scripts/dead_reckoning_debug
   scripts/ground_truth_odom
   scripts/scan_restamper

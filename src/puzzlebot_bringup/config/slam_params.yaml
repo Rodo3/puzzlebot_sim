@@ -47,6 +47,19 @@ slam_node:
     use_keyframes:             true
     keyframe_min_translation:  0.10    # 10 cm mínimo de traslación (antes 8 cm)
     keyframe_min_rotation:     0.0873  # 5° mínimo de rotación (antes 3°)
-    # Scan matching local conservador: corrige principalmente yaw al girar.
-    # El matcher tiene warmup y límites de corrección para no arrastrar el mapa.
-    scan_matching_enabled:     true
+
+    # Scan matching — DESACTIVADO para mapeo en robot real.
+    #
+    # Con scan_matching_enabled: true durante mapping, el matcher crea un
+    # feedback loop: cada scan sobreescribe la corrección map→odom interna
+    # (incluso la que viene de aruco_map_odom via /map_to_odom), lo que
+    # amplifica el drift angular en lugar de corregirlo. Síntoma visible:
+    # el robot parece girar continuamente en RViz.
+    #
+    # Habilitarlo solo cuando:
+    #   1. El mapa ya tiene suficiente contenido (≥ 30 scans integrados).
+    #   2. ArUco NO es el dueño de map→odom (publish_map_odom_tf: true).
+    #   3. La odometría ya está calibrada.
+    #
+    # Para localización (MCL): el MCL tiene su propio mecanismo — dejar false.
+    scan_matching_enabled:     false

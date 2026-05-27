@@ -12,6 +12,22 @@ The current default behavior is intentionally equivalent to the validated
 Gazebo mapper: scans are integrated using the odometry pose, and map->odom is an
 identity transform.  The component boundaries are ready for a future physical
 robot scan matcher and dynamic map->odom correction.
+
+--- TF ownership protocol ---
+
+map→odom puede tener tres dueños posibles (mutuamente excluyentes):
+  1. slam_node (este nodo):  publish_map_odom_tf = true
+  2. aruco_map_odom:         publica TF + /map_to_odom cuando aruco:=true
+  3. mcl:                    publica TF cuando mcl:=true
+
+Cuando el dueño es aruco_map_odom (caso más común en robot real):
+  - slam_node recibe la corrección via /map_to_odom → _map_to_odom_cb
+  - slam_node USA esa corrección para proyectar odom_pose al frame map
+  - slam_node NO debe sobreescribir self._map_odom_* con scan matching
+    (param scan_match_updates_map_odom: false → default cuando publish_map_odom_tf: false)
+
+Esto evita el feedback loop: scan_matcher → sobreescribe corrección de ArUco
+→ siguiente scan usa pose incorrecta → matcher aun más confundido → divergencia.
 """
 
 import math
@@ -45,6 +61,13 @@ class SlamNode(Node):
         self._odom_frame = self.get_parameter('odom_frame').value
         self._publish_map_odom_tf = bool(
             self.get_parameter('publish_map_odom_tf').value)
+        # scan_match_updates_map_odom: controla si el scan matcher puede
+        # sobreescribir la corrección interna map→odom.
+        # Por defecto: igual a publish_map_odom_tf (solo cuando SLAM es dueño).
+        # Cuando ArUco o MCL son dueños (publish_map_odom_tf: false),
+        # este parámetro debe ser False para no borrar la corrección externa.
+        self._scan_match_updates_map_odom = bool(
+            self.get_parameter('scan_match_updates_map_odom').value)
         map_resolution = float(self.get_parameter('map_resolution').value)
         map_width_meters = float(self.get_parameter('map_width_meters').value)
         map_height_meters = float(self.get_parameter('map_height_meters').value)
@@ -108,12 +131,11 @@ class SlamNode(Node):
         self.create_subscription(
             TransformStamped, '/map_to_odom', self._map_to_odom_cb, 10)
 
-        self.create_timer(0.1, self._broadcast_tf)   # 10 Hz — suficiente para TF tree; 30 Hz en Python es caro
-        self.create_timer(0.5, self._publish_map)
+        self.create_timer(0.1, self._broadcast_tf)   # 10 Hz — suficiente para TF tree
+        self.create_timer(1.0, self._publish_map)   # 1 Hz — reduce carga Python vs 0.5s previo
 
         # Corrección map→odom que publica _broadcast_tf.
-        # Se actualiza en cada scan (no solo en keyframes) para que la
-        # localización mejore continuamente incluso sin integrar al mapa.
+        # Actualizada por _map_to_odom_cb (ArUco/MCL) o _update_map_odom_tf (SLAM propio).
         self._map_odom_x   = 0.0
         self._map_odom_y   = 0.0
         self._map_odom_yaw = 0.0
@@ -126,10 +148,10 @@ class SlamNode(Node):
             f'origin=({self._grid_map.origin_x:.2f}, {self._grid_map.origin_y:.2f}), '
             f'lidar=({self._grid_map.lidar_x:.3f}, {self._grid_map.lidar_y:.3f}, '
             f'{math.degrees(self._grid_map.lidar_yaw):.1f}deg), '
-            f'l_occ={self._grid_map.l_occ:+.2f} '
-            f'l_free={self._grid_map.l_free:+.2f}, '
+            f'l_occ={self._grid_map.l_occ:+.2f} l_free={self._grid_map.l_free:+.2f}, '
             f'scan_matching={self._scan_matcher.enabled}, '
-            f'publish_map_odom_tf={self._publish_map_odom_tf}')
+            f'publish_map_odom_tf={self._publish_map_odom_tf}, '
+            f'scan_match_updates_map_odom={self._scan_match_updates_map_odom}')
 
     def _declare_parameters(self) -> None:
         self.declare_parameter('map_size_pixels', 500)
@@ -164,6 +186,17 @@ class SlamNode(Node):
         self.declare_parameter('keyframe_min_rotation', math.radians(5.0))
 
         self.declare_parameter('scan_matching_enabled', False)
+
+        # scan_match_updates_map_odom:
+        #   True  → el scan matcher puede actualizar la corrección map→odom interna.
+        #           Apropiado cuando SLAM es el único dueño del TF (publish_map_odom_tf: true).
+        #   False → la corrección interna solo viene de /map_to_odom (ArUco/MCL).
+        #           OBLIGATORIO cuando ArUco o MCL publican map→odom externamente,
+        #           para evitar que el scan matcher sobreescriba correcciones absolutas.
+        # Nota: el valor por defecto es True para compatibilidad con Gazebo (modo solo SLAM).
+        # En real_robot.launch.py con aruco:=true, publish_map_odom_tf se pone en false
+        # automáticamente, y se recomienda pasar scan_match_updates_map_odom:=false también.
+        self.declare_parameter('scan_match_updates_map_odom', True)
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._odom_buffer.add(msg)
@@ -205,8 +238,17 @@ class SlamNode(Node):
                 throttle_duration_sec=2.0)
             map_pose = map_init
 
-        # Actualiza map→odom en CADA scan, no solo en keyframes.
-        self._update_map_odom_tf(map_pose, odom_pose)
+        # Actualiza map→odom solo cuando SLAM es el dueño del TF
+        # (scan_match_updates_map_odom: true) Y el scan matching está activo.
+        #
+        # Cuando ArUco o MCL son dueños de map→odom:
+        #   - _map_to_odom_cb() actualiza self._map_odom_* desde /map_to_odom
+        #   - NO debe sobrescribirse aquí, o se pierde la corrección absoluta
+        #
+        # Cuando SLAM es dueño (publish_map_odom_tf: true, sin ArUco):
+        #   - Actualizar permite que el scan matcher refine la pose del mapa
+        if self._scan_match_updates_map_odom:
+            self._update_map_odom_tf(map_pose, odom_pose)
 
         if not self._keyframes.should_integrate(map_pose):
             return
