@@ -275,23 +275,21 @@ class BridgeNode(Node):
                 'hmm': result.ranked_hmm[:3],
             })
 
-            # Publish to ROS topics so other nodes (e.g. future voice controller) can react.
-            self._pub_voice_command.publish(String(data=result.command))
-            self._pub_voice_confidence.publish(Float32(data=result.confidence))
+            # Pre-load the accumulator with fresh data so that when _voice_command_cb
+            # fires (triggered by our own publication below), _build_voice_payload()
+            # returns the new result instead of stale data from the previous command.
+            self._voice['command']           = result.command
+            self._voice['confidence']        = result.confidence
+            self._voice['status']            = 'idle'
+            self._voice['inference_time_ms'] = result.inference_time_ms
+            self._voice['ranked_predictions'] = ranked_json
+
+            # Publish to ROS topics — _voice_command_cb will handle the WebSocket broadcast.
             self._pub_voice_ranked.publish(String(data=ranked_json))
             self._pub_voice_time.publish(Float32(data=result.inference_time_ms))
+            self._pub_voice_confidence.publish(Float32(data=result.confidence))
             self._pub_voice_status.publish(String(data='idle'))
-
-            # Also broadcast directly to WebSocket clients (they already subscribed to
-            # voice topics, but since we are the publisher we broadcast immediately).
-            payload = voice_to_json(
-                command=result.command,
-                confidence=result.confidence,
-                status='idle',
-                inference_time_ms=result.inference_time_ms,
-                ranked_predictions_raw=ranked_json,
-            )
-            self._ws.broadcast_sync(payload)
+            self._pub_voice_command.publish(String(data=result.command))
 
             self.get_logger().info(
                 f'Voice [POST /audio]: {result.command.upper()}  '

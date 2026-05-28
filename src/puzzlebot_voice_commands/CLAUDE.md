@@ -2,7 +2,16 @@
 
 ## Estado actual
 **Fase 8b completa:** 4 hablantes, augmentation 4x, modelos finales entrenados y guardados.
-**Fase 9 pendiente:** Nodo ROS 2 de inferencia + launch file + integración con bringup.
+**Fase 9 completa:** Nodo ROS 2 de inferencia implementado. Integración con dashboard vía bridge.
+
+### Archivos nuevos (Fase 9)
+- `voice_inference.py` — Motor de inferencia puro (sin ROS, sin sounddevice). Usado por el bridge para inferencia remota vía POST /audio desde el dashboard.
+- `voice_commands_node.py` — Nodo ROS 2 completo para uso futuro con micrófono local en el robot (sounddevice). Listo pero no integrado al launch principal hasta tener los nodos de control.
+
+### Dependencias Python requeridas en Linux
+```bash
+pip install "numpy>=1.25" scipy librosa "coverage>=7.2" fastapi "uvicorn[standard]" websockets
+```
 
 ---
 
@@ -104,38 +113,14 @@ def main(args=None):
 
 ---
 
-### 2. `launch/voice_commands.launch.py` (PENDIENTE)
+### 2. `launch/voice_commands.launch.py` — PENDIENTE (futuro)
 
-Crear directorio `launch/` en la raíz del paquete.  
-Patrón del repo (ver `puzzlebot_bringup/launch/`): usar `ament_index_python` + `launch_ros.actions.Node`.
+Solo necesario cuando se use `voice_commands_node` con mic local en el robot.
+El bridge ya integra la inferencia remota vía POST /audio.
 
-```python
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+### 3. Integrar con `puzzlebot_bringup` — PENDIENTE (futuro)
 
-def generate_launch_description():
-    artifact_dir_arg = DeclareLaunchArgument(
-        'artifact_dir',
-        default_value='src/puzzlebot_voice_commands/artifacts_final',
-    )
-    node = Node(
-        package='puzzlebot_voice_commands',
-        executable='voice_commands_node',
-        parameters=[{'artifact_dir': LaunchConfiguration('artifact_dir')}],
-        output='screen',
-    )
-    return LaunchDescription([artifact_dir_arg, node])
-```
-
-También registrar el directorio `launch/` en `setup.py` bajo `data_files`.
-
----
-
-### 3. Integrar con `puzzlebot_bringup` (PENDIENTE)
-
-Agregar el nodo voice_commands al launch principal (`puzzlebot_bringup/launch/puzzlebot_launch.py`) como `IncludeLaunchDescription` o directamente como `Node`.
+Cuando los nodos de control estén listos y se defina qué acción ejecuta cada comando de voz.
 
 ---
 
@@ -147,12 +132,13 @@ puzzlebot_voice_commands/
 ├── audio_io.py             — load_wav, normalize
 ├── librosa_features.py     — extract_librosa_frames (MFCC+ZCR+RMS+contrast) ← HMM usa este
 ├── mfcc.py                 — extract_mfcc_frames manual (NumPy) ← KMeans usa este
-├── voice_commands_node.py  — PENDIENTE DE CREAR
+├── voice_inference.py      — VoiceInferenceEngine: carga ambos modelos, infer(pcm) → resultado
+├── voice_commands_node.py  — Nodo ROS 2 con mic local (futuro uso en robot)
 ├── models/
 │   ├── hmm.py              — HiddenMarkovModelClassifier + _SingleHMM
 │   └── kmeans_codebook.py  — KMeansCodebookClassifier
 └── scripts/
-    └── live_test.py        — REFERENCIA COMPLETA: carga + grabación + inferencia
+    └── live_test.py        — Referencia: carga + grabación + inferencia interactiva
 ```
 
 ---
