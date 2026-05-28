@@ -4,11 +4,21 @@ Subscribes to core and optional topics, serializes messages, and broadcasts
 JSON to all connected WebSocket clients. Missing optional topics are silently
 ignored — the bridge will not crash if they don't exist.
 
-SAFETY: This node NEVER publishes to any control topic.
+Also exposes POST /audio for voice inference when the microphone is on the
+dashboard machine. Audio is received as WAV bytes, inference runs locally
+(KMeans + HMM), and results are published to /voice/* topics AND broadcast
+to WebSocket clients.
+
+SAFETY: This node NEVER publishes to any control topic (/cmd_vel, /goal_pose,
+/initialpose, etc.). Publishing to /voice/* is intentional and safe.
 """
 
+import io
+import json
 import logging
+import time
 
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -55,6 +65,8 @@ class BridgeNode(Node):
         self.declare_parameter('camera_topic',                  DEFAULT_TOPICS['camera'])
         self.declare_parameter('websocket_host',                WEBSOCKET_HOST_DEFAULT)
         self.declare_parameter('websocket_port',                WEBSOCKET_PORT_DEFAULT)
+        # artifact_dir: path to trained voice models. Empty string disables voice inference.
+        self.declare_parameter('artifact_dir', '')
 
         # Rate limiters.
         self._rl = {
@@ -62,7 +74,7 @@ class BridgeNode(Node):
             for key, hz in RATE_LIMITS_HZ.items()
         }
 
-        # Voice state accumulator (assembled before sending).
+        # Voice state accumulator (assembled before sending, from ROS topics).
         self._voice: dict = {
             'command': None,
             'confidence': None,
@@ -71,10 +83,33 @@ class BridgeNode(Node):
             'ranked_predictions': None,
         }
 
+        # Voice inference engine (optional — loaded if artifact_dir is set).
+        self._inference_engine = None
+        artifact_dir = self.get_parameter('artifact_dir').get_parameter_value().string_value
+        if artifact_dir:
+            self._load_voice_engine(artifact_dir)
+
+        # Voice publishers (used when inference runs in the bridge via POST /audio).
+        self._pub_voice_command = self.create_publisher(
+            String, DEFAULT_TOPICS['voice_command'], 10)
+        self._pub_voice_confidence = self.create_publisher(
+            Float32, DEFAULT_TOPICS['voice_confidence'], 10)
+        self._pub_voice_status = self.create_publisher(
+            String, DEFAULT_TOPICS['voice_status'], 10)
+        self._pub_voice_ranked = self.create_publisher(
+            String, DEFAULT_TOPICS['voice_ranked_predictions'], 10)
+        self._pub_voice_time = self.create_publisher(
+            Float32, DEFAULT_TOPICS['voice_inference_time'], 10)
+
         # Start WebSocket server.
         host = self.get_parameter('websocket_host').get_parameter_value().string_value
         port = self.get_parameter('websocket_port').get_parameter_value().integer_value
         self._ws = WebSocketServer(host=host, port=port)
+
+        # Register audio handler only if inference engine is ready.
+        if self._inference_engine is not None:
+            self._ws.set_audio_handler(self._handle_audio_bytes)
+
         self._ws.start()
 
         # Core subscribers.
@@ -195,6 +230,77 @@ class BridgeNode(Node):
             inference_time_ms=self._voice['inference_time_ms'],
             ranked_predictions_raw=self._voice['ranked_predictions'],
         )
+
+    # ------------------------------------------------------------------ #
+    #  Voice inference from dashboard microphone (POST /audio)
+    # ------------------------------------------------------------------ #
+
+    def _load_voice_engine(self, artifact_dir: str) -> None:
+        try:
+            from puzzlebot_voice_commands.voice_inference import VoiceInferenceEngine
+            self._inference_engine = VoiceInferenceEngine.load(artifact_dir)
+            self.get_logger().info('Voice inference engine loaded from: %s', artifact_dir)
+        except ImportError:
+            self.get_logger().warn(
+                'puzzlebot_voice_commands not installed — voice inference via POST /audio disabled.'
+            )
+        except FileNotFoundError as e:
+            self.get_logger().warn('Voice models not found: %s', str(e))
+
+    def _handle_audio_bytes(self, wav_bytes: bytes) -> None:
+        """Decode WAV bytes, run inference, publish results to ROS + WebSocket."""
+        try:
+            from scipy.io import wavfile
+
+            self._pub_voice_status.publish(String(data='processing'))
+
+            buf = io.BytesIO(wav_bytes)
+            sample_rate, data = wavfile.read(buf)
+
+            # Normalize to float32 [-1, 1]
+            if data.dtype == np.int16:
+                signal = data.astype(np.float32) / 32768.0
+            elif data.dtype == np.int32:
+                signal = data.astype(np.float32) / 2147483648.0
+            else:
+                signal = data.astype(np.float32)
+
+            if signal.ndim == 2:
+                signal = signal.mean(axis=1)
+
+            result = self._inference_engine.infer(signal, sample_rate)
+
+            ranked_json = json.dumps({
+                'kmeans': result.ranked_kmeans[:3],
+                'hmm': result.ranked_hmm[:3],
+            })
+
+            # Publish to ROS topics so other nodes (e.g. future voice controller) can react.
+            self._pub_voice_command.publish(String(data=result.command))
+            self._pub_voice_confidence.publish(Float32(data=result.confidence))
+            self._pub_voice_ranked.publish(String(data=ranked_json))
+            self._pub_voice_time.publish(Float32(data=result.inference_time_ms))
+            self._pub_voice_status.publish(String(data='idle'))
+
+            # Also broadcast directly to WebSocket clients (they already subscribed to
+            # voice topics, but since we are the publisher we broadcast immediately).
+            payload = voice_to_json(
+                command=result.command,
+                confidence=result.confidence,
+                status='idle',
+                inference_time_ms=result.inference_time_ms,
+                ranked_predictions_raw=ranked_json,
+            )
+            self._ws.broadcast_sync(payload)
+
+            self.get_logger().info(
+                'Voice [POST /audio]: %s  conf=%.4f  %.1fms',
+                result.command.upper(), result.confidence, result.inference_time_ms,
+            )
+
+        except Exception as exc:
+            self.get_logger().error('Audio inference error: %s', str(exc))
+            self._pub_voice_status.publish(String(data='idle'))
 
     def destroy_node(self):
         self._ws.stop()

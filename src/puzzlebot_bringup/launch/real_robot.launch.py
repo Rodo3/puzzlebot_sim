@@ -167,6 +167,17 @@ def generate_launch_description():
     arg_rviz        = DeclareLaunchArgument('rviz',        default_value='true')
     arg_avoidance   = DeclareLaunchArgument('avoidance',   default_value='true')
     arg_slam        = DeclareLaunchArgument('slam',        default_value='true')
+    arg_web_bridge  = DeclareLaunchArgument('web_bridge',  default_value='true',
+                          description='Launch the WebSocket bridge + web dashboard backend.')
+    arg_artifact_dir = DeclareLaunchArgument(
+        'artifact_dir',
+        default_value='src/puzzlebot_voice_commands/artifacts_final',
+        description=(
+            'Path to trained voice models (artifacts_final/). '
+            'Relative to the workspace root or absolute. '
+            'Leave empty to disable voice inference in the bridge.'
+        ),
+    )
     arg_lidar_topic = DeclareLaunchArgument(
         'lidar_topic',
         default_value='/Lidar',
@@ -177,10 +188,12 @@ def generate_launch_description():
         ),
     )
 
-    rviz_en      = LaunchConfiguration('rviz')
-    avoidance_en = LaunchConfiguration('avoidance')
-    slam_en      = LaunchConfiguration('slam')
-    lidar_topic  = LaunchConfiguration('lidar_topic')
+    rviz_en       = LaunchConfiguration('rviz')
+    avoidance_en  = LaunchConfiguration('avoidance')
+    slam_en       = LaunchConfiguration('slam')
+    web_bridge_en = LaunchConfiguration('web_bridge')
+    artifact_dir  = LaunchConfiguration('artifact_dir')
+    lidar_topic   = LaunchConfiguration('lidar_topic')
 
     # ── 1. robot_state_publisher ─────────────────────────────────────────
     rsp = Node(
@@ -266,7 +279,22 @@ def generate_launch_description():
         condition=IfCondition(slam_en),
     )
 
-    # ── 6. RViz (optional) ───────────────────────────────────────────────
+    # ── 6. Web dashboard bridge (optional, default on) ──────────────────
+    # Exposes ws://0.0.0.0:8000/ws (WebSocket) and POST /audio (voice inference).
+    # Disable with web_bridge:=false if running without a dashboard.
+    web_bridge = Node(
+        package='puzzlebot_web_bridge',
+        executable='bridge_node',
+        name='puzzlebot_web_bridge',
+        output='screen',
+        parameters=[{
+            'use_sim_time': False,
+            'artifact_dir': artifact_dir,
+        }],
+        condition=IfCondition(web_bridge_en),
+    )
+
+    # ── 7. RViz (optional) ───────────────────────────────────────────────
     rviz = Node(
         package='rviz2',
         executable='rviz2',
@@ -281,6 +309,8 @@ def generate_launch_description():
         arg_rviz,
         arg_avoidance,
         arg_slam,
+        arg_web_bridge,
+        arg_artifact_dir,
         arg_lidar_topic,
         rsp,
         odometry,
@@ -288,5 +318,6 @@ def generate_launch_description():
         pd_controller,
         obstacle_avoidance,
         pd_controller_direct,
+        web_bridge,
         rviz,
     ])

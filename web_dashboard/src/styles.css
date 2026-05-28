@@ -132,6 +132,58 @@ hr {
 }
 
 /* ── Voice panel ──────────────────────────────────────── */
+.voice-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-listen {
+  padding: 6px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-listen:hover:not(:disabled) {
+  background: var(--accent);
+  color: #000;
+}
+
+.btn-listen:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-listen.recording {
+  border-color: var(--err);
+  color: var(--err);
+  animation: pulse 0.8s ease-in-out infinite alternate;
+}
+
+.btn-listen.uploading {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.btn-listen.error {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+@keyframes pulse {
+  from { opacity: 1; }
+  to   { opacity: 0.4; }
+}
+
+.badge-error { background: #3d0000; color: var(--err); }
+
 .voice-main {
   display: flex;
   flex-direction: column;
