@@ -85,7 +85,7 @@ export default function VoiceCommandPanel({ voiceData, history }) {
       return;
     }
 
-    const ctx = new AudioContext();
+    const ctx = new AudioContext({ sampleRate: 16000 });
     const source = ctx.createMediaStreamSource(stream);
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (e) => {
