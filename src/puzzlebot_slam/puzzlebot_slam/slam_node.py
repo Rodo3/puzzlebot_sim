@@ -33,7 +33,7 @@ Esto evita el feedback loop: scan_matcher → sobreescribe corrección de ArUco
 import math
 
 import rclpy
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from rclpy.qos import (
@@ -117,12 +117,19 @@ class SlamNode(Node):
             enabled=bool(self.get_parameter('scan_matching_enabled').value),
         )
 
+        # Parámetros para scan match → EKF feedback
+        self._scan_match_min_score  = float(self.get_parameter('scan_match_min_score').value)
+        self._scan_match_cov_xy     = float(self.get_parameter('scan_match_cov_xy').value)
+        self._scan_match_cov_theta  = float(self.get_parameter('scan_match_cov_theta').value)
+
         map_qos = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self._pub_map = self.create_publisher(OccupancyGrid, '/map', map_qos)
+        self._pub_map        = self.create_publisher(OccupancyGrid, '/map', map_qos)
+        self._pub_scan_match = self.create_publisher(
+            PoseWithCovarianceStamped, '/scan_match/pose', 10)
         self._tf = tf2_ros.TransformBroadcaster(self)
 
         self.create_subscription(Odometry, '/odom', self._odom_cb, 10)
@@ -131,11 +138,9 @@ class SlamNode(Node):
         self.create_subscription(
             TransformStamped, '/map_to_odom', self._map_to_odom_cb, 10)
 
-        self.create_timer(0.1, self._broadcast_tf)   # 10 Hz — suficiente para TF tree
-        self.create_timer(1.0, self._publish_map)   # 1 Hz — reduce carga Python vs 0.5s previo
+        self.create_timer(0.1, self._broadcast_tf)
+        self.create_timer(1.0, self._publish_map)
 
-        # Corrección map→odom que publica _broadcast_tf.
-        # Actualizada por _map_to_odom_cb (ArUco/MCL) o _update_map_odom_tf (SLAM propio).
         self._map_odom_x   = 0.0
         self._map_odom_y   = 0.0
         self._map_odom_yaw = 0.0
@@ -186,6 +191,9 @@ class SlamNode(Node):
         self.declare_parameter('keyframe_min_rotation', math.radians(5.0))
 
         self.declare_parameter('scan_matching_enabled', False)
+        self.declare_parameter('scan_match_min_score',  15.0)
+        self.declare_parameter('scan_match_cov_xy',     0.04)
+        self.declare_parameter('scan_match_cov_theta',  0.03)
 
         # scan_match_updates_map_odom:
         #   True  → el scan matcher puede actualizar la corrección map→odom interna.
@@ -238,6 +246,15 @@ class SlamNode(Node):
                 throttle_duration_sec=2.0)
             map_pose = map_init
 
+        # True si el matcher encontró una corrección confiable Y la sanity check
+        # no la revirtió. map_pose is not map_init: durante warmup/disabled el
+        # matcher devuelve el mismo objeto initial_pose → descarta silenciosamente.
+        scan_matched = (
+            self._scan_matcher.enabled
+            and self._scan_matcher.last_score >= self._scan_match_min_score
+            and map_pose is not map_init
+        )
+
         # Actualiza map→odom solo cuando SLAM es el dueño del TF
         # (scan_match_updates_map_odom: true) Y el scan matching está activo.
         #
@@ -250,6 +267,11 @@ class SlamNode(Node):
         if self._scan_match_updates_map_odom:
             self._update_map_odom_tf(map_pose, odom_pose)
 
+        # Publicar corrección de pose al EKF para loop closure liviano.
+        # El Kalman la fusiona como medición adicional junto con ArUco.
+        if scan_matched:
+            self._publish_scan_match(map_pose, scan.header.stamp)
+
         if not self._keyframes.should_integrate(map_pose):
             return
 
@@ -257,6 +279,21 @@ class SlamNode(Node):
             self.get_logger().warn(
                 'Skipping scan: robot pose is outside the map bounds',
                 throttle_duration_sec=2.0)
+
+    def _publish_scan_match(self, map_pose: Pose2D, stamp) -> None:
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp    = stamp
+        msg.header.frame_id = self._map_frame
+        msg.pose.pose.position.x    = map_pose.x
+        msg.pose.pose.position.y    = map_pose.y
+        msg.pose.pose.orientation.z = math.sin(map_pose.yaw / 2.0)
+        msg.pose.pose.orientation.w = math.cos(map_pose.yaw / 2.0)
+        cov = [0.0] * 36
+        cov[0]  = self._scan_match_cov_xy
+        cov[7]  = self._scan_match_cov_xy
+        cov[35] = self._scan_match_cov_theta
+        msg.pose.covariance = cov
+        self._pub_scan_match.publish(msg)
 
     def _odom_to_map_pose(self, odom_pose: Pose2D) -> Pose2D:
         """Aplica la corrección map→odom almacenada para obtener la pose en frame map.

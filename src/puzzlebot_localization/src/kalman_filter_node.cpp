@@ -70,6 +70,11 @@ public:
     // desaparece por mucho tiempo. Unidades: m² para x/y, rad² para theta.
     declare_parameter("p_max_xy",    1.0);
     declare_parameter("p_max_theta", 2.0);
+    // Scan match → EKF feedback: ruido mínimo de la medición de scan matching.
+    // Más conservador que ArUco porque el matcher trabaja con un mapa imperfecto.
+    declare_parameter("scan_match_noise_x",     0.04);
+    declare_parameter("scan_match_noise_y",     0.04);
+    declare_parameter("scan_match_noise_theta", 0.03);
 
     double ic = get_parameter("initial_covariance").as_double();
     x_  = {get_parameter("initial_x").as_double(),
@@ -89,6 +94,11 @@ public:
     double rt  = get_parameter("meas_noise_theta").as_double();
     R_ = {rx,0,0, 0,ry,0, 0,0,rt};
 
+    double smx = get_parameter("scan_match_noise_x").as_double();
+    double smy = get_parameter("scan_match_noise_y").as_double();
+    double smt = get_parameter("scan_match_noise_theta").as_double();
+    R_scan_ = {smx,0,0, 0,smy,0, 0,0,smt};
+
     zupt_threshold_ = get_parameter("zupt_speed_threshold").as_double();
     p_max_xy_       = get_parameter("p_max_xy").as_double();
     p_max_theta_    = get_parameter("p_max_theta").as_double();
@@ -100,6 +110,10 @@ public:
     sub_aruco_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       "/aruco/pose", 10,
       std::bind(&KalmanFilterNode::aruco_cb, this, std::placeholders::_1));
+
+    sub_scan_match_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      "/scan_match/pose", 10,
+      std::bind(&KalmanFilterNode::scan_match_cb, this, std::placeholders::_1));
 
     pub_odom_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -233,6 +247,39 @@ private:
     publish();
   }
 
+  void scan_match_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
+  {
+    // Solo fusiona si el EKF ya tiene pose válida (primer ArUco ya llegó).
+    // La corrección de scan matching NO inicializa el estado — rol exclusivo de ArUco.
+    if (!initialized_) return;
+
+    const auto & p = msg->pose.pose;
+    tf2::Quaternion q(p.orientation.x, p.orientation.y,
+                      p.orientation.z, p.orientation.w);
+    double z[3] = {p.position.x, p.position.y, tf2::getYaw(q)};
+
+    const auto & cov = msg->pose.covariance;
+    // Aplicar floor de R_scan_. El mensaje trae la covarianza de slam_params.yaml
+    // pero R_scan_ actúa como mínimo irrevocable para no sobreconfiar al matcher.
+    double r_x     = std::max(cov[0]  > 1e-9 ? cov[0]  : R_scan_[0], R_scan_[0]);
+    double r_y     = std::max(cov[7]  > 1e-9 ? cov[7]  : R_scan_[4], R_scan_[4]);
+    double r_theta = std::max(cov[35] > 1e-9 ? cov[35] : R_scan_[8], R_scan_[8]);
+    Mat3 R = {r_x, 0.0, 0.0,  0.0, r_y, 0.0,  0.0, 0.0, r_theta};
+
+    Mat3 S = mat_add(P_, R);
+    Mat3 K = mat_mul(P_, mat_inv3(S));
+
+    double inn[3] = {z[0]-x_[0], z[1]-x_[1], norm_angle(z[2]-x_[2])};
+    x_[0] += K[0]*inn[0] + K[1]*inn[1] + K[2]*inn[2];
+    x_[1] += K[3]*inn[0] + K[4]*inn[1] + K[5]*inn[2];
+    x_[2]  = norm_angle(x_[2] + K[6]*inn[0] + K[7]*inn[1] + K[8]*inn[2]);
+
+    Mat3 IK = {1-K[0],-K[1],-K[2], -K[3],1-K[4],-K[5], -K[6],-K[7],1-K[8]};
+    P_ = mat_mul(IK, P_);
+
+    publish();
+  }
+
   void publish()
   {
     tf2::Quaternion q;
@@ -265,11 +312,12 @@ private:
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_aruco_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_scan_match_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
   std::array<double, 3> x_;
-  Mat3 P_, Q_, R_;
+  Mat3 P_, Q_, R_, R_scan_;
   rclcpp::Time last_time_;
   bool init_from_aruco_;
   bool initialized_;

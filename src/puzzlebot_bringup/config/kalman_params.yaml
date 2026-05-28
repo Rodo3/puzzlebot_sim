@@ -21,6 +21,15 @@ kalman_filter_node:
     p_max_xy:    1.0   # [m²]
     p_max_theta: 2.0   # [rad²] → σ_max ≈ 81°
     initial_covariance:  0.1
+
+    # ── Scan match → EKF feedback ────────────────────────────────────────────
+    # Ruido mínimo (floor) de la medición enviada por slam_node en /scan_match/pose.
+    # Más conservador que ArUco: el matcher trabaja con un mapa imperfecto.
+    # scan_match_noise_xy: 0.04 m²  → σ_min ≈ 20 cm (floor de posición)
+    # scan_match_noise_theta: 0.03 rad² → σ_min ≈ 10° (floor de yaw)
+    scan_match_noise_x:     0.04
+    scan_match_noise_y:     0.04
+    scan_match_noise_theta: 0.03
     # ── Inicialización desde ArUco (RECOMENDADO para robot real) ─────────────
     #
     # init_from_aruco: true
