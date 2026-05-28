@@ -53,15 +53,23 @@ public:
     declare_parameter("process_noise_theta", 0.005);
     declare_parameter("meas_noise_x",        0.05);
     declare_parameter("meas_noise_y",        0.05);
-    declare_parameter("meas_noise_theta",    0.01);
+    declare_parameter("meas_noise_theta",    0.07);
     declare_parameter("initial_covariance",  0.1);
     declare_parameter("initial_x",     0.0);
     declare_parameter("initial_y",     0.0);
     declare_parameter("initial_theta", 0.0);
-    // Si true, el Kalman ignora /odom_raw hasta recibir el primer /aruco/pose
-    // válido y lo usa como estado inicial en lugar de initial_x/y/theta.
-    // Recomendado cuando el robot arranca mirando un marcador conocido.
     declare_parameter("init_from_aruco", true);
+    // ZUPT — Zero Velocity Update: escala Q por la velocidad observada.
+    // Cuando el robot está quieto (|v|+|ω| < threshold), Q_scale ≈ 0 y P
+    // deja de crecer. Esto evita que el elipse de incertidumbre se expanda
+    // indefinidamente entre correcciones ArUco aunque el robot no se mueva.
+    // zupt_speed_threshold: velocidad (m/s + rad/s) por debajo de la cual
+    // el robot se considera estático. Empezar con 0.02 y subir si no converge.
+    declare_parameter("zupt_speed_threshold", 0.02);
+    // P_max: techo de covarianza por eje. Evita que P explote si ArUco
+    // desaparece por mucho tiempo. Unidades: m² para x/y, rad² para theta.
+    declare_parameter("p_max_xy",    1.0);
+    declare_parameter("p_max_theta", 2.0);
 
     double ic = get_parameter("initial_covariance").as_double();
     x_  = {get_parameter("initial_x").as_double(),
@@ -69,7 +77,7 @@ public:
            get_parameter("initial_theta").as_double()};
     P_  = {ic,0,0, 0,ic,0, 0,0,ic};
     init_from_aruco_ = get_parameter("init_from_aruco").as_bool();
-    initialized_     = !init_from_aruco_;   // si init_from_aruco=false, ya está listo
+    initialized_     = !init_from_aruco_;
 
     double qx  = get_parameter("process_noise_x").as_double();
     double qy  = get_parameter("process_noise_y").as_double();
@@ -80,6 +88,10 @@ public:
     double ry  = get_parameter("meas_noise_y").as_double();
     double rt  = get_parameter("meas_noise_theta").as_double();
     R_ = {rx,0,0, 0,ry,0, 0,0,rt};
+
+    zupt_threshold_ = get_parameter("zupt_speed_threshold").as_double();
+    p_max_xy_       = get_parameter("p_max_xy").as_double();
+    p_max_theta_    = get_parameter("p_max_theta").as_double();
 
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom_raw", 10,
@@ -135,12 +147,23 @@ private:
               0,1, delta_d*std::cos(th),
               0,0,1};
 
-    // Q debe escalarse por dt para que la incertidumbre crezca a Q_valor/segundo
-    // independientemente de la tasa de llegada de /odom_raw.
-    // Sin escalar: a 50 Hz con Q_x=0.01 → P_xx crece 0.5 m²/s → 50 m² en 100 s.
+    // ZUPT: escalar Q por velocidad observada.
+    // Cuando |v|+|ω| < zupt_threshold → q_scale ≈ 0 → P no crece.
+    // Cuando el robot se mueve → q_scale → 1.0 → comportamiento normal.
+    // Físicamente correcto: si el robot no se mueve, la incertidumbre
+    // de posición no debería crecer (los encoders confirman que hay 0 desplazamiento).
+    double speed    = std::abs(v) + std::abs(w);
+    double q_scale  = std::min(speed / std::max(zupt_threshold_, 1e-6), 1.0);
+
     Mat3 Q_dt{};
-    for (int i = 0; i < 9; ++i) Q_dt[i] = Q_[i] * dt;
+    for (int i = 0; i < 9; ++i) Q_dt[i] = Q_[i] * dt * q_scale;
     P_ = mat_add(mat_mul(mat_mul(F, P_), mat_transpose(F)), Q_dt);
+
+    // P_max clamp: techo de seguridad para que P no explote si ArUco
+    // desaparece durante un tiempo prolongado (p.ej. zona sin cobertura).
+    P_[0] = std::min(P_[0], p_max_xy_);
+    P_[4] = std::min(P_[4], p_max_xy_);
+    P_[8] = std::min(P_[8], p_max_theta_);
 
     publish();
   }
@@ -248,8 +271,11 @@ private:
   std::array<double, 3> x_;
   Mat3 P_, Q_, R_;
   rclcpp::Time last_time_;
-  bool init_from_aruco_;   // parámetro: esperar primer ArUco para inicializar
-  bool initialized_;       // true cuando el estado ya es válido
+  bool init_from_aruco_;
+  bool initialized_;
+  double zupt_threshold_;
+  double p_max_xy_;
+  double p_max_theta_;
 };
 
 int main(int argc, char ** argv)

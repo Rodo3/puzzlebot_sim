@@ -276,6 +276,7 @@ def generate_launch_description():
             'max_detection_distance': 2.5,    # ampliado: centro pista (1.88,2.43) → 2.43 m del marker más cercano
             'max_incidence_angle_deg': 75.0,  # ampliado: cubre paredes laterales en toda la pista
             'max_processing_hz': 8.0,         # limita solvePnP a 8 Hz para no acumular backlog de frames
+            'max_position_jump': 0.25,        # reducido: rechaza outliers de 32cm con robot quieto (era 0.5)
             'map_min_x': 0.0,
             'map_max_x': 3.76,
             'map_min_y': 0.0,

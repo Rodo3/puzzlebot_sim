@@ -3,13 +3,23 @@ kalman_filter_node:
     process_noise_x:     0.01
     process_noise_y:     0.01
     process_noise_theta: 0.005
-    meas_noise_x:        0.05
-    meas_noise_y:        0.05
-    # meas_noise_theta actúa ahora como floor mínimo de R_theta (no solo fallback).
-    # Con el floor activo en kalman_filter_node.cpp, K_theta ≈ 0.12 en lugar de ~0.98.
-    # Resultado: correcciones de yaw suaves aunque ArUco reporte σ_θ muy bajo.
-    # 0.07 rad² → σ_min ≈ 15° (apropiado para solvePnP a 1.5–2.5 m con incidencia oblicua).
-    meas_noise_theta:    0.07
+
+    meas_noise_x:        0.05   # floor de R_x [m²]; activo cuando cov ArUco < 0.05
+    meas_noise_y:        0.05   # floor de R_y [m²]
+    meas_noise_theta:    0.07   # floor de R_θ [rad²] → σ_min ≈ 15°; evita K_θ≈1
+
+    # ── ZUPT — Zero-Velocity Update ─────────────────────────────────────────
+    # Escala Q × (speed / zupt_speed_threshold).
+    # Con robot quieto: Q_scale ≈ 0 → P no crece → elipse estable ante ArUco continuo.
+    # Con robot en movimiento: Q_scale = 1.0 → comportamiento normal.
+    # Subir threshold si el robot tarda en encoger el elipse al detenerse.
+    zupt_speed_threshold: 0.02  # m/s + rad/s combinado
+
+    # ── P_max clamp ──────────────────────────────────────────────────────────
+    # Techo de P para que no explote si ArUco desaparece varios segundos.
+    # 1.0 m² → σ_max = 1.0 m (zona de búsqueda razonable al retomar markers).
+    p_max_xy:    1.0   # [m²]
+    p_max_theta: 2.0   # [rad²] → σ_max ≈ 81°
     initial_covariance:  0.1
     # ── Inicialización desde ArUco (RECOMENDADO para robot real) ─────────────
     #
