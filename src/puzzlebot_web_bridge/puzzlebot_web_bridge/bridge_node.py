@@ -288,7 +288,10 @@ class BridgeNode(Node):
             self._voice['inference_time_ms'] = result.inference_time_ms
             self._voice['ranked_predictions'] = ranked_json
 
-            # Publish to ROS topics — _voice_command_cb will handle the WebSocket broadcast.
+            # Broadcast directly to WebSocket — don't rely on the ROS roundtrip.
+            self._ws.broadcast_sync(self._build_voice_payload())
+
+            # Also publish to ROS topics for other nodes that may listen.
             self._pub_voice_ranked.publish(String(data=ranked_json))
             self._pub_voice_time.publish(Float32(data=result.inference_time_ms))
             self._pub_voice_confidence.publish(Float32(data=result.confidence))
