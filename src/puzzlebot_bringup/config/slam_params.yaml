@@ -47,6 +47,35 @@ slam_node:
     use_keyframes:             true
     keyframe_min_translation:  0.10    # 10 cm mínimo de traslación (antes 8 cm)
     keyframe_min_rotation:     0.0873  # 5° mínimo de rotación (antes 3°)
-    # Scan matching local conservador: corrige principalmente yaw al girar.
-    # El matcher tiene warmup y límites de corrección para no arrastrar el mapa.
+
+    # Scan matching — ACTIVADO con kalman:=true (modo robot real).
+    #
+    # Con scan_match_updates_map_odom: false (activo cuando kalman:=true),
+    # el matcher NO puede tocar el TF map→odom — el EKF/ArUco sigue siendo
+    # el dueño de la localización.  El matcher SOLO refina la pose de cada
+    # scan antes de integrarlo al mapa.  No hay feedback loop posible.
+    #
+    # Efecto: aunque el EKF llegue con 3–5° de drift, cada scan se coloca
+    # en su posición óptima dentro del mapa ya construido → sin doble-pared.
+    #
+    # Para localización (MCL): dejar false — MCL tiene su propio mecanismo.
     scan_matching_enabled:     true
+
+    # ── Scan match → EKF feedback (loop closure liviano) ────────────────────
+    # Cuando el matcher encuentra una buena corrección (score ≥ min_score),
+    # slam_node publica /scan_match/pose que el Kalman funde como medición
+    # adicional (junto con ArUco).  Esto corrige el drift acumulado cuando el
+    # robot vuelve a pasar por zonas ya mapeadas — loop closure sin pose graph.
+    #
+    # scan_match_min_score: mínimo de log-odds acumulado para confiar en el match.
+    #   A 0.05m/px, l_occ≈1.39 por celda → score=15 ≈ 11 celdas de pared vistas.
+    #   Sube si hay falsos loop closures; baja si las correcciones no llegan.
+    scan_match_min_score:      15.0
+
+    # Covarianza de la medición de scan match enviada al EKF.
+    # Más conservadora que ArUco (que da σ_xy≈9cm): el matcher trabaja con un
+    # mapa imperfecto, así que no es tan preciso como un marcador conocido.
+    # scan_match_cov_xy: 0.04 m²  → σ_xy ≈ 20 cm  (floor de posición)
+    # scan_match_cov_theta: 0.03 rad²  → σ_θ ≈ 10°  (floor de yaw)
+    scan_match_cov_xy:         0.04
+    scan_match_cov_theta:      0.03

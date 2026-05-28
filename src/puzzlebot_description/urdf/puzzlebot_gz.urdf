@@ -174,13 +174,12 @@
     <parent link="base_link"/>
     <child link="lidar_link"/>
     <!--
-      Posición del LiDAR respecto a base_link.
-      z = 0.15 m (altura sobre la placa base, medida física).
-      x = 0.0  — ajustar si el LiDAR está desplazado hacia adelante:
-                  medir distancia desde el centro del eje de ruedas
-                  hasta el centro del LiDAR en el eje X del robot.
+      Posición del LiDAR respecto a base_link (medida física).
+      x = 0.000 m — centrado sobre el eje de ruedas (sin offset adelante/atrás)
+      y = 0.000 m — centrado lateralmente
+      z = 0.175 m — altura medida desde el centro de la placa (base_link)
     -->
-    <origin xyz="0.0 0.0 0.15" rpy="0 0 0"/>
+    <origin xyz="0.0 0.0 0.175" rpy="0 0 0"/>
   </joint>
 
   <joint name="caster_joint" type="fixed">
@@ -212,8 +211,8 @@
                     /model/puzzlebot/tf         (gz topic)
     Joint velocities are read via ros_gz_bridge JointState bridge.
 
-    Wheel separation = 0.19 m  (matches URDF joint origins: 0.095 * 2)
-    Wheel radius     = 0.0425 m
+    Wheel separation = 0.18 m  (matches URDF joint origins: 0.095 * 2)
+    Wheel radius     = 0.05 m
   -->
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system"

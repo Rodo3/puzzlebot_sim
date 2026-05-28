@@ -53,15 +53,28 @@ public:
     declare_parameter("process_noise_theta", 0.005);
     declare_parameter("meas_noise_x",        0.05);
     declare_parameter("meas_noise_y",        0.05);
-    declare_parameter("meas_noise_theta",    0.01);
+    declare_parameter("meas_noise_theta",    0.07);
     declare_parameter("initial_covariance",  0.1);
     declare_parameter("initial_x",     0.0);
     declare_parameter("initial_y",     0.0);
     declare_parameter("initial_theta", 0.0);
-    // Si true, el Kalman ignora /odom_raw hasta recibir el primer /aruco/pose
-    // válido y lo usa como estado inicial en lugar de initial_x/y/theta.
-    // Recomendado cuando el robot arranca mirando un marcador conocido.
     declare_parameter("init_from_aruco", true);
+    // ZUPT — Zero Velocity Update: escala Q por la velocidad observada.
+    // Cuando el robot está quieto (|v|+|ω| < threshold), Q_scale ≈ 0 y P
+    // deja de crecer. Esto evita que el elipse de incertidumbre se expanda
+    // indefinidamente entre correcciones ArUco aunque el robot no se mueva.
+    // zupt_speed_threshold: velocidad (m/s + rad/s) por debajo de la cual
+    // el robot se considera estático. Empezar con 0.02 y subir si no converge.
+    declare_parameter("zupt_speed_threshold", 0.02);
+    // P_max: techo de covarianza por eje. Evita que P explote si ArUco
+    // desaparece por mucho tiempo. Unidades: m² para x/y, rad² para theta.
+    declare_parameter("p_max_xy",    1.0);
+    declare_parameter("p_max_theta", 2.0);
+    // Scan match → EKF feedback: ruido mínimo de la medición de scan matching.
+    // Más conservador que ArUco porque el matcher trabaja con un mapa imperfecto.
+    declare_parameter("scan_match_noise_x",     0.04);
+    declare_parameter("scan_match_noise_y",     0.04);
+    declare_parameter("scan_match_noise_theta", 0.03);
 
     double ic = get_parameter("initial_covariance").as_double();
     x_  = {get_parameter("initial_x").as_double(),
@@ -69,7 +82,7 @@ public:
            get_parameter("initial_theta").as_double()};
     P_  = {ic,0,0, 0,ic,0, 0,0,ic};
     init_from_aruco_ = get_parameter("init_from_aruco").as_bool();
-    initialized_     = !init_from_aruco_;   // si init_from_aruco=false, ya está listo
+    initialized_     = !init_from_aruco_;
 
     double qx  = get_parameter("process_noise_x").as_double();
     double qy  = get_parameter("process_noise_y").as_double();
@@ -81,6 +94,15 @@ public:
     double rt  = get_parameter("meas_noise_theta").as_double();
     R_ = {rx,0,0, 0,ry,0, 0,0,rt};
 
+    double smx = get_parameter("scan_match_noise_x").as_double();
+    double smy = get_parameter("scan_match_noise_y").as_double();
+    double smt = get_parameter("scan_match_noise_theta").as_double();
+    R_scan_ = {smx,0,0, 0,smy,0, 0,0,smt};
+
+    zupt_threshold_ = get_parameter("zupt_speed_threshold").as_double();
+    p_max_xy_       = get_parameter("p_max_xy").as_double();
+    p_max_theta_    = get_parameter("p_max_theta").as_double();
+
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom_raw", 10,
       std::bind(&KalmanFilterNode::odom_cb, this, std::placeholders::_1));
@@ -88,6 +110,10 @@ public:
     sub_aruco_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       "/aruco/pose", 10,
       std::bind(&KalmanFilterNode::aruco_cb, this, std::placeholders::_1));
+
+    sub_scan_match_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      "/scan_match/pose", 10,
+      std::bind(&KalmanFilterNode::scan_match_cb, this, std::placeholders::_1));
 
     pub_odom_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -134,7 +160,24 @@ private:
     Mat3 F = {1,0,-delta_d*std::sin(th),
               0,1, delta_d*std::cos(th),
               0,0,1};
-    P_ = mat_add(mat_mul(mat_mul(F, P_), mat_transpose(F)), Q_);
+
+    // ZUPT: escalar Q por velocidad observada.
+    // Cuando |v|+|ω| < zupt_threshold → q_scale ≈ 0 → P no crece.
+    // Cuando el robot se mueve → q_scale → 1.0 → comportamiento normal.
+    // Físicamente correcto: si el robot no se mueve, la incertidumbre
+    // de posición no debería crecer (los encoders confirman que hay 0 desplazamiento).
+    double speed    = std::abs(v) + std::abs(w);
+    double q_scale  = std::min(speed / std::max(zupt_threshold_, 1e-6), 1.0);
+
+    Mat3 Q_dt{};
+    for (int i = 0; i < 9; ++i) Q_dt[i] = Q_[i] * dt * q_scale;
+    P_ = mat_add(mat_mul(mat_mul(F, P_), mat_transpose(F)), Q_dt);
+
+    // P_max clamp: techo de seguridad para que P no explote si ArUco
+    // desaparece durante un tiempo prolongado (p.ej. zona sin cobertura).
+    P_[0] = std::min(P_[0], p_max_xy_);
+    P_[4] = std::min(P_[4], p_max_xy_);
+    P_[8] = std::min(P_[8], p_max_theta_);
 
     publish();
   }
@@ -157,14 +200,16 @@ private:
     // ── MODO BOOTSTRAP: primer ArUco inicializa el estado ─────────────────
     // En lugar de fusionar (que requiere un estado previo válido), se hace
     // un reset directo usando la pose ArUco como verdad absoluta.
-    // La covarianza inicial se toma de la covarianza del mensaje ArUco.
+    // La covarianza inicial se toma de la covarianza del mensaje ArUco,
+    // con floor desde R_ para no asumir precisión imposible en el robot real.
     if (!initialized_) {
       x_[0] = z[0];
       x_[1] = z[1];
       x_[2] = z[2];
-      P_ = {cov[0],  0.0,     0.0,
-            0.0,     cov[7],  0.0,
-            0.0,     0.0,     cov[35] > 1e-9 ? cov[35] : R_[8]};
+      double p_theta0 = std::max(cov[35] > 1e-9 ? cov[35] : R_[8], R_[8]);
+      P_ = {std::max(cov[0], R_[0]),  0.0,      0.0,
+            0.0,     std::max(cov[7], R_[4]),    0.0,
+            0.0,     0.0,                         p_theta0};
       initialized_ = true;
       last_time_   = now();   // reset del reloj para el primer dt de odom
       RCLCPP_INFO(get_logger(),
@@ -176,12 +221,15 @@ private:
     }
 
     // ── MODO NORMAL: fusión EKF con la corrección ArUco ───────────────────
-    // Construye R desde la covarianza diferenciada por eje que calculó ArUco.
-    Mat3 R = {
-      cov[0],  0.0,    0.0,
-      0.0,     cov[7], 0.0,
-      0.0,     0.0,    cov[35] > 1e-9 ? cov[35] : R_[8]
-    };
+    // Construye R aplicando un floor desde meas_noise_* para cada eje.
+    // Sin floor, ArUco reporta cov[35] ≈ 2.25e-4 rad² (σ≈0.86°), dando
+    // K_theta ≈ 0.98 — el EKF prácticamente sobreescribe el yaw en cada
+    // detección, amplificando el ruido real de solvePnP a 1.5–2.5 m.
+    // Con meas_noise_theta: 0.07 rad² (σ_min≈15°), K_theta baja a ~0.12.
+    double r_x     = std::max(cov[0],                          R_[0]);
+    double r_y     = std::max(cov[7],                          R_[4]);
+    double r_theta = std::max(cov[35] > 1e-9 ? cov[35] : R_[8], R_[8]);
+    Mat3 R = {r_x, 0.0, 0.0,  0.0, r_y, 0.0,  0.0, 0.0, r_theta};
 
     // H = I (medición directa de pose), S = P + R, K = P * S^-1
     Mat3 S = mat_add(P_, R);
@@ -193,6 +241,39 @@ private:
     x_[2]  = norm_angle(x_[2] + K[6]*inn[0] + K[7]*inn[1] + K[8]*inn[2]);
 
     // P = (I - K) P
+    Mat3 IK = {1-K[0],-K[1],-K[2], -K[3],1-K[4],-K[5], -K[6],-K[7],1-K[8]};
+    P_ = mat_mul(IK, P_);
+
+    publish();
+  }
+
+  void scan_match_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
+  {
+    // Solo fusiona si el EKF ya tiene pose válida (primer ArUco ya llegó).
+    // La corrección de scan matching NO inicializa el estado — rol exclusivo de ArUco.
+    if (!initialized_) return;
+
+    const auto & p = msg->pose.pose;
+    tf2::Quaternion q(p.orientation.x, p.orientation.y,
+                      p.orientation.z, p.orientation.w);
+    double z[3] = {p.position.x, p.position.y, tf2::getYaw(q)};
+
+    const auto & cov = msg->pose.covariance;
+    // Aplicar floor de R_scan_. El mensaje trae la covarianza de slam_params.yaml
+    // pero R_scan_ actúa como mínimo irrevocable para no sobreconfiar al matcher.
+    double r_x     = std::max(cov[0]  > 1e-9 ? cov[0]  : R_scan_[0], R_scan_[0]);
+    double r_y     = std::max(cov[7]  > 1e-9 ? cov[7]  : R_scan_[4], R_scan_[4]);
+    double r_theta = std::max(cov[35] > 1e-9 ? cov[35] : R_scan_[8], R_scan_[8]);
+    Mat3 R = {r_x, 0.0, 0.0,  0.0, r_y, 0.0,  0.0, 0.0, r_theta};
+
+    Mat3 S = mat_add(P_, R);
+    Mat3 K = mat_mul(P_, mat_inv3(S));
+
+    double inn[3] = {z[0]-x_[0], z[1]-x_[1], norm_angle(z[2]-x_[2])};
+    x_[0] += K[0]*inn[0] + K[1]*inn[1] + K[2]*inn[2];
+    x_[1] += K[3]*inn[0] + K[4]*inn[1] + K[5]*inn[2];
+    x_[2]  = norm_angle(x_[2] + K[6]*inn[0] + K[7]*inn[1] + K[8]*inn[2]);
+
     Mat3 IK = {1-K[0],-K[1],-K[2], -K[3],1-K[4],-K[5], -K[6],-K[7],1-K[8]};
     P_ = mat_mul(IK, P_);
 
@@ -231,14 +312,18 @@ private:
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_aruco_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_scan_match_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
   std::array<double, 3> x_;
-  Mat3 P_, Q_, R_;
+  Mat3 P_, Q_, R_, R_scan_;
   rclcpp::Time last_time_;
-  bool init_from_aruco_;   // parámetro: esperar primer ArUco para inicializar
-  bool initialized_;       // true cuando el estado ya es válido
+  bool init_from_aruco_;
+  bool initialized_;
+  double zupt_threshold_;
+  double p_max_xy_;
+  double p_max_theta_;
 };
 
 int main(int argc, char ** argv)

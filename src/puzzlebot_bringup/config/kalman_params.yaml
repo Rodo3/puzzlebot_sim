@@ -3,48 +3,73 @@ kalman_filter_node:
     process_noise_x:     0.01
     process_noise_y:     0.01
     process_noise_theta: 0.005
-    meas_noise_x:        0.05
-    meas_noise_y:        0.05
-    meas_noise_theta:    0.01
-    initial_covariance:  0.1
-    # ── Pose inicial del robot al arrancar (frame: map) ──────────────────
-    #
-    # IMPORTANTE: el aruco_map.yaml define el origen (0,0) en la esquina
-    # inferior-izquierda (SW) de la pista. El robot SIEMPRE debe arrancar
-    # desde el mismo punto físico para que las correcciones ArUco sean válidas.
-    #
-    # Punto de arranque recomendado:
-    #   • Posición: 30 cm adentro de la esquina SW (para no quedar pegado a paredes)
-    #   • Orientación: mirando al norte (+Y) = π/2 rad
-    #
-    # Pista vista desde arriba:
-    #
-    #   Y=4.86 ┌──────[ID1]──────┐
-    #          │                  │
-    #   Y=3.90 [ID0]        [ID2] │
-    #          │                  │
-    #   Y=1.04 [ID4]        [ID3] │
-    #          │                  │
-    #   Y=0.00 └──────────────────┘
-    #          X=0               X=3.76
-    #
-    #   ★ = punto de arranque → (0.30, 0.30, π/2)
-    #       mirando hacia el norte (hacia ID1)
-    #
-    # SESIÓN 1 — Mapeo (slam:=true):
-    #   Coloca el robot en la esquina SW mirando al norte y usa estos valores.
-    #   El mapa se construirá con ese punto como origen.
-    #
-    # SESIÓN 2 — Localización MCL (slam:=false mcl:=true):
-    #   Coloca el robot en el mismo punto físico de siempre.
-    #   Ajusta initial_x/y/theta si usas un punto de inicio diferente.
-    initial_x:      0.30     # usado solo si init_from_aruco: false
-    initial_y:      0.30
-    initial_theta:  1.5708
 
-    # ── Inicialización desde ArUco ────────────────────────────────────────
-    # Si true: el Kalman espera el primer /aruco/pose válido y usa esa pose
-    # como estado inicial (reset directo, ganancia=1). El odómetro se ignora
-    # hasta recibir la primera detección.
-    # Si false: arranca desde initial_x/y/theta estático.
+    meas_noise_x:        0.05   # floor de R_x [m²]; activo cuando cov ArUco < 0.05
+    meas_noise_y:        0.05   # floor de R_y [m²]
+    meas_noise_theta:    0.07   # floor de R_θ [rad²] → σ_min ≈ 15°; evita K_θ≈1
+
+    # ── ZUPT — Zero-Velocity Update ─────────────────────────────────────────
+    # Escala Q × (speed / zupt_speed_threshold).
+    # Con robot quieto: Q_scale ≈ 0 → P no crece → elipse estable ante ArUco continuo.
+    # Con robot en movimiento: Q_scale = 1.0 → comportamiento normal.
+    # Subir threshold si el robot tarda en encoger el elipse al detenerse.
+    zupt_speed_threshold: 0.02  # m/s + rad/s combinado
+
+    # ── P_max clamp ──────────────────────────────────────────────────────────
+    # Techo de P para que no explote si ArUco desaparece varios segundos.
+    # 1.0 m² → σ_max = 1.0 m (zona de búsqueda razonable al retomar markers).
+    p_max_xy:    1.0   # [m²]
+    p_max_theta: 2.0   # [rad²] → σ_max ≈ 81°
+    initial_covariance:  0.1
+
+    # ── Scan match → EKF feedback ────────────────────────────────────────────
+    # Ruido mínimo (floor) de la medición enviada por slam_node en /scan_match/pose.
+    # Más conservador que ArUco: el matcher trabaja con un mapa imperfecto.
+    # scan_match_noise_xy: 0.04 m²  → σ_min ≈ 20 cm (floor de posición)
+    # scan_match_noise_theta: 0.03 rad² → σ_min ≈ 10° (floor de yaw)
+    scan_match_noise_x:     0.04
+    scan_match_noise_y:     0.04
+    scan_match_noise_theta: 0.03
+    # ── Inicialización desde ArUco (RECOMENDADO para robot real) ─────────────
+    #
+    # init_from_aruco: true
+    #   El Kalman arranca sin estado definido y espera el primer /aruco/pose
+    #   válido. Ese mensaje inicializa x, y, theta directamente (reset duro,
+    #   ganancia K=1). initial_x/y/theta se IGNORAN.
+    #
+    #   Protocolo de arranque:
+    #     1. Coloca el robot MIRANDO a cualquier marcador (< 1.8 m de distancia)
+    #     2. Lanza el sistema
+    #     3. Espera el log: "✅ Pose inicial desde ArUco: x=... y=... theta=..."
+    #     4. Ya puedes mover el robot
+    #
+    #   Zona de inicio recomendada: frente a ID4 (pared Oeste, Y≈1.04)
+    #   mirando al Este (+X). El robot queda en ≈(0.20, 1.04, 0.0).
+    #
+    # init_from_aruco: false
+    #   Arranca desde initial_x/y/theta estático (útil en simulación o cuando
+    #   el punto de partida físico es siempre el mismo y conocido).
+    #
     init_from_aruco: true
+
+    # ── Pose inicial estática (solo si init_from_aruco: false) ───────────────
+    #
+    # Pista vista desde arriba — origen (0,0) = esquina SW:
+    #
+    #   Y=4.86 ┌──────[ID1 norte]──────┐
+    #          │                        │
+    #   Y=3.90 [ID0 oeste]    [ID2 este]│
+    #          │                        │
+    #   Y=1.04 [ID4 oeste]    [ID3 este]│
+    #          │                        │
+    #   Y=0.00 └────────────────────────┘
+    #          X=0                    X=3.76
+    #
+    # Punto de arranque esquina SW: (0.30, 0.30) mirando al norte (π/2 rad).
+    # Punto de arranque frente a ID4: (0.20, 1.04) mirando al este (0.0 rad).
+    #
+    # NOTA: estos valores se usan como backup en Gazebo (spawn conocido) o
+    # cuando se quiere probar la Estrategia A (solo predicción de ruedas).
+    initial_x:      0.0      # ignorado cuando init_from_aruco: true
+    initial_y:      0.0
+    initial_theta:  0.0

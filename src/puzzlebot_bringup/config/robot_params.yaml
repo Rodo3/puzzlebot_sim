@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     wheel_radius: 0.05          # metres
-    wheel_separation: 0.19      # metres — distance between wheel contact points
+    wheel_separation: 0.18      # metres — distance between wheel contact points
     input_source: encoders      # encoders | joint_states
     odom_topic: odom_raw
     odom_frame: odom

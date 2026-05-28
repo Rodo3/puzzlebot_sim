@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""
+ArUco Oracle — Simulador sintético de detecciones ArUco para Gazebo Fortress.
+
+Lee la pose real del robot (ground truth de Gazebo) y simula las detecciones
+que produciría aruco_node en el robot real:
+
+  • Filtra marcadores por distancia máxima y ángulo de incidencia
+  • Añade ruido gaussiano al eje lateral y al eje de profundidad por separado
+    (mismo modelo que aruco_node._compute_covariance_per_axis)
+  • Si hay varios marcadores visibles, fusiona las poses por inversa de varianza
+  • Publica /aruco/pose como PoseWithCovarianceStamped — entrada directa al
+    kalman_filter_node (Estrategia B) o a aruco_map_odom
+
+Propósito: probar kalman + ArUco en Gazebo sin texturas ni visión computacional.
+El ruido y la tasa de detección se controlan con parámetros del nodo.
+
+Parámetros
+----------
+  pose_topic          /world/real_arena/dynamic_pose/info  (PoseArray de Gazebo)
+  aruco_map_file      ruta al YAML con posiciones de marcadores
+  max_detection_dist  1.8    m   — descarta marcadores más lejanos
+  max_incidence_deg   75.0   °   — descarta marcadores muy oblicuos
+  sigma_lateral       0.015  m   — ruido en eje perpendicular al marcador
+  sigma_depth_base    0.020  m   — ruido base en eje de profundidad (se amplía con oblicuidad)
+  sigma_yaw           0.015  rad — ruido angular
+  publish_rate_hz     10.0       — cadencia máxima de publicación
+  detection_prob      1.0        — probabilidad de detectar un marcador visible (0..1)
+                                   usar <1.0 para simular pérdidas de detección
+"""
+
+import math
+import random
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+
+from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped
+import yaml
+
+
+def _yaw_from_pose(pose):
+    q = pose.orientation
+    return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+
+def _norm(a):
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+class ArucoOracle(Node):
+    def __init__(self):
+        super().__init__('aruco_oracle')
+
+        self.declare_parameter('pose_topic',         '/world/real_arena/dynamic_pose/info')
+        self.declare_parameter('aruco_map_file',     '')
+        self.declare_parameter('aruco_out_topic',    '/aruco/pose')
+        self.declare_parameter('map_frame',          'map')
+        self.declare_parameter('max_detection_dist', 1.8)
+        self.declare_parameter('max_incidence_deg',  75.0)
+        self.declare_parameter('sigma_lateral',      0.015)
+        self.declare_parameter('sigma_depth_base',   0.020)
+        self.declare_parameter('sigma_yaw',          0.015)
+        self.declare_parameter('publish_rate_hz',    10.0)
+        self.declare_parameter('detection_prob',     1.0)
+
+        pose_topic  = self.get_parameter('pose_topic').value
+        map_file    = self.get_parameter('aruco_map_file').value
+        out_topic   = self.get_parameter('aruco_out_topic').value
+        self._frame = self.get_parameter('map_frame').value
+        self._max_dist   = float(self.get_parameter('max_detection_dist').value)
+        self._max_inc    = math.radians(float(self.get_parameter('max_incidence_deg').value))
+        self._sig_lat    = float(self.get_parameter('sigma_lateral').value)
+        self._sig_dep    = float(self.get_parameter('sigma_depth_base').value)
+        self._sig_yaw    = float(self.get_parameter('sigma_yaw').value)
+        self._det_prob   = float(self.get_parameter('detection_prob').value)
+
+        # ── Cargar mapa de marcadores ─────────────────────────────────────
+        self._markers = {}   # id → {x, y, z, yaw}
+        if map_file:
+            try:
+                with open(map_file, 'r') as f:
+                    data = yaml.safe_load(f)
+                for mid, info in data.get('aruco_markers', {}).items():
+                    self._markers[int(mid)] = {
+                        'x':   float(info['x']),
+                        'y':   float(info['y']),
+                        'yaw': float(info['yaw']),   # dirección hacia la que apunta el marcador
+                    }
+                self.get_logger().info(
+                    f'ArUco oracle: {len(self._markers)} marcadores cargados desde {map_file}')
+            except Exception as e:
+                self.get_logger().error(f'No se pudo cargar {map_file}: {e}')
+        else:
+            self.get_logger().warn(
+                'aruco_oracle: aruco_map_file vacío — no habrá detecciones')
+
+        # ── Estado robot ──────────────────────────────────────────────────
+        self._robot_pose = None   # (x, y, yaw) en frame map
+
+        # ── Publishers / suscriptores ─────────────────────────────────────
+        self._pub = self.create_publisher(PoseWithCovarianceStamped, out_topic, 10)
+        self.create_subscription(PoseArray, pose_topic,
+                                 self._pose_cb, qos_profile_sensor_data)
+
+        rate = max(1.0, float(self.get_parameter('publish_rate_hz').value))
+        self.create_timer(1.0 / rate, self._publish_if_visible)
+
+        self.get_logger().info(
+            f'aruco_oracle listo — '
+            f'max_dist={self._max_dist}m  '
+            f'max_inc={math.degrees(self._max_inc):.0f}°  '
+            f'sigma=(lat={self._sig_lat:.3f}, dep={self._sig_dep:.3f}, yaw={self._sig_yaw:.4f})  '
+            f'det_prob={self._det_prob:.2f}')
+
+    # ── Callback pose de Gazebo ───────────────────────────────────────────
+
+    def _pose_cb(self, msg: PoseArray):
+        """Extrae la pose del robot del PoseArray de Gazebo.
+
+        El bridge de Fortress no preserva nombres de modelo en el PoseArray.
+        El robot es el primer (y único) modelo dinámico en real_arena,
+        por lo que poses[0] siempre es el puzzlebot.
+        """
+        if not msg.poses:
+            return
+        p = msg.poses[0]
+        self._robot_pose = (p.position.x, p.position.y, _yaw_from_pose(p))
+
+    # ── Publicación sintética ─────────────────────────────────────────────
+
+    def _publish_if_visible(self):
+        if self._robot_pose is None:
+            return
+
+        rx, ry, ryaw = self._robot_pose
+        candidates = []
+
+        for mid, mk in self._markers.items():
+            mx, my = mk['x'], mk['y']
+            mk_yaw = mk['yaw']
+
+            # Vector desde marcador al robot (en frame mapa)
+            dx, dy = rx - mx, ry - my
+            dist = math.hypot(dx, dy)
+            if dist < 1e-6 or dist > self._max_dist:
+                continue
+
+            # Dirección hacia la que apunta el marcador (su eje Z en 2D).
+            # Convención aruco_map.yaml (marcadores montados con roll=π/2):
+            #   eje Z del marcador → [sin(yaw), -cos(yaw)]  ≠ [cos(yaw), sin(yaw)]
+            # Ejemplo: ID4 yaw=π/2 → apunta hacia +X (este), no hacia +Y (norte).
+            fx = math.sin(mk_yaw)
+            fy = -math.cos(mk_yaw)
+
+            # Ángulo de incidencia: ángulo entre la normal del marcador
+            # y el vector marcador→robot (= cuánto está de frente el robot)
+            nx, ny = dx / dist, dy / dist
+            cos_inc = fx * nx + fy * ny
+            if cos_inc <= 0.0:
+                # Robot detrás del marcador — no visible
+                continue
+            inc_angle = math.acos(min(1.0, cos_inc))
+            if inc_angle > self._max_inc:
+                continue
+
+            # Simular pérdidas de detección (detection_prob < 1)
+            if random.random() > self._det_prob:
+                continue
+
+            candidates.append({
+                'dist':     dist,
+                'cos_inc':  cos_inc,
+                'mk_yaw':   mk_yaw,
+                'inc_angle': inc_angle,
+            })
+
+        if not candidates:
+            return
+
+        # ── Modelo de ruido (mismo que aruco_node._compute_covariance_per_axis) ──
+        # Eje de profundidad: sigma crece con la oblicuidad (1/cos_inc)
+        # Eje lateral:        sigma fijo
+        # Fusión por inversa de varianza si hay varios marcadores visibles
+
+        inv_var_x = 0.0
+        inv_var_y = 0.0
+        inv_var_yaw = 0.0
+        wx_sum = 0.0
+        wy_sum = 0.0
+        wyaw_sum = 0.0
+
+        for c in candidates:
+            cos_inc = max(0.125, c['cos_inc'])   # cap ×8 (same as aruco_node)
+            mk_yaw  = c['mk_yaw']
+
+            # El eje de profundidad es el eje de facing del marcador:
+            #   facing = [sin(yaw), -cos(yaw)]
+            #   Si |sin(yaw)| > 0.5 → facing en X → X es profundidad, Y es lateral
+            #   Si |sin(yaw)| ≤ 0.5 → facing en Y → Y es profundidad, X es lateral
+            is_depth_x = abs(math.sin(mk_yaw)) > 0.5
+
+            sig_dep = self._sig_dep / cos_inc
+            if is_depth_x:
+                sig_x = sig_dep
+                sig_y = self._sig_lat
+            else:
+                sig_x = self._sig_lat
+                sig_y = sig_dep
+
+            # Pose ruidosa del robot
+            noisy_x   = rx   + random.gauss(0.0, sig_x)
+            noisy_y   = ry   + random.gauss(0.0, sig_y)
+            noisy_yaw = ryaw + random.gauss(0.0, self._sig_yaw)
+
+            var_x   = sig_x ** 2
+            var_y   = sig_y ** 2
+            var_yaw = self._sig_yaw ** 2
+
+            inv_var_x   += 1.0 / var_x
+            inv_var_y   += 1.0 / var_y
+            inv_var_yaw += 1.0 / var_yaw
+            wx_sum   += noisy_x   / var_x
+            wy_sum   += noisy_y   / var_y
+            wyaw_sum += noisy_yaw / var_yaw
+
+        # Pose fusionada y covarianza resultante
+        fused_x   = wx_sum   / inv_var_x
+        fused_y   = wy_sum   / inv_var_y
+        fused_yaw = _norm(wyaw_sum / inv_var_yaw)
+
+        cov_x   = 1.0 / inv_var_x
+        cov_y   = 1.0 / inv_var_y
+        cov_yaw = 1.0 / inv_var_yaw
+
+        # ── Publicar ──────────────────────────────────────────────────────
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp    = self.get_clock().now().to_msg()
+        msg.header.frame_id = self._frame
+
+        msg.pose.pose.position.x = fused_x
+        msg.pose.pose.position.y = fused_y
+        msg.pose.pose.orientation.z = math.sin(fused_yaw / 2.0)
+        msg.pose.pose.orientation.w = math.cos(fused_yaw / 2.0)
+
+        # Covarianza 6×6 — solo llenamos diagonal [0]=xx, [7]=yy, [35]=yaw·yaw
+        msg.pose.covariance[0]  = cov_x
+        msg.pose.covariance[7]  = cov_y
+        msg.pose.covariance[35] = cov_yaw
+
+        self._pub.publish(msg)
+
+        n = len(candidates)
+        self.get_logger().debug(
+            f'Oracle: {n} marker(s) visible → '
+            f'pose=({fused_x:.3f}, {fused_y:.3f}, {math.degrees(fused_yaw):.1f}°)  '
+            f'std=({math.sqrt(cov_x):.4f}, {math.sqrt(cov_y):.4f}) m',
+            throttle_duration_sec=1.0)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ArucoOracle()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

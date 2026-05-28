@@ -197,6 +197,12 @@ class ArucoNode(Node):
         # Si last_pose tiene más de N segundos de antigüedad se descarta, permitiendo
         # que el primer marcador nuevo sea aceptado aunque esté lejos del anterior.
         self.declare_parameter('last_pose_timeout',        2.0)
+        # Frecuencia máxima de procesamiento de imagen [Hz].
+        # Limita cuántos frames se procesan por segundo independientemente de
+        # la frecuencia de llegada de la cámara. Esto evita que el callback se
+        # acumule cuando solvePnP tarda más que el periodo de llegada de frames.
+        # El frame más reciente siempre se procesa; los intermedios se descartan.
+        self.declare_parameter('max_processing_hz',        8.0)
         self.declare_parameter('map_min_x',                0.0)
         self.declare_parameter('map_max_x',                3.76)
         self.declare_parameter('map_min_y',                0.0)
@@ -232,6 +238,9 @@ class ArucoNode(Node):
         self.far_yaw_std         = g('far_marker_yaw_std').value
         self._last_pose_timeout  = g('last_pose_timeout').value
         self._max_incidence_rad  = math.radians(g('max_incidence_angle_deg').value)
+        _max_hz = g('max_processing_hz').value
+        self._min_proc_interval  = 1.0 / max(_max_hz, 0.1)   # segundos entre procesados
+        self._last_proc_time     = 0.0                         # timestamp del último frame procesado
         self._map_min_x          = g('map_min_x').value
         self._map_max_x          = g('map_max_x').value
         self._map_min_y          = g('map_min_y').value
@@ -376,6 +385,14 @@ class ArucoNode(Node):
     # Pipeline
     # ------------------------------------------------------------------
     def _process(self, frame, stamp):
+        # Descartar frame si llegó demasiado pronto respecto al último procesado.
+        # Esto evita que solvePnP (20–80 ms) acumule un backlog de frames cuando
+        # la cámara publica a mayor FPS que la capacidad de procesamiento del nodo.
+        now_sec = self.get_clock().now().nanoseconds * 1e-9
+        if now_sec - self._last_proc_time < self._min_proc_interval:
+            return
+        self._last_proc_time = now_sec
+
         actual_h, actual_w = frame.shape[:2]
         if actual_w != self.calib_w or actual_h != self.calib_h:
             self.get_logger().warn(
