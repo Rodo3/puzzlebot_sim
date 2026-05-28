@@ -107,6 +107,7 @@ export default function VoiceCommandPanel({ voiceData, history }) {
 
       const sampleRate = ctx.sampleRate;
       ctx.close();
+      console.log(`[Voice] sampleRate=${sampleRate} samples=${totalLen} duration=${(totalLen/sampleRate).toFixed(2)}s`);
       setRecState('uploading');
 
       const wav = encodeWAV(merged, sampleRate);

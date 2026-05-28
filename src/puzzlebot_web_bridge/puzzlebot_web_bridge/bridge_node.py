@@ -256,6 +256,10 @@ class BridgeNode(Node):
 
             buf = io.BytesIO(wav_bytes)
             sample_rate, data = wavfile.read(buf)
+            self.get_logger().info(
+                f'Audio received: {len(wav_bytes)} bytes, '
+                f'sr={sample_rate} Hz, samples={len(data)}, dtype={data.dtype}'
+            )
 
             # Normalize to float32 [-1, 1]
             if data.dtype == np.int16:
