@@ -82,13 +82,21 @@ ros2 run puzzlebot_web_bridge bridge_node \
 pip install fastapi "uvicorn[standard]" websockets "numpy>=1.25" scipy librosa "coverage>=7.2"
 ```
 
+## Comportamiento del broadcast de voz (POST /audio)
+
+El resultado de inferencia se transmite **directamente** por WebSocket desde `_handle_audio_bytes`
+via `broadcast_sync`, sin esperar el roundtrip por DDS. Los tópicos ROS `/voice/*` se publican
+igualmente para otros nodos que los escuchen, pero el dashboard no depende de ellos.
+
+El audio del browser llega a la sample rate nativa del OS (típicamente 44100 Hz).
+`voice_inference.py` resamplea automáticamente a 16000 Hz con `scipy.signal.resample_poly`.
+
+## Nota sobre el micrófono
+Los modelos fueron entrenados con audífonos/micrófono específicos. Para mejores resultados,
+usar el mismo dispositivo de grabación que se usó durante el entrenamiento del dataset.
+
 ## Lo que el bridge NO debe hacer
 - **NUNCA publicar** a `/cmd_vel`, `/goal_pose`, `/initialpose` ni ningún tópico de control.
 - No recibir comandos desde el frontend para mover el robot.
 - No hacer ningún tipo de planeación, navegación ni evasión.
 - No fallar si los tópicos opcionales no existen — ROS 2 simplemente no recibe mensajes.
-
-## Dependencias Python (instalar si no están presentes)
-```bash
-pip install fastapi uvicorn[standard] websockets
-```

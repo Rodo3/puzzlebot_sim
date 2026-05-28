@@ -2,7 +2,16 @@
 
 ## Estado actual
 **Fase 8b completa:** 4 hablantes, augmentation 4x, modelos finales entrenados y guardados.
-**Fase 9 completa:** Nodo ROS 2 de inferencia implementado. Integración con dashboard vía bridge.
+**Fase 9 completa:** Nodo ROS 2 de inferencia implementado. Integración con dashboard vía bridge. Pipeline end-to-end funcionando.
+
+### Fixes de integración aplicados
+- `voice_inference.py`: resamplea el audio del browser (44100→16000 Hz) antes de extraer features.
+- `bridge_node.py`: broadcast WebSocket directo desde `_handle_audio_bytes`, sin depender del roundtrip DDS.
+- El browser graba con `AudioContext()` nativo; el resampleo lo hace Python con `scipy.signal.resample_poly`.
+
+### Nota importante sobre el micrófono
+Los modelos se entrenaron con un dispositivo de audio específico. Usar el mismo micrófono/audífonos
+del entrenamiento garantiza mejor accuracy. Con un micrófono diferente la predicción puede degradarse.
 
 ### Archivos nuevos (Fase 9)
 - `voice_inference.py` — Motor de inferencia puro (sin ROS, sin sounddevice). Usado por el bridge para inferencia remota vía POST /audio desde el dashboard.
