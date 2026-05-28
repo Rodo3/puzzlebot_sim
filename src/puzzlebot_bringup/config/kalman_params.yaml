@@ -5,7 +5,11 @@ kalman_filter_node:
     process_noise_theta: 0.005
     meas_noise_x:        0.05
     meas_noise_y:        0.05
-    meas_noise_theta:    0.01
+    # meas_noise_theta actúa ahora como floor mínimo de R_theta (no solo fallback).
+    # Con el floor activo en kalman_filter_node.cpp, K_theta ≈ 0.12 en lugar de ~0.98.
+    # Resultado: correcciones de yaw suaves aunque ArUco reporte σ_θ muy bajo.
+    # 0.07 rad² → σ_min ≈ 15° (apropiado para solvePnP a 1.5–2.5 m con incidencia oblicua).
+    meas_noise_theta:    0.07
     initial_covariance:  0.1
     # ── Inicialización desde ArUco (RECOMENDADO para robot real) ─────────────
     #

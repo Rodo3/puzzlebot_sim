@@ -163,14 +163,16 @@ private:
     // ── MODO BOOTSTRAP: primer ArUco inicializa el estado ─────────────────
     // En lugar de fusionar (que requiere un estado previo válido), se hace
     // un reset directo usando la pose ArUco como verdad absoluta.
-    // La covarianza inicial se toma de la covarianza del mensaje ArUco.
+    // La covarianza inicial se toma de la covarianza del mensaje ArUco,
+    // con floor desde R_ para no asumir precisión imposible en el robot real.
     if (!initialized_) {
       x_[0] = z[0];
       x_[1] = z[1];
       x_[2] = z[2];
-      P_ = {cov[0],  0.0,     0.0,
-            0.0,     cov[7],  0.0,
-            0.0,     0.0,     cov[35] > 1e-9 ? cov[35] : R_[8]};
+      double p_theta0 = std::max(cov[35] > 1e-9 ? cov[35] : R_[8], R_[8]);
+      P_ = {std::max(cov[0], R_[0]),  0.0,      0.0,
+            0.0,     std::max(cov[7], R_[4]),    0.0,
+            0.0,     0.0,                         p_theta0};
       initialized_ = true;
       last_time_   = now();   // reset del reloj para el primer dt de odom
       RCLCPP_INFO(get_logger(),
@@ -182,12 +184,15 @@ private:
     }
 
     // ── MODO NORMAL: fusión EKF con la corrección ArUco ───────────────────
-    // Construye R desde la covarianza diferenciada por eje que calculó ArUco.
-    Mat3 R = {
-      cov[0],  0.0,    0.0,
-      0.0,     cov[7], 0.0,
-      0.0,     0.0,    cov[35] > 1e-9 ? cov[35] : R_[8]
-    };
+    // Construye R aplicando un floor desde meas_noise_* para cada eje.
+    // Sin floor, ArUco reporta cov[35] ≈ 2.25e-4 rad² (σ≈0.86°), dando
+    // K_theta ≈ 0.98 — el EKF prácticamente sobreescribe el yaw en cada
+    // detección, amplificando el ruido real de solvePnP a 1.5–2.5 m.
+    // Con meas_noise_theta: 0.07 rad² (σ_min≈15°), K_theta baja a ~0.12.
+    double r_x     = std::max(cov[0],                          R_[0]);
+    double r_y     = std::max(cov[7],                          R_[4]);
+    double r_theta = std::max(cov[35] > 1e-9 ? cov[35] : R_[8], R_[8]);
+    Mat3 R = {r_x, 0.0, 0.0,  0.0, r_y, 0.0,  0.0, 0.0, r_theta};
 
     // H = I (medición directa de pose), S = P + R, K = P * S^-1
     Mat3 S = mat_add(P_, R);
