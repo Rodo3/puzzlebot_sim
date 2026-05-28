@@ -79,6 +79,15 @@ def generate_launch_description():
         default_value='false',
         description='[real_arena+kalman] Publica /aruco/pose sintético desde ground truth',
     )
+    # navigation:=true → lanza navigation.launch.py (A* + steering_controller + obstacle_avoidance)
+    # Requiere que SLAM haya construido /map (mode:=mapping o que /map ya esté disponible).
+    # Usa 2D Nav Goal en RViz para enviar /goal_pose al planner.
+    arg_navigation = DeclareLaunchArgument(
+        'navigation',
+        default_value='false',
+        description='Lanza navegación autónoma A* + steering_controller + obstacle_avoidance. '
+                    'Envía /goal_pose desde RViz (tecla G → 2D Nav Goal).',
+    )
 
     world_name   = LaunchConfiguration('world')
     slam_en      = LaunchConfiguration('slam')
@@ -87,6 +96,7 @@ def generate_launch_description():
     odom_source  = LaunchConfiguration('odom_source')
     kalman_en    = LaunchConfiguration('kalman')
     oracle_en    = LaunchConfiguration('aruco_oracle')
+    nav_en       = LaunchConfiguration('navigation')
 
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -662,11 +672,24 @@ def generate_launch_description():
         ])),
     )
 
+    # ── Navegación autónoma A* (opcional, navigation:=true) ──────────────
+    # Incluye: path_planner_node + steering_controller + obstacle_avoidance
+    # Conecta: /map → A* → /planned_path → steering → /cmd_vel_in → avoidance → /cmd_vel
+    nav_launch_file = os.path.join(bringup_pkg, 'launch', 'navigation.launch.py')
+    navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(nav_launch_file),
+        launch_arguments={
+            'use_sim_time':   'true',
+            'cmd_vel_topic':  '/model/puzzlebot/cmd_vel',  # DiffDrive de Fortress
+        }.items(),
+        condition=IfCondition(nav_en),
+    )
+
     return LaunchDescription([
         set_resource_path,
         # Argumentos
         arg_world, arg_gui, arg_slam, arg_rviz, arg_mode, arg_odom_source,
-        arg_kalman, arg_aruco_oracle,
+        arg_kalman, arg_aruco_oracle, arg_navigation,
         gz_sim,
         rsp,
         # Bridges (uno activo según world)
@@ -709,4 +732,6 @@ def generate_launch_description():
         rviz_flat_node,
         rviz_maze_node,
         rviz_mapping_node,
+        # Navegación autónoma A* (navigation:=true)
+        navigation,
     ])

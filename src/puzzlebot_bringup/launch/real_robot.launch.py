@@ -47,8 +47,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -96,11 +97,15 @@ def generate_launch_description():
                           description='Invert LaserScan angles when left/right are mirrored')
     arg_lidar_yaw_offset = DeclareLaunchArgument('lidar_yaw_offset', default_value='3.14159265359',
                           description='LaserScan angular offset in radians; pi flips front/back')
+    arg_navigation = DeclareLaunchArgument('navigation', default_value='false',
+                          description='Navegación autónoma A* + steering_controller + obstacle_avoidance. '
+                                      'Requiere /map disponible. Enviar /goal_pose por RViz (G → 2D Nav Goal).')
 
     slam_en      = LaunchConfiguration('slam')
     mcl_en       = LaunchConfiguration('mcl')
     kalman_en    = LaunchConfiguration('kalman')
     avoidance_en = LaunchConfiguration('avoidance')
+    nav_en       = LaunchConfiguration('navigation')
     aruco_en     = LaunchConfiguration('aruco')
     viewer_en    = LaunchConfiguration('viewer')
     rviz_en      = LaunchConfiguration('rviz')
@@ -378,12 +383,27 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ── Navegación autónoma (navigation:=true) ────────────────────────────
+    # Incluye path_planner_node (A*) + steering_controller + obstacle_avoidance.
+    # Si navigation:=true y avoidance:=true simultáneamente, se lanzan dos
+    # instancias de obstacle_avoidance. Usar uno u otro, no ambos.
+    nav_launch_file = os.path.join(bringup_pkg, 'launch', 'navigation.launch.py')
+    navigation_stack = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(nav_launch_file),
+        launch_arguments={
+            'use_sim_time':  'false',
+            'cmd_vel_topic': '/cmd_vel',  # micro-ROS bridge escucha /cmd_vel
+        }.items(),
+        condition=IfCondition(nav_en),
+    )
+
     return LaunchDescription([
         # Argumentos
         arg_slam,
         arg_mcl,
         arg_kalman,
         arg_avoidance,
+        arg_navigation,
         arg_aruco,
         arg_viewer,
         arg_rviz,
@@ -408,6 +428,8 @@ def generate_launch_description():
         slam,
         mcl,
         obstacle_avoidance,
+        # Navegación autónoma A* completa (navigation:=true)
+        navigation_stack,
         # Visualización
         rviz,
     ])
