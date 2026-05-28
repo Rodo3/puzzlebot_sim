@@ -33,6 +33,19 @@ Contiene: simulación Gazebo, SLAM, localización, planificación, percepción, 
 Frontend React + Vite. Solo visualización. Se conecta al bridge vía WebSocket.  
 Ver [web_dashboard/CLAUDE.md](web_dashboard/CLAUDE.md) para detalles del frontend.
 
+### Mock (`mock/`)
+Paquete temporal `puzzlebot_mock` para probar el dashboard **sin el robot físico**.  
+Publica datos simulados (odometría, LiDAR, mapa, cámara). **Borrar cuando ya no se necesite.**
+
+```bash
+# Build (desde workspace root):
+colcon build --base-paths src mock --packages-select puzzlebot_mock puzzlebot_web_bridge puzzlebot_voice_commands
+
+# Lanzar todo:
+ros2 launch puzzlebot_mock mock_test.launch.py \
+  artifact_dir:=src/puzzlebot_voice_commands/artifacts_final
+```
+
 ### Documentación (`docs/`)
 - `architecture.md` — arquitectura del sistema ROS
 - `slam_mapping.md` — teoría e implementación del SLAM

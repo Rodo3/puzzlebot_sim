@@ -4,6 +4,8 @@
 Paquete ROS 2 Python (ament_python) que actúa como puente entre los tópicos del Puzzlebot y el dashboard web.  
 Suscribe tópicos ROS 2, serializa los mensajes a JSON y los transmite por WebSocket a todos los clientes conectados.
 
+También expone `POST /audio` para recibir audio WAV del browser del dashboard, correr inferencia KMeans+HMM localmente y publicar los resultados en `/voice/*`.
+
 ## Archivos principales
 
 | Archivo | Rol |
@@ -61,9 +63,24 @@ ros2 run puzzlebot_web_bridge bridge_node \
   --ros-args -p websocket_port:=8080 -p odom_topic:=/odom_filtered
 ```
 
-## Endpoint WebSocket
-- `ws://0.0.0.0:8000/ws` — flujo de datos
+## Endpoint WebSocket y HTTP
+- `ws://0.0.0.0:8000/ws` — flujo de datos hacia el dashboard
 - `http://0.0.0.0:8000/health` — liveness check (`{"status":"ok","clients":N}`)
+- `POST http://0.0.0.0:8000/audio` — recibe WAV del browser, corre inferencia de voz, publica `/voice/*`
+
+## Parámetro artifact_dir
+Si se pasa `artifact_dir` al nodo (ruta a `artifacts_final/`), el bridge carga los modelos KMeans+HMM
+al arrancar y habilita el endpoint POST /audio. Si se omite o deja vacío, el endpoint responde 503.
+
+```bash
+ros2 run puzzlebot_web_bridge bridge_node \
+  --ros-args -p artifact_dir:=src/puzzlebot_voice_commands/artifacts_final
+```
+
+## Dependencias Python (instalar si no están presentes)
+```bash
+pip install fastapi "uvicorn[standard]" websockets "numpy>=1.25" scipy librosa "coverage>=7.2"
+```
 
 ## Lo que el bridge NO debe hacer
 - **NUNCA publicar** a `/cmd_vel`, `/goal_pose`, `/initialpose` ni ningún tópico de control.
