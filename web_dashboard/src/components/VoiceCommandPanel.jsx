@@ -71,7 +71,14 @@ export default function VoiceCommandPanel({ voiceData, history }) {
 
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        },
+      });
     } catch (e) {
       setRecError(`Mic: ${e.message}`);
       setRecState('error');
