@@ -19,8 +19,9 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'path_planner_node       = puzzlebot_planning.path_planner_node:main',
-            'obstacle_avoidance_node = puzzlebot_planning.obstacle_avoidance_node:main',
+            'path_planner_node        = puzzlebot_planning.path_planner_node:main',
+            'obstacle_avoidance_node  = puzzlebot_planning.obstacle_avoidance_node:main',
+            'waypoint_navigator_node  = puzzlebot_planning.waypoint_navigator_node:main',
         ],
     },
 )
