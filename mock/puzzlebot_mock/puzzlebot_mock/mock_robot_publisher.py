@@ -105,7 +105,7 @@ class MockRobotPublisher(Node):
         self.create_timer(1.0,  self._publish_map)
 
         self.get_logger().info(
-            'mock_robot_publisher started — robot moves in a %.1f m radius circle', CIRCLE_RADIUS
+            f'mock_robot_publisher started — robot moves in a {CIRCLE_RADIUS:.1f} m radius circle'
         )
 
     def _now(self) -> float:

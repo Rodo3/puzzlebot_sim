@@ -175,7 +175,7 @@ class BridgeNode(Node):
             self.get_parameter('camera_topic').get_parameter_value().string_value,
             self._camera_cb, _cam_qos)
 
-        self.get_logger().info('puzzlebot_web_bridge ready — WebSocket at ws://%s:%d/ws', host, port)
+        self.get_logger().info(f'puzzlebot_web_bridge ready — WebSocket at ws://{host}:{port}/ws')
 
     # ------------------------------------------------------------------ #
     #  Core callbacks
@@ -239,13 +239,13 @@ class BridgeNode(Node):
         try:
             from puzzlebot_voice_commands.voice_inference import VoiceInferenceEngine
             self._inference_engine = VoiceInferenceEngine.load(artifact_dir)
-            self.get_logger().info('Voice inference engine loaded from: %s', artifact_dir)
+            self.get_logger().info(f'Voice inference engine loaded from: {artifact_dir}')
         except ImportError:
             self.get_logger().warn(
                 'puzzlebot_voice_commands not installed — voice inference via POST /audio disabled.'
             )
         except FileNotFoundError as e:
-            self.get_logger().warn('Voice models not found: %s', str(e))
+            self.get_logger().warn(f'Voice models not found: {e}')
 
     def _handle_audio_bytes(self, wav_bytes: bytes) -> None:
         """Decode WAV bytes, run inference, publish results to ROS + WebSocket."""
@@ -294,12 +294,12 @@ class BridgeNode(Node):
             self._ws.broadcast_sync(payload)
 
             self.get_logger().info(
-                'Voice [POST /audio]: %s  conf=%.4f  %.1fms',
-                result.command.upper(), result.confidence, result.inference_time_ms,
+                f'Voice [POST /audio]: {result.command.upper()}  '
+                f'conf={result.confidence:.4f}  {result.inference_time_ms:.1f}ms'
             )
 
         except Exception as exc:
-            self.get_logger().error('Audio inference error: %s', str(exc))
+            self.get_logger().error(f'Audio inference error: {exc}')
             self._pub_voice_status.publish(String(data='idle'))
 
     def destroy_node(self):

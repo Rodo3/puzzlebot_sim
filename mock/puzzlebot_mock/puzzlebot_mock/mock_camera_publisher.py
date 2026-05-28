@@ -31,7 +31,7 @@ class MockCameraPublisher(Node):
         self._t0  = time.time()
         self.create_timer(1.0 / FPS, self._publish_frame)
         self.get_logger().info(
-            'mock_camera_publisher started — %dx%d @ %d Hz', WIDTH, HEIGHT, FPS
+            f'mock_camera_publisher started — {WIDTH}x{HEIGHT} @ {FPS} Hz'
         )
 
     def _make_frame(self, t: float) -> np.ndarray:
