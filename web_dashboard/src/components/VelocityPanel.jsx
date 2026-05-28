@@ -44,9 +44,10 @@ export default function VelocityPanel({ cmdVel, cmdVelIn }) {
       <h3>Velocity</h3>
       <VelocityRow label="Desired (/cmd_vel_in)" data={cmdVelIn} />
       <VelocityRow label="Final  (/cmd_vel)"     data={cmdVel} />
-      {statusNote && (
-        <div className={`badge ${statusNote.cls}`}>{statusNote.text}</div>
-      )}
+      <div className={`badge ${statusNote ? statusNote.cls : ''}`}
+           style={{ visibility: statusNote ? 'visible' : 'hidden' }}>
+        {statusNote ? statusNote.text : 'placeholder'}
+      </div>
     </div>
   );
 }

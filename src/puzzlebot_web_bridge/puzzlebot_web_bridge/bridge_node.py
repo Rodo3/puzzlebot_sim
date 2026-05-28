@@ -240,12 +240,12 @@ class BridgeNode(Node):
             from puzzlebot_voice_commands.voice_inference import VoiceInferenceEngine
             self._inference_engine = VoiceInferenceEngine.load(artifact_dir)
             self.get_logger().info(f'Voice inference engine loaded from: {artifact_dir}')
-        except ImportError:
-            self.get_logger().warn(
-                'puzzlebot_voice_commands not installed — voice inference via POST /audio disabled.'
-            )
+        except ModuleNotFoundError as e:
+            self.get_logger().warn(f'puzzlebot_voice_commands not importable: {e}')
         except FileNotFoundError as e:
             self.get_logger().warn(f'Voice models not found: {e}')
+        except Exception as e:
+            self.get_logger().warn(f'Voice inference failed to load ({type(e).__name__}): {e}')
 
     def _handle_audio_bytes(self, wav_bytes: bytes) -> None:
         """Decode WAV bytes, run inference, publish results to ROS + WebSocket."""
