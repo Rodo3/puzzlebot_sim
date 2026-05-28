@@ -105,11 +105,14 @@ class VoiceInferenceEngine:
         Returns:
             InferenceResult con comando, confianza y predicciones rankeadas.
         """
-        from .audio_io import normalize
+        from .audio_io import normalize, _resample
         from .mfcc import extract_mfcc_frames
         from .librosa_features import extract_librosa_frames
 
-        signal = normalize(signal.flatten().astype(np.float32))
+        signal = signal.flatten().astype(np.float32)
+        if sample_rate != 16000:
+            signal = _resample(signal, sample_rate, 16000)
+        signal = normalize(signal)
 
         t0 = time.perf_counter()
 
