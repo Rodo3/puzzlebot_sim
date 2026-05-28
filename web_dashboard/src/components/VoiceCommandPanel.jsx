@@ -3,13 +3,11 @@ import React, { useState, useRef, useCallback } from 'react';
 const MAX_HISTORY = 8;
 const RECORD_DURATION_S = 1.5;
 
-// Derives HTTP audio endpoint from the WebSocket URL env variable.
 function getAudioUrl() {
   const wsUrl = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
   return wsUrl.replace(/^ws(s?):/, 'http$1:').replace(/\/ws$/, '/audio');
 }
 
-// Encodes a Float32Array of mono PCM samples into a 16-bit WAV ArrayBuffer.
 function encodeWAV(samples, sampleRate) {
   const dataLen = samples.length * 2;
   const buf = new ArrayBuffer(44 + dataLen);
@@ -18,12 +16,12 @@ function encodeWAV(samples, sampleRate) {
 
   str(0,  'RIFF'); v.setUint32(4,  36 + dataLen, true);
   str(8,  'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true);
-  v.setUint16(20, 1, true);           // PCM
-  v.setUint16(22, 1, true);           // mono
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
   v.setUint32(24, sampleRate, true);
-  v.setUint32(28, sampleRate * 2, true); // byte rate
-  v.setUint16(32, 2, true);           // block align
-  v.setUint16(34, 16, true);          // bits per sample
+  v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
   str(36, 'data'); v.setUint32(40, dataLen, true);
 
   let off = 44;
@@ -35,9 +33,30 @@ function encodeWAV(samples, sampleRate) {
   return buf;
 }
 
-// 'idle' | 'recording' | 'uploading' | 'error'
 function recLabel(state) {
   return { idle: 'Escuchar', recording: 'Grabando…', uploading: 'Procesando…', error: 'Reintentar' }[state];
+}
+
+// Renders a top-3 list for one model.
+// For KMeans: lower dist = better. For HMM: higher log_lik = better.
+function ModelPredictions({ label, rows, winner, scoreLabel }) {
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div className="model-block">
+      <div className="model-header">
+        <span className="model-name">{label}</span>
+        <span className="muted small">{scoreLabel}</span>
+      </div>
+      {rows.slice(0, 3).map(([cmd, score], i) => (
+        <div key={i} className={`ranked-row ${i === 0 && cmd === winner ? 'ranked-winner' : ''}`}>
+          <span>{i === 0 ? '▶ ' : '  '}{cmd}</span>
+          <span className="muted">
+            {typeof score === 'number' ? score.toFixed(4) : score}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function VoiceCommandPanel({ voiceData, history }) {
@@ -54,15 +73,13 @@ export default function VoiceCommandPanel({ voiceData, history }) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      setRecError(`Micrófono no disponible: ${e.message}`);
+      setRecError(`Mic: ${e.message}`);
       setRecState('error');
       return;
     }
 
     const ctx = new AudioContext();
     const source = ctx.createMediaStreamSource(stream);
-
-    // ScriptProcessorNode is deprecated but universally supported in browsers.
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (e) => {
       samplesRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
@@ -83,7 +100,6 @@ export default function VoiceCommandPanel({ voiceData, history }) {
 
       const sampleRate = ctx.sampleRate;
       ctx.close();
-
       setRecState('uploading');
 
       const wav = encodeWAV(merged, sampleRate);
@@ -101,13 +117,18 @@ export default function VoiceCommandPanel({ voiceData, history }) {
           setRecState('idle');
         }
       } catch (e) {
-        setRecError(`Error de conexión: ${e.message}`);
+        setRecError(`Conexión: ${e.message}`);
         setRecState('error');
       }
     }, RECORD_DURATION_S * 1000);
   }, []);
 
   const busy = recState === 'recording' || recState === 'uploading';
+
+  // ranked_predictions arrives as { kmeans: [[label, dist], ...], hmm: [[label, ll], ...] }
+  const ranked = voiceData?.ranked_predictions;
+  const kmeansRows = Array.isArray(ranked?.kmeans) ? ranked.kmeans : null;
+  const hmmRows   = Array.isArray(ranked?.hmm)    ? ranked.hmm    : null;
 
   return (
     <div className="panel">
@@ -130,29 +151,37 @@ export default function VoiceCommandPanel({ voiceData, history }) {
         )}
       </div>
 
-      {/* Last result from WebSocket */}
       {voiceData ? (
         <>
+          {/* Final decision */}
           <div className="voice-main">
-            <span className="voice-command">{voiceData.command ?? '—'}</span>
-            <span className="muted">
-              conf: {voiceData.confidence != null
-                ? voiceData.confidence.toFixed(4)
-                : '—'}
-            </span>
-            {voiceData.inference_time_ms != null && (
-              <span className="muted">{voiceData.inference_time_ms.toFixed(1)} ms</span>
-            )}
+            <div className="voice-decision-row">
+              <span className="voice-command">{voiceData.command ?? '—'}</span>
+              <span className="badge badge-info">KMeans decide</span>
+            </div>
+            <div className="voice-meta">
+              <span className="muted">margen: <b>{voiceData.confidence != null ? voiceData.confidence.toFixed(4) : '—'}</b></span>
+              {voiceData.inference_time_ms != null && (
+                <span className="muted">{voiceData.inference_time_ms.toFixed(0)} ms</span>
+              )}
+            </div>
           </div>
 
-          {voiceData.ranked_predictions?.length > 0 && (
-            <div className="ranked-list">
-              {voiceData.ranked_predictions.slice(0, 3).map((p, i) => (
-                <div key={i} className="ranked-row">
-                  <span>{p.command}</span>
-                  <span className="muted">{typeof p.score === 'number' ? p.score.toFixed(4) : p.score}</span>
-                </div>
-              ))}
+          {/* Per-model predictions */}
+          {(kmeansRows || hmmRows) && (
+            <div className="models-grid">
+              <ModelPredictions
+                label="KMeans"
+                rows={kmeansRows}
+                winner={voiceData.command}
+                scoreLabel="dist ↓"
+              />
+              <ModelPredictions
+                label="HMM"
+                rows={hmmRows}
+                winner={voiceData.command}
+                scoreLabel="log-lik ↑"
+              />
             </div>
           )}
         </>

@@ -188,25 +188,64 @@ hr {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.voice-decision-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .voice-command {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: bold;
   color: var(--info);
 }
 
-.ranked-list {
+.voice-meta {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: 12px;
+}
+
+/* Two-column grid: KMeans | HMM */
+.models-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.model-block {
+  background: #181818;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.model-header {
+  display: flex;
+  justify-content: space-between;
   margin-bottom: 4px;
+}
+
+.model-name {
+  font-weight: bold;
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
 .ranked-row {
   display: flex;
   justify-content: space-between;
+  font-size: 11px;
+  padding: 1px 0;
+}
+
+.ranked-winner {
+  color: var(--info);
+  font-weight: bold;
 }
 
 .voice-history {
