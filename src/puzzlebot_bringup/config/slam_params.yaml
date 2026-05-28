@@ -32,4 +32,4 @@ slam_node:
     use_keyframes:             false
     keyframe_min_translation:  0.10
     keyframe_min_rotation:     0.0873  # 5 deg
-    scan_matching_enabled:     false
+    scan_matching_enabled:     true
