@@ -131,6 +131,22 @@ class OccupancyGridMap:
                 self.grid[end_row, end_col] + self.l_free,
             )
 
+    def to_png(self, path: str) -> None:
+        """Save the current occupancy grid as a grayscale PNG.
+
+        Convention (matches ROS map_server):
+          127 = unknown  (log-odds ≈ 0)
+          255 = free     (log-odds < -0.5)
+            0 = occupied (log-odds >  0.5)
+        """
+        from PIL import Image
+        img_data = np.full(self.grid.shape, 127, dtype=np.uint8)
+        img_data[self.grid < -0.5] = 255
+        img_data[self.grid > 0.5] = 0
+        # OccupancyGrid origin is bottom-left; PNG row 0 is top → flip vertically
+        img = Image.fromarray(np.flipud(img_data), mode='L')
+        img.save(path)
+
     def to_msg(self, stamp, frame_id: str) -> OccupancyGrid:
         msg = OccupancyGrid()
         msg.header.stamp = stamp
