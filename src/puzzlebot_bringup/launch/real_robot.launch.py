@@ -113,14 +113,24 @@ def generate_launch_description():
     invert_lidar = LaunchConfiguration('invert_lidar')
     lidar_yaw_offset = LaunchConfiguration('lidar_yaw_offset')
 
-    # slam_node publica map→odom cuando NO hay nadie más dueño de ese TF.
-    # Con kalman:=true, el Kalman absorbe la corrección ArUco internamente
-    # en el TF odom→base_footprint; el slam_node aún puede publicar map→odom
-    # pero no necesita scan matching (solo acumula el mapa).
+    # slam_node publica map→odom cuando NO hay otro nodo dueño de ese TF.
+    #
+    # Dueño de map→odom según modo:
+    #   kalman:=false  aruco:=true  mcl:=false → aruco_map_odom  (modo clásico)
+    #   kalman:=true   aruco:=any   mcl:=false → slam_node        ← ESTE CASO
+    #   kalman:=false  aruco:=false mcl:=false → slam_node
+    #   mcl:=true                              → mcl node
+    #
+    # aruco_map_odom se desactiva cuando kalman:=true, así que si aruco está
+    # activo pero kalman también, slam_node DEBE publicar map→odom.
+    # Condición: slam publica map→odom cuando aruco_map_odom NO está activo Y mcl NO está activo.
+    # aruco_map_odom activo ↔ aruco==true AND mcl==false AND kalman==false
+    # → slam publica ↔ NOT(aruco==true AND kalman==false) AND mcl==false
+    #                ↔ (aruco==false OR kalman==true)   AND mcl==false
     slam_publishes_map_odom = ParameterValue(
         PythonExpression([
-            "'", aruco_en, "' == 'false' and '", mcl_en, "' == 'false' and '",
-            kalman_en, "' == 'false'"
+            "('", aruco_en, "' == 'false' or '", kalman_en, "' == 'true') and '",
+            mcl_en, "' == 'false'"
         ]),
         value_type=bool,
     )
@@ -268,8 +278,10 @@ def generate_launch_description():
             'extrinsics_file':   extrinsics_yaml,
             'marker_map_file':   aruco_map_yaml,
             'marker_length':     0.10,
-            'max_detection_distance': 1.8,
-            'max_incidence_angle_deg': 65.0,
+            'max_detection_distance': 2.5,    # ampliado: centro pista (1.88,2.43) → 2.43 m del marker más cercano
+            'max_incidence_angle_deg': 75.0,  # ampliado: cubre paredes laterales en toda la pista
+            'max_processing_hz': 8.0,         # limita solvePnP a 8 Hz para no acumular backlog de frames
+            'max_position_jump': 0.25,        # reducido: rechaza outliers de 32cm con robot quieto (era 0.5)
             'map_min_x': 0.0,
             'map_max_x': 3.76,
             'map_min_y': 0.0,

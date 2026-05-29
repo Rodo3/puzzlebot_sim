@@ -38,7 +38,7 @@ _FINE_HALF_RAD   = 0.0262   # 1.5°
 _FINE_STEP_RAD   = 0.00873  # 0.5°
 
 # ── Fase 2: búsqueda de traslación ───────────────────────────────────────
-_TRANS_HALF_M  = 0.05   # ±1 celda: evita que el matcher arrastre el mapa
+_TRANS_HALF_M  = 0.15   # ±3 celdas a 5cm — cubre el drift típico entre correcciones ArUco
 _TRANS_STEP_M  = 0.05
 
 # Score mínimo de la fase 1 para activar la búsqueda de traslación.
@@ -53,10 +53,15 @@ class LocalScanMatcher:
     def __init__(self, enabled: bool = False):
         self._enabled    = enabled
         self._scan_count = 0
+        self._last_score = 0.0   # score del último match; 0 durante warmup o desactivado
 
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def last_score(self) -> float:
+        return self._last_score
 
     def match(
         self,
@@ -65,10 +70,12 @@ class LocalScanMatcher:
         grid_map: OccupancyGridMap,
     ) -> Pose2D:
         if not self._enabled:
+            self._last_score = 0.0
             return initial_pose
 
         self._scan_count += 1
         if self._scan_count <= _WARMUP_SCANS:
+            self._last_score = 0.0
             return initial_pose
 
         return self._search(scan, initial_pose, grid_map)
@@ -112,6 +119,7 @@ class LocalScanMatcher:
         # ── Fase 2: búsqueda de traslación ───────────────────────────────
         # Solo si el mapa tiene contenido suficiente en esta zona
         if rot_score < _MIN_SCORE_FOR_TRANS:
+            self._last_score = rot_score
             return rot_pose
 
         offsets = np.arange(-_TRANS_HALF_M,
@@ -128,6 +136,7 @@ class LocalScanMatcher:
                 if s > trans_score:
                     trans_score, trans_pose = s, c
 
+        self._last_score = trans_score
         return trans_pose
 
     # ------------------------------------------------------------------ #
