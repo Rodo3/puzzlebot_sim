@@ -289,8 +289,8 @@ hr {
 .lidar-panel { display: flex; flex-direction: column; }
 .lidar-canvas {
   width: 100%;
+  aspect-ratio: 1;
   max-width: 300px;
-  height: auto;
   display: block;
 }
 
@@ -299,6 +299,7 @@ hr {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  min-height: 200px;
 }
 
 .col-left-bottom > * { flex: 1; min-width: 0; }

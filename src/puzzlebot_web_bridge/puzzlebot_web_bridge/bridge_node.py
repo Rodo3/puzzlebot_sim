@@ -112,16 +112,23 @@ class BridgeNode(Node):
 
         self._ws.start()
 
+        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
+        _sensor_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10,
+        )
+
         # Core subscribers.
         self.create_subscription(
             Odometry,
             self.get_parameter('odom_topic').get_parameter_value().string_value,
-            self._odom_cb, 10)
+            self._odom_cb, _sensor_qos)
 
         self.create_subscription(
             LaserScan,
             self.get_parameter('scan_topic').get_parameter_value().string_value,
-            self._scan_cb, 10)
+            self._scan_cb, _sensor_qos)
 
         self.create_subscription(
             OccupancyGrid,
@@ -164,16 +171,10 @@ class BridgeNode(Node):
             self.get_parameter('voice_inference_time_topic').get_parameter_value().string_value,
             self._voice_inference_cb, 10)
 
-        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-        _cam_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1,
-        )
         self.create_subscription(
             CompressedImage,
             self.get_parameter('camera_topic').get_parameter_value().string_value,
-            self._camera_cb, _cam_qos)
+            self._camera_cb, _sensor_qos)
 
         self.get_logger().info(f'puzzlebot_web_bridge ready — WebSocket at ws://{host}:{port}/ws')
 
