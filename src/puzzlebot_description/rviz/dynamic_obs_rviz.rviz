@@ -1,0 +1,337 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 78
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Map (base)1
+        - /Augmented Map1
+        - /LaserScan1
+        - /Planned Path1
+        - /MCL Particles1
+        - /DOM Markers1
+      Splitter Ratio: 0.5
+    Tree Height: 800
+  - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: rviz_common/Time
+    Experimental: false
+    Name: Time
+    SyncMode: 0
+    SyncSource: ""
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz_default_plugins/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+      Value: true
+
+    # ── Mapa base fijo ──────────────────────────────────────────────────────
+    - Alpha: 0.8
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: true
+      Name: Map (base)
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Value: true
+
+    # ── Mapa aumentado (mapa base + obstáculos dinámicos detectados) ─────────
+    # Solo aparecen celdas donde el LiDAR detectó algo nuevo (no en mapa base).
+    - Alpha: 0.6
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Draw Behind: false
+      Enabled: true
+      Name: Augmented Map (dyn obstacles)
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /augmented_map
+      Value: true
+
+    # ── Robot ───────────────────────────────────────────────────────────────
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      Name: RobotModel
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+
+    # ── TF ──────────────────────────────────────────────────────────────────
+    - Class: rviz_default_plugins/TF
+      Enabled: false
+      Frame Timeout: 15
+      Frames:
+        All Enabled: false
+      Marker Scale: 0.3
+      Name: TF
+      Show Arrows: false
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0
+      Value: false
+
+    # ── LiDAR scan ──────────────────────────────────────────────────────────
+    - Class: rviz_default_plugins/LaserScan
+      Enabled: true
+      Name: LaserScan (/scan)
+      Size (m): 0.03
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /scan
+      Value: true
+      Color Transformer: FlatColor
+      Color:
+        R: 255
+        G: 80
+        B: 0
+
+    # ── Ruta A* ─────────────────────────────────────────────────────────────
+    - Alpha: 1
+      Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Planned Path (A*)
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /planned_path
+      Value: true
+      Color: 0; 200; 50
+      Line Style:
+        Line Width: 0.04
+        Value: Lines
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.02
+
+    # ── Goal persistente ────────────────────────────────────────────────────
+    - Class: rviz_default_plugins/Pose
+      Enabled: true
+      Name: Goal Pose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+      Value: true
+      Arrow Length: 0.3
+      Color: 255; 25; 0
+      Shape: Arrow
+
+    # ── Odometría ───────────────────────────────────────────────────────────
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Odometry
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /odom
+      Value: true
+      Keep: 100
+      Angle Tolerance: 0.05
+      Position Tolerance: 0.05
+      Shape:
+        Alpha: 1
+        Axes Length: 0.15
+        Axes Radius: 0.01
+        Color:
+          B: 255
+          G: 255
+          R: 0
+        Head Length: 0.05
+        Head Radius: 0.02
+        Shaft Length: 0.1
+        Shaft Radius: 0.01
+        Value: Arrow
+
+    # ── Partículas MCL ──────────────────────────────────────────────────────
+    # Visualiza la distribución de hipótesis de localización.
+    # Deben converger cerca del robot real.
+    - Class: rviz_default_plugins/PoseArray
+      Alpha: 0.7
+      Arrow Length: 0.08
+      Axes Length: 0.08
+      Axes Radius: 0.01
+      Color: 0; 120; 255
+      Enabled: true
+      Name: MCL Particles
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mcl/particles
+      Value: true
+
+    # ── Marcadores DOM (obstáculos dinámicos detectados + estado FSM) ────────
+    # Rojo = obstáculo dinámico detectado por LiDAR (radio físico)
+    # Naranja = inflación para A* (radio total de exclusión)
+    # Gris = obstáculo físico en Gazebo, robot aún NO lo ha detectado con LiDAR
+    # Verde = goal persistente
+    # Texto amarillo = estado FSM actual
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: DOM Markers (dyn obs + FSM state)
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /dom/markers
+      Value: true
+
+    # ── Obstáculos dinámicos detectados (tópico alternativo) ────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Dynamic Obstacles (detected)
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /dynamic_obstacles
+      Value: true
+
+    # ── Marcadores del spawner (SOLO DEBUG — no los usa el planner) ──────────
+    # GROUND TRUTH DEBUG ONLY — el planner NO suscribe este tópico.
+    # Muestra dónde el spawner colocó los obstáculos en Gazebo.
+    # Solo útil para el operador humano comparando con lo que ve el LiDAR.
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: "SPAWNER DEBUG (ground truth - NOT for planner)"
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /dynamic_obstacle_spawner/markers
+      Value: true
+
+  Enabled: true
+  Global Options:
+    Background Color: 25; 25; 25
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /clicked_point
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+  Transformation:
+    Current:
+      Class: rviz_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Angle: 0
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.06
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.01
+      Scale: 120
+      Target Frame: <Fixed Frame>
+      Value: TopDownOrtho (rviz)
+      X: 2.0
+      Y: 2.5
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Hide Left Dock: false
+  Hide Right Dock: false
+  Time:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 1400
+  X: 50
+  Y: 50

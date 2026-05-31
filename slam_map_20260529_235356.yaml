@@ -1,0 +1,22 @@
+# Metadata del mapa SLAM — generado 2026-05-29
+# Mapa base fijo para navegación, localización MCL y A*.
+# NO modificar. Los obstáculos dinámicos van en /augmented_map.
+#
+# Convención de píxeles (compatibles con nav2_map_server y map_server_node):
+#   pixel >= occupied_thresh*255 (>= 166) → libre   (0)
+#   pixel <= free_thresh*255     (<= 64)  → ocupado (100)
+#   intermedio                            → desconocido (-1)
+#
+# Resolución: 0.05 m/px
+# Tamaño físico: 4.30 m × 5.40 m
+# Origen (esquina inferior-izquierda del mapa):
+#   X = -0.25 m  (margen de 0.25 m al oeste de la pista)
+#   Y = -0.25 m  (margen de 0.25 m al sur de la pista)
+
+image: slam_map_20260529_235356.png
+mode: trinary
+resolution: 0.05
+origin: [-0.25, -0.25, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.25
