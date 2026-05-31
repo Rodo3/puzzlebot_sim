@@ -53,6 +53,10 @@ class OccupancyGridMap:
         self.lidar_yaw = lidar_yaw
         self.grid = np.zeros((self.height_pixels, self.width_pixels), dtype=np.float32)
 
+    def reset(self) -> None:
+        """Reset the log-odds grid to uniform unknown state (all zeros)."""
+        self.grid[:] = 0.0
+
     def world_to_cell(self, wx: float, wy: float):
         col = int(math.floor((wx - self.origin_x) / self.resolution))
         row = int(math.floor((wy - self.origin_y) / self.resolution))

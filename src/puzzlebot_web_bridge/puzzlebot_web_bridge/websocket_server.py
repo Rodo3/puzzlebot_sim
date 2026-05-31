@@ -25,6 +25,7 @@ class WebSocketServer:
         self._port = port
         self._clients: Set[WebSocket] = set()
         self._audio_handler: Optional[Callable[[bytes], None]] = None
+        self._command_handler: Optional[Callable[[dict], None]] = None
         self._app = self._build_app()
         self._server: uvicorn.Server | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -32,6 +33,10 @@ class WebSocketServer:
     def set_audio_handler(self, callback: Callable[[bytes], None]) -> None:
         """Register a synchronous callback that receives raw WAV bytes."""
         self._audio_handler = callback
+
+    def set_command_handler(self, callback: Callable[[dict], None]) -> None:
+        """Register a synchronous callback that receives parsed JSON commands from the browser."""
+        self._command_handler = callback
 
     def _build_app(self) -> FastAPI:
         app = FastAPI(title='Puzzlebot Web Bridge')
@@ -70,8 +75,14 @@ class WebSocketServer:
             logger.info('WebSocket client connected. Total: %d', len(self._clients))
             try:
                 while True:
-                    # Keep connection alive; we only send, not receive.
-                    await websocket.receive_text()
+                    text = await websocket.receive_text()
+                    if text and self._command_handler:
+                        try:
+                            data = json.loads(text)
+                            loop = asyncio.get_running_loop()
+                            await loop.run_in_executor(None, self._command_handler, data)
+                        except Exception as exc:
+                            logger.debug('Command handler error: %s', exc)
             except WebSocketDisconnect:
                 pass
             except Exception as exc:

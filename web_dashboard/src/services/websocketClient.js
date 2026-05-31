@@ -50,5 +50,10 @@ export function createWebSocketClient(url, handlers = {}) {
       stopped = true;
       ws?.close();
     },
+    send(data) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(data));
+      }
+    },
   };
 }

@@ -88,15 +88,22 @@ def generate_launch_description():
         description='Lanza navegación autónoma A* + steering_controller + obstacle_avoidance. '
                     'Envía /goal_pose desde RViz (tecla G → 2D Nav Goal).',
     )
+    arg_web_bridge = DeclareLaunchArgument(
+        'web_bridge',
+        default_value='true',
+        description='Lanza puzzlebot_web_bridge (WebSocket dashboard). '
+                    'Deshabilitar con web_bridge:=false si no se usa el dashboard.',
+    )
 
-    world_name   = LaunchConfiguration('world')
-    slam_en      = LaunchConfiguration('slam')
-    rviz_en      = LaunchConfiguration('rviz')
-    mode         = LaunchConfiguration('mode')
-    odom_source  = LaunchConfiguration('odom_source')
-    kalman_en    = LaunchConfiguration('kalman')
-    oracle_en    = LaunchConfiguration('aruco_oracle')
-    nav_en       = LaunchConfiguration('navigation')
+    world_name    = LaunchConfiguration('world')
+    slam_en       = LaunchConfiguration('slam')
+    rviz_en       = LaunchConfiguration('rviz')
+    mode          = LaunchConfiguration('mode')
+    odom_source   = LaunchConfiguration('odom_source')
+    kalman_en     = LaunchConfiguration('kalman')
+    oracle_en     = LaunchConfiguration('aruco_oracle')
+    nav_en        = LaunchConfiguration('navigation')
+    web_bridge_en = LaunchConfiguration('web_bridge')
 
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -685,11 +692,46 @@ def generate_launch_description():
         condition=IfCondition(nav_en),
     )
 
+    # ── scan_restamper (requerido para navigation en Gazebo) ─────────────
+    # Los nodos de navegación (bug_navigation, obstacle_avoidance) suscriben /scan_stamped.
+    # En Gazebo el scan llega en /scan directamente. Este nodo reempaqueta el timestamp
+    # y cambia el frame_id a lidar_link para que la cadena TF sea válida.
+    scan_restamper = Node(
+        package='puzzlebot_localization',
+        executable='scan_restamper',
+        name='scan_restamper',
+        output='screen',
+        parameters=[{
+            'use_sim_time':    True,
+            'input_topic':     '/scan',
+            'target_frame':    'lidar_link',
+            'invert_angles':   False,
+            'angle_offset_rad': 0.0,
+        }],
+        condition=IfCondition(nav_en),
+    )
+
+    # ── Web dashboard bridge (opcional, web_bridge:=true) ────────────────
+    # Expone ws://0.0.0.0:8000/ws para el dashboard React.
+    # cmd_vel_out_topic apunta al tópico del DiffDrive de Gazebo para que el teleop funcione.
+    web_bridge = Node(
+        package='puzzlebot_web_bridge',
+        executable='bridge_node',
+        name='puzzlebot_web_bridge',
+        output='screen',
+        parameters=[{
+            'use_sim_time':       True,
+            'cmd_vel_out_topic':  '/model/puzzlebot/cmd_vel',
+            'artifact_dir':       '',
+        }],
+        condition=IfCondition(web_bridge_en),
+    )
+
     return LaunchDescription([
         set_resource_path,
         # Argumentos
         arg_world, arg_gui, arg_slam, arg_rviz, arg_mode, arg_odom_source,
-        arg_kalman, arg_aruco_oracle, arg_navigation,
+        arg_kalman, arg_aruco_oracle, arg_navigation, arg_web_bridge,
         gz_sim,
         rsp,
         # Bridges (uno activo según world)
@@ -734,4 +776,8 @@ def generate_launch_description():
         rviz_mapping_node,
         # Navegación autónoma A* (navigation:=true)
         navigation,
+        # scan_restamper: adapta /scan → /scan_stamped para nodos de navegación en Gazebo
+        scan_restamper,
+        # Web dashboard bridge (web_bridge:=true)
+        web_bridge,
     ])

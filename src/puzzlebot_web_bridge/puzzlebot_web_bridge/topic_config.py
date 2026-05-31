@@ -1,6 +1,7 @@
 """Centralizes default topic names and rate limits (Hz) for the bridge."""
 
 DEFAULT_TOPICS = {
+    # Inbound (ROS → WebSocket)
     'odom':                   '/odom',
     'scan':                   '/scan',
     'map':                    '/map',
@@ -12,6 +13,11 @@ DEFAULT_TOPICS = {
     'voice_status':           '/voice/status',
     'voice_ranked_predictions': '/voice/ranked_predictions',
     'voice_inference_time':   '/voice/inference_time_ms',
+    # Outbound (WebSocket → ROS) — control topics
+    'cmd_vel_out':            '/cmd_vel',          # teleop; override in Gazebo to /model/puzzlebot/cmd_vel
+    'goal_pose':              '/goal_pose',
+    'navigate_to_waypoint':   '/navigate_to_waypoint',
+    'slam_reset':             '/slam/reset',
 }
 
 # Maximum publish rate to WebSocket clients (Hz).

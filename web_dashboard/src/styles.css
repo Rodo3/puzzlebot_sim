@@ -349,3 +349,167 @@ hr {
 /* ── Helpers ──────────────────────────────────────────── */
 .muted { color: var(--muted); }
 .small { font-size: 11px; }
+
+/* ── Mode panel ───────────────────────────────────────── */
+.mode-buttons {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.btn-mode {
+  flex: 1;
+  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn-mode:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-mode-active {
+  border-color: var(--accent);
+  background: rgba(41, 121, 255, 0.15);
+  color: var(--accent);
+}
+
+.btn-mode:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mode-hint { margin-top: 2px; }
+
+.mode-badge-nav {
+  color: var(--ok);
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+/* ── SLAM canvas navigation cursor ───────────────────── */
+.slam-canvas-nav { cursor: crosshair; }
+
+/* ── Teleop panel ─────────────────────────────────────── */
+.dpad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.dpad-row {
+  display: flex;
+  gap: 4px;
+}
+
+.dpad-btn {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 18px;
+  font-family: var(--font);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.1s;
+}
+
+.dpad-btn:active:not(:disabled),
+.dpad-btn:hover:not(:disabled) {
+  background: rgba(41, 121, 255, 0.2);
+  border-color: var(--accent);
+}
+
+.dpad-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.dpad-stop {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.dpad-stop:hover:not(:disabled) {
+  background: rgba(239, 83, 80, 0.2);
+}
+
+.speed-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.speed-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.speed-label strong { color: var(--text); }
+
+.speed-label input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+/* ── Waypoint panel ───────────────────────────────────── */
+.waypoint-select {
+  width: 100%;
+  padding: 5px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.waypoint-select:disabled { opacity: 0.4; }
+
+.waypoint-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-waypoint {
+  flex: 1;
+  padding: 5px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-waypoint:hover:not(:disabled) {
+  background: rgba(41, 121, 255, 0.2);
+}
+
+.btn-waypoint:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-stop-nav {
+  border-color: var(--err);
+  color: var(--err);
+  flex: 0 0 auto;
+  padding: 5px 10px;
+}
+
+.btn-stop-nav:hover:not(:disabled) {
+  background: rgba(239, 83, 80, 0.2);
+}

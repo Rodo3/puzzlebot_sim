@@ -38,6 +38,7 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
+from std_msgs.msg import Bool
 from rclpy.qos import (
     DurabilityPolicy,
     QoSProfile,
@@ -157,6 +158,7 @@ class SlamNode(Node):
             LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
         self.create_subscription(
             TransformStamped, '/map_to_odom', self._map_to_odom_cb, 10)
+        self.create_subscription(Bool, '/slam/reset', self._slam_reset_cb, 10)
 
         self.create_timer(0.1, self._broadcast_tf)
         self.create_timer(1.0, self._publish_map)
@@ -237,6 +239,15 @@ class SlamNode(Node):
         # En real_robot.launch.py con aruco:=true, publish_map_odom_tf se pone en false
         # automáticamente, y se recomienda pasar scan_match_updates_map_odom:=false también.
         self.declare_parameter('scan_match_updates_map_odom', True)
+
+    def _slam_reset_cb(self, msg: Bool) -> None:
+        if not msg.data:
+            return
+        self._grid_map.reset()
+        self._map_odom_x   = 0.0
+        self._map_odom_y   = 0.0
+        self._map_odom_yaw = 0.0
+        self.get_logger().info('SLAM map reset via /slam/reset')
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._odom_buffer.add(msg)

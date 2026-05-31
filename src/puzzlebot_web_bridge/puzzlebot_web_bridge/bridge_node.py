@@ -9,22 +9,32 @@ dashboard machine. Audio is received as WAV bytes, inference runs locally
 (KMeans + HMM), and results are published to /voice/* topics AND broadcast
 to WebSocket clients.
 
-SAFETY: This node NEVER publishes to any control topic (/cmd_vel, /goal_pose,
-/initialpose, etc.). Publishing to /voice/* is intentional and safe.
+BIDIRECTIONAL CONTROL: The bridge also accepts JSON commands from the dashboard
+to publish control messages to ROS:
+  {"type": "cmd_vel",              "linear_x": 0.2, "angular_z": 0.5}
+  {"type": "goal_pose",            "x": 1.5, "y": 2.3, "theta": 0.0}
+  {"type": "navigate_to_waypoint", "name": "centro"}
+  {"type": "slam_reset"}
+
+SAFETY: /initialpose is intentionally never published. Outgoing cmd_vel topic
+is configurable via cmd_vel_out_topic (default /cmd_vel; use
+/model/puzzlebot/cmd_vel for Gazebo).
 """
 
 import io
 import json
 import logging
+import math
 import time
 
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, LaserScan
-from std_msgs.msg import Float32, String
+from std_msgs.msg import Bool, Float32, String
 
 from .rate_limiter import RateLimiter
 from .serializers import (
@@ -67,6 +77,9 @@ class BridgeNode(Node):
         self.declare_parameter('websocket_port',                WEBSOCKET_PORT_DEFAULT)
         # artifact_dir: path to trained voice models. Empty string disables voice inference.
         self.declare_parameter('artifact_dir', '')
+        # cmd_vel_out_topic: topic to publish teleop commands.
+        # Default /cmd_vel for real robot; use /model/puzzlebot/cmd_vel for Gazebo.
+        self.declare_parameter('cmd_vel_out_topic', DEFAULT_TOPICS['cmd_vel_out'])
 
         # Rate limiters.
         self._rl = {
@@ -101,6 +114,21 @@ class BridgeNode(Node):
         self._pub_voice_time = self.create_publisher(
             Float32, DEFAULT_TOPICS['voice_inference_time'], 10)
 
+        # ── Control publishers (outgoing: dashboard → ROS) ─────────────────
+        cmd_vel_out = self.get_parameter('cmd_vel_out_topic').get_parameter_value().string_value
+        self._pub_cmd_vel_out = self.create_publisher(Twist, cmd_vel_out, 10)
+
+        _latched_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self._pub_goal_pose = self.create_publisher(PoseStamped, DEFAULT_TOPICS['goal_pose'], _latched_qos)
+        self._pub_nav_wp    = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
+        self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
+
+        self.get_logger().info(f'Control publishers ready — cmd_vel_out: {cmd_vel_out}')
+
         # Start WebSocket server.
         host = self.get_parameter('websocket_host').get_parameter_value().string_value
         port = self.get_parameter('websocket_port').get_parameter_value().integer_value
@@ -110,12 +138,14 @@ class BridgeNode(Node):
         if self._inference_engine is not None:
             self._ws.set_audio_handler(self._handle_audio_bytes)
 
+        # Register command handler for incoming dashboard control messages.
+        self._ws.set_command_handler(self._handle_command)
+
         self._ws.start()
 
-        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
         _sensor_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            history=QoSHistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
             depth=10,
         )
 
@@ -307,6 +337,50 @@ class BridgeNode(Node):
         except Exception as exc:
             self.get_logger().error(f'Audio inference error: {exc}')
             self._pub_voice_status.publish(String(data='idle'))
+
+    # ------------------------------------------------------------------ #
+    #  Incoming commands from dashboard (WebSocket → ROS)
+    # ------------------------------------------------------------------ #
+
+    def _handle_command(self, data: dict) -> None:
+        """Route a JSON command received from the browser to the appropriate ROS publisher."""
+        msg_type = data.get('type')
+        try:
+            if msg_type == 'cmd_vel':
+                msg = Twist()
+                msg.linear.x  = float(data.get('linear_x', 0.0))
+                msg.angular.z = float(data.get('angular_z', 0.0))
+                self._pub_cmd_vel_out.publish(msg)
+
+            elif msg_type == 'goal_pose':
+                msg = PoseStamped()
+                msg.header.stamp    = self.get_clock().now().to_msg()
+                msg.header.frame_id = str(data.get('frame_id', 'map'))
+                msg.pose.position.x = float(data.get('x', 0.0))
+                msg.pose.position.y = float(data.get('y', 0.0))
+                theta = float(data.get('theta', 0.0))
+                msg.pose.orientation.z = math.sin(theta / 2.0)
+                msg.pose.orientation.w = math.cos(theta / 2.0)
+                self._pub_goal_pose.publish(msg)
+                self.get_logger().info(
+                    f'goal_pose → ({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f})'
+                    f' θ={math.degrees(theta):.1f}°')
+
+            elif msg_type == 'navigate_to_waypoint':
+                name = str(data.get('name', '')).strip()
+                if name:
+                    self._pub_nav_wp.publish(String(data=name))
+                    self.get_logger().info(f'navigate_to_waypoint → {name}')
+
+            elif msg_type == 'slam_reset':
+                self._pub_slam_reset.publish(Bool(data=True))
+                self.get_logger().info('SLAM reset requested from dashboard')
+
+            else:
+                self.get_logger().debug(f'Unknown command type: {msg_type}')
+
+        except Exception as exc:
+            self.get_logger().error(f'Error handling command {msg_type}: {exc}')
 
     def destroy_node(self):
         self._ws.stop()

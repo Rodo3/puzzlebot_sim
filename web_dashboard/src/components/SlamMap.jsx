@@ -4,13 +4,13 @@ import { drawCircle, drawArrow } from '../utils/geometry.js';
 
 const CANVAS_W = 520;
 const CANVAS_H = 520;
-const MAX_TRAJECTORY = 500;
 const ROBOT_RADIUS_PX = 6;
+const GOAL_RADIUS_PX  = 8;
 
-export default function SlamMap({ mapData, robotPose, trajectory }) {
+export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMarker, onGoalPose }) {
   const canvasRef     = useRef(null);
-  const offscreenRef  = useRef(null);  // offscreen canvas for map tiles
-  const lastMapRef    = useRef(null);  // cache last rendered map data array
+  const offscreenRef  = useRef(null);
+  const lastMapRef    = useRef(null);
 
   // Re-render map tiles only when map data changes (expensive).
   useEffect(() => {
@@ -29,7 +29,6 @@ export default function SlamMap({ mapData, robotPose, trajectory }) {
     lastMapRef.current   = mapData;
   }, [mapData]);
 
-  // Draw everything on the visible canvas.
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -50,7 +49,6 @@ export default function SlamMap({ mapData, robotPose, trajectory }) {
     const { width, height, resolution, origin } = map;
     const cellSize = Math.min(CANVAS_W / width, CANVAS_H / height);
 
-    // Draw map.
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(offscreenRef.current, 0, 0, width * cellSize, height * cellSize);
 
@@ -59,7 +57,7 @@ export default function SlamMap({ mapData, robotPose, trajectory }) {
       return cellToCanvas(col, row, height, cellSize);
     };
 
-    // Trajectory.
+    // Trajectory
     if (trajectory.length > 1) {
       ctx.beginPath();
       const start = worldToPx(trajectory[0].x, trajectory[0].y);
@@ -73,28 +71,90 @@ export default function SlamMap({ mapData, robotPose, trajectory }) {
       ctx.stroke();
     }
 
-    // Robot.
+    // Goal marker
+    if (goalMarker) {
+      const { px, py } = worldToPx(goalMarker.x, goalMarker.y);
+      ctx.beginPath();
+      ctx.arc(px, py, GOAL_RADIUS_PX, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#69f0ae';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px - 5, py - 5); ctx.lineTo(px + 5, py + 5);
+      ctx.moveTo(px + 5, py - 5); ctx.lineTo(px - 5, py + 5);
+      ctx.strokeStyle = '#69f0ae';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Robot
     if (robotPose) {
       const { px, py } = worldToPx(robotPose.x, robotPose.y);
       drawCircle(ctx, px, py, ROBOT_RADIUS_PX, '#2979ff');
       drawArrow(ctx, px, py, robotPose.theta, ROBOT_RADIUS_PX * 3, '#ffcc02');
     }
-  }, [robotPose, trajectory]);
+
+    // Navigation mode hint overlay
+    if (mode === 'navigation') {
+      ctx.fillStyle = 'rgba(105, 240, 174, 0.08)';
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.fillStyle = 'rgba(105, 240, 174, 0.7)';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('NAV — clic para enviar goal', 6, 14);
+    }
+  }, [robotPose, trajectory, goalMarker, mode]);
 
   useEffect(() => {
     draw();
   }, [draw, mapData]);
 
+  // Convert canvas click to world coordinates and emit goal_pose
+  const handleClick = useCallback((e) => {
+    if (mode !== 'navigation' || !lastMapRef.current || !onGoalPose) return;
+    const map = lastMapRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = CANVAS_W / rect.width;
+    const scaleY = CANVAS_H / rect.height;
+    const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top)  * scaleY;
+
+    const cellSize = Math.min(CANVAS_W / map.width, CANVAS_H / map.height);
+    const col = canvasX / cellSize;
+    // row 0 in canvas is the top (north), but map row 0 is the south (origin_y).
+    // cellToCanvas uses: py = (height - row) * cellSize → invert to get row
+    const row = map.height - canvasY / cellSize;
+
+    const wx = map.origin.x + col * map.resolution;
+    const wy = map.origin.y + row * map.resolution;
+
+    onGoalPose({ x: wx, y: wy, theta: 0 });
+  }, [mode, onGoalPose]);
+
   return (
     <div className="panel slam-panel">
-      <h3>SLAM Map</h3>
+      <h3>
+        SLAM Map
+        {mode === 'navigation' && (
+          <span className="mode-badge-nav"> [NAV]</span>
+        )}
+      </h3>
       {lastMapRef.current && (
         <div className="muted small">
           {lastMapRef.current.width}×{lastMapRef.current.height} cells —{' '}
           {lastMapRef.current.resolution} m/cell
         </div>
       )}
-      <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="slam-canvas" />
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_W}
+        height={CANVAS_H}
+        className={`slam-canvas ${mode === 'navigation' ? 'slam-canvas-nav' : ''}`}
+        onClick={handleClick}
+      />
     </div>
   );
 }

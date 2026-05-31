@@ -6,6 +6,9 @@ import LidarView         from './components/LidarView.jsx';
 import CameraPanel       from './components/CameraPanel.jsx';
 import VelocityPanel     from './components/VelocityPanel.jsx';
 import VoiceCommandPanel from './components/VoiceCommandPanel.jsx';
+import ModePanel         from './components/ModePanel.jsx';
+import TeleopPanel       from './components/TeleopPanel.jsx';
+import WaypointPanel     from './components/WaypointPanel.jsx';
 import LogsPanel         from './components/LogsPanel.jsx';
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
@@ -18,18 +21,24 @@ function nowStr() {
 }
 
 export default function App() {
-  const [connected,   setConnected]   = useState(false);
-  const [lastUpdate,  setLastUpdate]  = useState(null);
-  const [robotState,  setRobotState]  = useState(null);
-  const [scanData,    setScanData]    = useState(null);
-  const [mapData,     setMapData]     = useState(null);
-  const [cmdVel,      setCmdVel]      = useState(null);
-  const [cmdVelIn,    setCmdVelIn]    = useState(null);
-  const [voiceData,   setVoiceData]   = useState(null);
-  const [cameraData,  setCameraData]  = useState(null);
-  const [trajectory,  setTrajectory]  = useState([]);
+  const [connected,    setConnected]    = useState(false);
+  const [lastUpdate,   setLastUpdate]   = useState(null);
+  const [robotState,   setRobotState]   = useState(null);
+  const [scanData,     setScanData]     = useState(null);
+  const [mapData,      setMapData]      = useState(null);
+  const [cmdVel,       setCmdVel]       = useState(null);
+  const [cmdVelIn,     setCmdVelIn]     = useState(null);
+  const [voiceData,    setVoiceData]    = useState(null);
+  const [cameraData,   setCameraData]   = useState(null);
+  const [trajectory,   setTrajectory]   = useState([]);
   const [voiceHistory, setVoiceHistory] = useState([]);
-  const [logs,        setLogs]        = useState([]);
+  const [logs,         setLogs]         = useState([]);
+
+  // Control state
+  const [mode,       setMode]       = useState('mapping');   // 'mapping' | 'navigation'
+  const [goalMarker, setGoalMarker] = useState(null);        // {x, y} in world coords
+
+  const clientRef = useRef(null);
 
   const topicStatus = {
     odom:   !!robotState,
@@ -42,6 +51,10 @@ export default function App() {
 
   const addLog = useCallback((msg) => {
     setLogs(prev => [...prev.slice(-(MAX_LOGS - 1)), { time: nowStr(), msg }]);
+  }, []);
+
+  const sendCommand = useCallback((data) => {
+    clientRef.current?.send(data);
   }, []);
 
   const handleMessage = useCallback((msg) => {
@@ -93,8 +106,22 @@ export default function App() {
       onDisconnect: () => { setConnected(false); addLog('WebSocket disconnected'); },
       onMessage:    handleMessage,
     });
+    clientRef.current = client;
     return () => client.close();
   }, [handleMessage, addLog]);
+
+  const handleGoalPose = useCallback(({ x, y, theta = 0 }) => {
+    sendCommand({ type: 'goal_pose', x, y, theta });
+    setGoalMarker({ x, y });
+    addLog(`Goal → (${x.toFixed(2)}, ${y.toFixed(2)})`);
+  }, [sendCommand, addLog]);
+
+  const handleSlamReset = useCallback(() => {
+    sendCommand({ type: 'slam_reset' });
+    setGoalMarker(null);
+    setTrajectory([]);
+    addLog('SLAM map reset');
+  }, [sendCommand, addLog]);
 
   return (
     <div className="app">
@@ -116,6 +143,9 @@ export default function App() {
             mapData={mapData}
             robotPose={robotState?.pose}
             trajectory={trajectory}
+            mode={mode}
+            goalMarker={goalMarker}
+            onGoalPose={handleGoalPose}
           />
           <div className="col-left-bottom">
             <LidarView scanData={scanData} />
@@ -128,6 +158,22 @@ export default function App() {
             connected={connected}
             lastUpdate={lastUpdate}
             topicStatus={topicStatus}
+          />
+          <ModePanel
+            mode={mode}
+            connected={connected}
+            onModeChange={setMode}
+            onSlamReset={handleSlamReset}
+          />
+          <TeleopPanel
+            connected={connected}
+            onCommand={sendCommand}
+          />
+          <WaypointPanel
+            connected={connected}
+            mode={mode}
+            onCommand={sendCommand}
+            addLog={addLog}
           />
           <VelocityPanel cmdVel={cmdVel} cmdVelIn={cmdVelIn} />
           <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />

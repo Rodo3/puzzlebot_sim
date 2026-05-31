@@ -1,102 +1,88 @@
 # puzzlebot_web_bridge — CLAUDE.md
 
 ## Propósito
-Paquete ROS 2 Python (ament_python) que actúa como puente entre los tópicos del Puzzlebot y el dashboard web.  
-Suscribe tópicos ROS 2, serializa los mensajes a JSON y los transmite por WebSocket a todos los clientes conectados.
+Paquete ROS 2 Python (ament_python) que actúa como **puente bidireccional** entre los tópicos del Puzzlebot y el dashboard web.
 
-También expone `POST /audio` para recibir audio WAV del browser del dashboard, correr inferencia KMeans+HMM localmente y publicar los resultados en `/voice/*`.
+- **ROS → WebSocket**: suscribe tópicos, serializa a JSON, broadcast a clientes.
+- **WebSocket → ROS**: recibe comandos JSON del browser, los publica en tópicos de control.
+- **POST /audio**: inferencia de voz KMeans+HMM desde el micrófono del browser.
 
 ## Archivos principales
 
 | Archivo | Rol |
 |---|---|
-| `bridge_node.py` | Nodo ROS 2. Declara parámetros, crea suscriptores, arranca el servidor. |
-| `websocket_server.py` | FastAPI + uvicorn en hilo daemon. Expone `/ws` y `/health`. |
+| `bridge_node.py` | Nodo ROS 2. Parámetros, suscriptores, publicadores de control, `_handle_command`. |
+| `websocket_server.py` | FastAPI + uvicorn en hilo daemon. `/ws`, `/health`, `/audio`. Maneja mensajes entrantes del browser. |
 | `serializers.py` | Funciones puras: `odom_to_json`, `scan_to_json`, `map_to_json`, `twist_to_json`, `voice_to_json`. |
-| `rate_limiter.py` | `RateLimiter(max_hz)` — decide si se debe enviar según tiempo transcurrido. |
-| `topic_config.py` | Nombres de tópico por defecto y rate limits (Hz). Editar aquí para cambiar defaults. |
+| `rate_limiter.py` | `RateLimiter(max_hz)` — throttle de publicación al WebSocket. |
+| `topic_config.py` | Nombres de tópico y rate limits. **Editar aquí para cambiar defaults.** |
 
-## Tópicos que escucha
+## Tópicos que escucha (ROS → WebSocket)
 
-### Core (siempre presentes en robot físico)
-- `/odom` — nav_msgs/Odometry → tipo `robot_state`
-- `/scan` — sensor_msgs/LaserScan → tipo `scan`
-- `/map` — nav_msgs/OccupancyGrid → tipo `map`
-- `/cmd_vel` — geometry_msgs/Twist → tipo `velocity_command` (source: `cmd_vel`)
+### Core
+- `/odom` — nav_msgs/Odometry → `robot_state`
+- `/scan` — sensor_msgs/LaserScan → `scan`
+- `/map` — nav_msgs/OccupancyGrid → `map`
+- `/cmd_vel` — geometry_msgs/Twist → `velocity_command` (source: `cmd_vel`)
 
-### Opcionales (silenciados si no existen)
-- `/cmd_vel_in` — geometry_msgs/Twist → tipo `velocity_command` (source: `cmd_vel_in`)
-- `/voice/command` — std_msgs/String
-- `/voice/confidence` — std_msgs/Float32
-- `/voice/status` — std_msgs/String
-- `/voice/ranked_predictions` — std_msgs/String (JSON serializado)
-- `/voice/inference_time_ms` — std_msgs/Float32
+### Opcionales
+- `/cmd_vel_in`, `/voice/command`, `/voice/confidence`, `/voice/status`, `/voice/ranked_predictions`, `/voice/inference_time_ms`, `/camera/image/compressed`
 
-## Formato JSON enviado al frontend
-Ver [web_dashboard_architecture.md](../../docs/web_dashboard_architecture.md) para el formato completo de cada tipo.
+## Tópicos que publica (WebSocket → ROS)
 
-Tipos de mensaje: `robot_state`, `scan`, `map`, `velocity_command`, `voice_command`.
+| Tópico | Tipo | Comando dashboard | Notas |
+|---|---|---|---|
+| `cmd_vel_out_topic` | geometry_msgs/Twist | `"type":"cmd_vel"` | Default `/cmd_vel`; en Gazebo: `/model/puzzlebot/cmd_vel` |
+| `/goal_pose` | geometry_msgs/PoseStamped | `"type":"goal_pose"` | QoS TRANSIENT_LOCAL (latched) |
+| `/navigate_to_waypoint` | std_msgs/String | `"type":"navigate_to_waypoint"` | Nombre del waypoint |
+| `/slam/reset` | std_msgs/Bool | `"type":"slam_reset"` | True → slam_node limpia el mapa |
 
-## Rate limits recomendados
+## Parámetro crítico: `cmd_vel_out_topic`
+
+```bash
+# Robot físico (default)
+ros2 run puzzlebot_web_bridge bridge_node
+
+# Gazebo (DiffDrive plugin)
+ros2 run puzzlebot_web_bridge bridge_node \
+  --ros-args -p cmd_vel_out_topic:=/model/puzzlebot/cmd_vel
+```
+
+En `gz_sim.launch.py` este parámetro ya está configurado correctamente para Gazebo.
+
+## Protocolo de comandos entrantes (JSON del browser)
+
+```json
+{ "type": "cmd_vel",              "linear_x": 0.2, "angular_z": 0.5 }
+{ "type": "goal_pose",            "x": 1.5, "y": 2.3, "theta": 0.0, "frame_id": "map" }
+{ "type": "navigate_to_waypoint", "name": "centro" }
+{ "type": "slam_reset" }
+```
+
+## Endpoints HTTP/WebSocket
+- `ws://0.0.0.0:8000/ws` — canal bidireccional con el dashboard
+- `GET http://0.0.0.0:8000/health` — liveness check
+- `POST http://0.0.0.0:8000/audio` — inferencia de voz WAV
+
+## Parámetro artifact_dir
+Ruta a `artifacts_final/` con los modelos KMeans+HMM. Si está vacío, `/audio` responde 503.
+
+## Rate limits (WebSocket → browser)
 | Tópico | Hz |
 |---|---|
 | /odom | 10 |
 | /cmd_vel | 10 |
-| /cmd_vel_in | 10 |
 | /scan | 5 |
 | /map | 1 |
-| /voice/* | sin límite (por evento) |
+| /camera | 10 |
+| /voice/* | sin límite |
 
-## Cómo correr el nodo
-
+## Dependencias Python
 ```bash
-# Desde el workspace
-cd ~/puzzlebot_sim
-colcon build --packages-select puzzlebot_web_bridge
-source install/setup.bash
-ros2 run puzzlebot_web_bridge bridge_node
+pip install fastapi "uvicorn[standard]" websockets "numpy>=1.25" scipy librosa
 ```
 
-Con parámetros personalizados:
-```bash
-ros2 run puzzlebot_web_bridge bridge_node \
-  --ros-args -p websocket_port:=8080 -p odom_topic:=/odom_filtered
-```
-
-## Endpoint WebSocket y HTTP
-- `ws://0.0.0.0:8000/ws` — flujo de datos hacia el dashboard
-- `http://0.0.0.0:8000/health` — liveness check (`{"status":"ok","clients":N}`)
-- `POST http://0.0.0.0:8000/audio` — recibe WAV del browser, corre inferencia de voz, publica `/voice/*`
-
-## Parámetro artifact_dir
-Si se pasa `artifact_dir` al nodo (ruta a `artifacts_final/`), el bridge carga los modelos KMeans+HMM
-al arrancar y habilita el endpoint POST /audio. Si se omite o deja vacío, el endpoint responde 503.
-
-```bash
-ros2 run puzzlebot_web_bridge bridge_node \
-  --ros-args -p artifact_dir:=src/puzzlebot_voice_commands/artifacts_final
-```
-
-## Dependencias Python (instalar si no están presentes)
-```bash
-pip install fastapi "uvicorn[standard]" websockets "numpy>=1.25" scipy librosa "coverage>=7.2"
-```
-
-## Comportamiento del broadcast de voz (POST /audio)
-
-El resultado de inferencia se transmite **directamente** por WebSocket desde `_handle_audio_bytes`
-via `broadcast_sync`, sin esperar el roundtrip por DDS. Los tópicos ROS `/voice/*` se publican
-igualmente para otros nodos que los escuchen, pero el dashboard no depende de ellos.
-
-El audio del browser llega a la sample rate nativa del OS (típicamente 44100 Hz).
-`voice_inference.py` resamplea automáticamente a 16000 Hz con `scipy.signal.resample_poly`.
-
-## Nota sobre el micrófono
-Los modelos fueron entrenados con audífonos/micrófono específicos. Para mejores resultados,
-usar el mismo dispositivo de grabación que se usó durante el entrenamiento del dataset.
-
-## Lo que el bridge NO debe hacer
-- **NUNCA publicar** a `/cmd_vel`, `/goal_pose`, `/initialpose` ni ningún tópico de control.
-- No recibir comandos desde el frontend para mover el robot.
-- No hacer ningún tipo de planeación, navegación ni evasión.
-- No fallar si los tópicos opcionales no existen — ROS 2 simplemente no recibe mensajes.
+## Restricciones
+- NUNCA publicar `/initialpose`.
+- El bridge NO hace planeación ni navegación — solo retransmite comandos del usuario.
+- No fallar si los tópicos opcionales no existen.
