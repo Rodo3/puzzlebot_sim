@@ -42,6 +42,12 @@ setup(
                 'puzzlebot_voice_commands.scripts.train_hmm:main',
             'tune_hmm_models = '
                 'puzzlebot_voice_commands.scripts.tune_hmm:main',
+            'live_test_voice = '
+                'puzzlebot_voice_commands.scripts.live_test:main',
+            'augment_voice_dataset = '
+                'puzzlebot_voice_commands.scripts.augment_dataset:main',
+            'voice_commands_node = '
+                'puzzlebot_voice_commands.voice_commands_node:main',
         ],
     },
 )

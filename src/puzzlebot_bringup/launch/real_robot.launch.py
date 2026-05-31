@@ -121,6 +121,17 @@ def generate_launch_description():
                           description='Carga mapa PNG estático: activa map_server_node (/map) y '
                                       'aruco_map_odom (map→odom). Combinar con slam:=false mcl:=false '
                                       'kalman:=true aruco:=true para localización EKF sobre mapa conocido.')
+    arg_web_bridge  = DeclareLaunchArgument('web_bridge',  default_value='true',
+                          description='Launch the WebSocket bridge + web dashboard backend.')
+    arg_artifact_dir = DeclareLaunchArgument(
+        'artifact_dir',
+        default_value='src/puzzlebot_voice_commands/artifacts_final',
+        description=(
+            'Path to trained voice models (artifacts_final/). '
+            'Relative to the workspace root or absolute. '
+            'Leave empty to disable voice inference in the bridge.'
+        ),
+    )
 
     slam_en      = LaunchConfiguration('slam')
     mcl_en       = LaunchConfiguration('mcl')
@@ -134,6 +145,8 @@ def generate_launch_description():
     lidar_topic  = LaunchConfiguration('lidar_topic')
     invert_lidar = LaunchConfiguration('invert_lidar')
     lidar_yaw_offset = LaunchConfiguration('lidar_yaw_offset')
+    web_bridge_en = LaunchConfiguration('web_bridge')
+    artifact_dir  = LaunchConfiguration('artifact_dir')
 
     # slam_node publica map→odom cuando NO hay otro nodo dueño de ese TF.
     #
@@ -444,7 +457,33 @@ def generate_launch_description():
         condition=IfCondition(avoidance_en),
     )
 
-    # ── 10. RViz ──────────────────────────────────────────────────────────
+    # When avoidance is disabled, wire pd_controller directly to /cmd_vel.
+    pd_controller_direct = Node(
+        package='puzzlebot_controller',
+        executable='pd_controller_node',
+        name='pd_controller_node',
+        output='screen',
+        parameters=[controller_cfg, {'use_sim_time': False}],
+        remappings=[('/cmd_vel_in', '/cmd_vel')],
+        condition=IfCondition(PythonExpression(["'", avoidance_en, "' == 'false'"])),
+    )
+
+    # ── 10. Web dashboard bridge ──────────────────────────────────────────
+    # Exposes ws://0.0.0.0:8000/ws (WebSocket) and POST /audio (voice inference).
+    # Disable with web_bridge:=false if running without a dashboard.
+    web_bridge = Node(
+        package='puzzlebot_web_bridge',
+        executable='bridge_node',
+        name='puzzlebot_web_bridge',
+        output='screen',
+        parameters=[{
+            'use_sim_time': False,
+            'artifact_dir': artifact_dir,
+        }],
+        condition=IfCondition(web_bridge_en),
+    )
+
+    # ── 11. RViz ──────────────────────────────────────────────────────────
     # mcl:=true  → mcl_rviz.rviz  (Fixed Frame: map, Map display /map TRANSIENT_LOCAL,
     #                               herramientas SetInitialPose y SetGoal)
     # mcl:=false → puzzlebot_rviz.rviz (Fixed Frame: odom, para sesión de mapeo)
@@ -503,6 +542,8 @@ def generate_launch_description():
         arg_aruco,
         arg_viewer,
         arg_rviz,
+        arg_web_bridge,
+        arg_artifact_dir,
         arg_lidar_topic,
         arg_invert_lidar,
         arg_lidar_yaw_offset,
@@ -526,8 +567,11 @@ def generate_launch_description():
         mcl,
         map_server,
         obstacle_avoidance,
+        pd_controller_direct,
         # Navegación autónoma A* completa (navigation:=true)
         navigation_stack,
+        # Web dashboard bridge
+        web_bridge,
         # Visualización — archivo RViz según modo
         rviz_slam,   # mcl:=false → puzzlebot_rviz.rviz (Fixed Frame: odom)
         rviz_mcl,    # mcl:=true  → mcl_rviz.rviz       (Fixed Frame: map, TRANSIENT_LOCAL)

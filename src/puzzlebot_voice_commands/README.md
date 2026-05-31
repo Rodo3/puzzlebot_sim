@@ -2,105 +2,97 @@
 
 Offline voice command recognition package for the Puzzlebot ROS 2 workspace.
 
-**Current phase:** 8 complete — feature engineering (delta MFCCs, CMVN, min/max stats, per-model configs).
-**Status:** Full pipeline functional. Dataset collection in progress (3/4 speakers recorded).
-Recommended model: **GaussianNB** (97.7% CV accuracy, 0 safety errors, 0.17 ms inference).
+**Current phase:** 9 — ROS 2 inference node (in progress).  
+**Selected models:** KMeans (97.74%) + HMM librosa (92.01%), trained on 4-speaker augmented dataset.  
+**Artifacts:** `artifacts_final/` — production-ready pkl files.
 
-## Purpose
+## Models
 
-Train and evaluate voice command classifiers using `.wav` audio files and
-hand-crafted MFCC features. Two models are implemented from scratch:
+| Model | Accuracy (test) | Inference | Approach |
+|-------|----------------|-----------|----------|
+| `KMeansCodebookClassifier` | **97.74%** | 0.53 ms | One K-Means codebook per class (VQ distance) |
+| `HiddenMarkovModelClassifier` | **92.01%** | 53 ms | Left-to-right HMM per class, librosa features |
+| `GaussianNaiveBayesClassifier` | 89.41% | 0.22 ms | MFCC summary vector + Gaussian log-likelihood |
 
-| Model | Feature input | Approach | Config flag |
-|-------|---------------|----------|-------------|
-| `KMeansCodebookClassifier` | Frame-level MFCCs | One K-Means codebook per class (VQ-style) | `--kmeans-delta --kmeans-cmvn` |
-| `GaussianNaiveBayesClassifier` | MFCC summary vector | Gaussian log-likelihood + class prior | `--delta --min-max` |
-| `HiddenMarkovModelClassifier` | Frame-level MFCCs | Left-to-right HMM per class, Baum-Welch + Viterbi | `--cmvn` |
+Evaluated on 576 test samples (augmented dataset, 4 speakers × 20 clips/command × 4x aug).
 
-Each model uses its own MFCC feature configuration, stored independently in `artifacts/`.
-
-This package is **offline only** — it does not connect to the robot or publish
-to `/cmd_vel`. Integration with the Puzzlebot control stack is a future phase.
-
-The system is designed for **exactly 4 known speakers**. The model intentionally
-learns each team member's voice — it is not expected to generalise to unknown speakers.
-
-## Target commands
+## Commands
 
 `avanzar`, `retroceder`, `izquierda`, `derecha`, `alto`, `inicio`
 
-Classes are auto-discovered from dataset subfolders.
+## Dataset
+
+4 speakers (rodo, jorge, valeria, jesus) × 20 clips/command = **480 original clips**.  
+Augmented 4x (time stretch ×1.1, time stretch ×0.9, pitch shift +1 semitone) → **1920 clips**.
+
+```
+datasets/
+├── data_rodo/              — 20/cmd ✓
+├── data_jorge/             — 20/cmd ✓
+├── data_valeria/           — 20/cmd ✓
+├── data_jesus/             — 20/cmd ✓
+├── voice_commands_dataset/ — merged original (480 clips)
+└── voice_commands_dataset_aug/ — augmented 4x (1920 clips)
+```
+
+## Artifacts
+
+```
+artifacts_final/               ← production models (use these in ROS node)
+├── hmm_model.pkl              — HMM librosa + syllable-states
+├── hmm_config.json            — HMM params + MFCC config
+├── kmeans_model.pkl           — KMeans codebook
+├── kmeans_feature_config.json — KMeans MFCC config
+├── labels.json                — class list
+└── train_metadata.json        — split metadata
+
+artifacts_pre_aug/             ← snapshot before augmentation
+artifacts_hmm_manual/          ← manual HMM (no librosa) on augmented data
+artifacts_hmm_manual_pre_aug/  ← manual HMM before augmentation
+```
+
+## HMM feature configuration
+
+```
+n_mfcc=20, delta=True, cmvn=True
+librosa backend: MFCC + ZCR + RMS + spectral contrast
+per-command states: alto=3, avanzar=4, derecha=4, inicio=4, izquierda=5, retroceder=6
+n_symbols=32, n_iter=20
+```
 
 ## Quick start (Windows, no ROS)
 
 ```powershell
-cd C:\path\to\puzzlebot_sim
-$env:PYTHONPATH = "src\puzzlebot_voice_commands"
+cd C:\path\to\puzzlebot_sim\src\puzzlebot_voice_commands
 
-# 1. Record samples (one person at a time)
-python -m puzzlebot_voice_commands.scripts.grabar
-# rename the generated data/ folder to data_<name>/
-
-# 2. Merge all per-person folders into one dataset
-python -m puzzlebot_voice_commands.scripts.merge_datasets `
-  --inputs  datasets\data_jorge datasets\data_valeria ... `
-  --output  datasets\voice_commands_dataset
-
-# 3. Train both models (independent feature configs per model)
+# Train KMeans + GNB on augmented dataset
 python -m puzzlebot_voice_commands.scripts.train_models `
-  --dataset    datasets\voice_commands_dataset `
-  --model      both `
-  --output-dir artifacts `
-  --delta --min-max `
-  --kmeans-delta --kmeans-cmvn
+  --dataset datasets\voice_commands_dataset_aug `
+  --model both --output-dir artifacts `
+  --n-mfcc 20 --delta --min-max --kmeans-delta --kmeans-cmvn
 
-# 4. Evaluate and generate reports
-python -m puzzlebot_voice_commands.scripts.evaluate_models `
-  --dataset      datasets\voice_commands_dataset `
-  --artifact-dir artifacts `
-  --output-dir   reports
-
-# 5. Cross-validate (verify results are not lucky split)
-python -m puzzlebot_voice_commands.scripts.cross_validate `
-  --dataset datasets\voice_commands_dataset --model both --k 5
-
-# 6. Learning curve (check if more data is needed)
-python -m puzzlebot_voice_commands.scripts.learning_curve `
-  --dataset    datasets\voice_commands_dataset `
-  --model      both `
-  --output-dir reports
-
-# 7. Per-speaker evaluation (verify each team member is recognized)
-python -m puzzlebot_voice_commands.scripts.speaker_test `
-  --dataset    datasets\voice_commands_dataset `
-  --model      gnb `
-  --mode       all-train `
-  --output-dir reports
-
-# 8. (Optional) Grid search for best HMM hyperparameters
-python -m puzzlebot_voice_commands.scripts.tune_hmm `
-  --dataset   datasets\voice_commands_dataset `
-  --n-states  5 8 10 --n-symbols 32 64 --n-iter 20 50 `
-  --k 3 --cmvn
-
-# 9. Train HMM with best config (default: n_states=8, n_symbols=64, n_iter=50)
+# Train HMM librosa + syllable-states on augmented dataset
 python -m puzzlebot_voice_commands.scripts.train_hmm `
-  --dataset    datasets\voice_commands_dataset `
+  --dataset datasets\voice_commands_dataset_aug `
   --output-dir artifacts `
-  --n-states 8 --n-symbols 64 --n-iter 50 --cmvn
+  --n-mfcc 20 --n-states 5 --n-symbols 32 --n-iter 20 `
+  --cmvn --delta --librosa --include-zcr --include-rms --include-contrast `
+  --syllable-states
 
-# 10. Evaluate all three models
+# Evaluate all three models
 python -m puzzlebot_voice_commands.scripts.evaluate_models `
-  --dataset      datasets\voice_commands_dataset `
-  --artifact-dir artifacts `
-  --output-dir   reports `
-  --model        all
+  --dataset datasets\voice_commands_dataset_aug `
+  --artifact-dir artifacts --output-dir reports --model all
 
-# 11. Predict a single file
-python -m puzzlebot_voice_commands.scripts.predict_file `
-  --model-type gnb `
-  --model-path artifacts\gnb_model.pkl `
-  --audio      path\to\audio.wav
+# Live test (mic -> prediction)
+python -m puzzlebot_voice_commands.scripts.live_test `
+  --artifact-dir artifacts_final --models kmeans hmm
+
+# Data augmentation
+python -m puzzlebot_voice_commands.scripts.augment_dataset `
+  --input-dir  datasets\voice_commands_dataset `
+  --output-dir datasets\voice_commands_dataset_aug `
+  --factor 3
 ```
 
 ## Quick start (ROS 2 / WSL2)
@@ -109,16 +101,20 @@ python -m puzzlebot_voice_commands.scripts.predict_file `
 colcon build --packages-select puzzlebot_voice_commands
 source install/setup.bash
 
-ros2 run puzzlebot_voice_commands train_voice_models \
-  --dataset    src/puzzlebot_voice_commands/datasets/voice_commands_dataset \
-  --model      both \
-  --output-dir src/puzzlebot_voice_commands/artifacts
-
-ros2 run puzzlebot_voice_commands evaluate_voice_models \
-  --dataset      src/puzzlebot_voice_commands/datasets/voice_commands_dataset \
-  --artifact-dir src/puzzlebot_voice_commands/artifacts \
-  --output-dir   src/puzzlebot_voice_commands/reports
+ros2 run puzzlebot_voice_commands voice_commands_node \
+  --ros-args -p artifact_dir:=src/puzzlebot_voice_commands/artifacts_final
 ```
+
+## ROS 2 topics
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/voice/trigger` | `std_msgs/String` | Receive to start a recording |
+| `/voice/command` | `std_msgs/String` | Predicted command |
+| `/voice/confidence` | `std_msgs/Float32` | Log-likelihood margin (HMM) or distance margin (KMeans) |
+| `/voice/status` | `std_msgs/String` | `listening` / `processing` / `idle` |
+| `/voice/ranked_predictions` | `std_msgs/String` | JSON with top-3 predictions |
+| `/voice/inference_time_ms` | `std_msgs/Float32` | Inference latency in ms |
 
 ## Package structure
 
@@ -127,217 +123,57 @@ puzzlebot_voice_commands/
 ├── package.xml
 ├── setup.py
 ├── setup.cfg
-├── VALIDATION.md           — step-by-step build/train/evaluate checklist
+├── VALIDATION.md
 ├── resource/puzzlebot_voice_commands
 ├── puzzlebot_voice_commands/
-│   ├── config.py           — MFCCConfig, DatasetConfig, KMeansConfig, GNBConfig
-│   ├── audio_io.py         — WAV loading, mono conversion, normalization
-│   ├── mfcc.py             — Manual MFCC pipeline (NumPy/SciPy)
-│   ├── dataset.py          — Dataset discovery and stratified split
-│   ├── metrics.py          — All metrics from scratch (no sklearn)
-│   ├── serialization.py    — pickle and JSON save/load helpers
-│   ├── reports.py          — CSV, JSON, and Markdown report writers
+│   ├── config.py               — MFCCConfig, HMMConfig, DatasetConfig, ...
+│   ├── audio_io.py             — WAV loading, mono, normalization
+│   ├── mfcc.py                 — Manual MFCC pipeline (NumPy/SciPy)
+│   ├── librosa_features.py     — librosa-based feature extraction (HMM)
+│   ├── dataset.py              — Dataset discovery and stratified split
+│   ├── metrics.py              — All metrics from scratch (no sklearn)
+│   ├── serialization.py        — pickle and JSON save/load helpers
+│   ├── reports.py              — CSV, JSON, Markdown report writers
+│   ├── voice_commands_node.py  — ROS 2 inference node (Phase 9)
 │   ├── models/
 │   │   ├── kmeans_codebook.py  — KMeansCodebookClassifier
 │   │   ├── gaussian_nb.py      — GaussianNaiveBayesClassifier
 │   │   └── hmm.py              — HiddenMarkovModelClassifier
 │   └── scripts/
-│       ├── grabar.py           — CLI: record samples interactively
-│       ├── merge_datasets.py   — CLI: merge per-person folders into one dataset
-│       ├── prepare_dataset.py  — CLI: prepare_voice_dataset
-│       ├── train_models.py     — CLI: train_voice_models  (--delta --min-max --kmeans-delta --kmeans-cmvn)
-│       ├── train_hmm.py        — CLI: train_hmm_models    (--cmvn --n-states --n-symbols --n-iter)
-│       ├── tune_hmm.py         — CLI: tune_hmm_models     (grid search over HMM hyperparameters)
-│       ├── evaluate_models.py  — CLI: evaluate_voice_models (loads per-model MFCC configs)
-│       ├── predict_file.py     — CLI: predict_voice_file
-│       ├── cross_validate.py   — CLI: k-fold cross-validation (--delta --min-max --kmeans-delta --kmeans-cmvn)
-│       ├── learning_curve.py   — CLI: accuracy vs training size curve
-│       └── speaker_test.py     — CLI: per-speaker evaluation
-├── datasets/               — Per-person folders + merged dataset (not committed)
-├── artifacts/              — Trained models and configs (not committed)
-│   ├── feature_config.json         — GNB MFCC config (delta + min/max)
-│   ├── kmeans_feature_config.json  — KMeans MFCC config (delta + cmvn)
-│   └── hmm_config.json             — HMM params + MFCC config (cmvn)
-└── reports/                — Evaluation outputs (not committed)
+│       ├── grabar.py           — Record samples interactively
+│       ├── merge_datasets.py   — Merge per-person folders
+│       ├── prepare_dataset.py  — prepare_voice_dataset
+│       ├── train_models.py     — train_voice_models (KMeans + GNB)
+│       ├── train_hmm.py        — train_hmm_models
+│       ├── tune_hmm.py         — Grid search over HMM hyperparameters
+│       ├── evaluate_models.py  — evaluate_voice_models (--model all)
+│       ├── predict_file.py     — predict_voice_file
+│       ├── augment_dataset.py  — augment_voice_dataset
+│       ├── live_test.py        — live_test_voice (mic → prediction)
+│       ├── cross_validate.py   — k-fold CV
+│       ├── learning_curve.py   — accuracy vs training size
+│       └── speaker_test.py     — per-speaker evaluation
+├── datasets/                   — Audio clips (not committed)
+├── artifacts_final/            — Production models (pkl files)
+└── reports/                    — Evaluation outputs
 ```
 
 ## Allowed libraries
 
-NumPy, SciPy, and standard Python only.
+NumPy, SciPy, librosa, and standard Python only.  
 No scikit-learn, PyTorch, TensorFlow, or any prebuilt ML classifier.
-
-## Dataset collection workflow
-
-Each team member records using `grabar.py` (20 clips per command):
-
-```
-datasets/
-├── data_jorge/       — 15 clips/class (needs 5 more per class)
-├── data_valeria/     — 15 clips/class (needs 5 more per class)
-├── data_rodo/        — 20 clips/class ✓
-├── data_<person4>/   — pending
-└── voice_commands_dataset/  — merged output (auto-generated by merge_datasets)
-```
-
-**Recommended clip count:** 20 per person per command.
-After recording all 4, run `speaker_test --mode leave-one-out` to check if any
-person needs more recordings (target: recall ≥ 0.90 per class per speaker).
-
-## Evaluation results (3 speakers, 2026-05-12)
-
-Dataset: Jorge + Valeria + Rodo, 50 clips/class, 6 classes, 300 total samples.
-Each model uses its own MFCC feature config (see Phase 8).
-
-### Model comparison
-
-| Metric | KMeans | **GaussianNB** | HMM |
-|--------|--------|----------------|-----|
-| Test accuracy | **100%** | **100%** | 70.0% |
-| Macro recall | **100%** | **100%** | 70.0% |
-| Macro F1 | **100%** | **100%** | 70.3% |
-| Top-2 accuracy | **100%** | **100%** | 81.1% |
-| Safety errors (`alto`) | **0** | **0** | 5 |
-| Avg inference | 0.46 ms | **0.17 ms** | 39.7 ms |
-| Artifact size | 10.3 KB | 10.6 KB | 31.9 KB |
-| Feature config | delta + cmvn | delta + min/max | cmvn |
-
-### Cross-validation (k=5)
-
-| Metric | KMeans | **GaussianNB** |
-|--------|--------|----------------|
-| Acc mean ± std | **99.7% ± 0.7%** | 97.7% ± 2.0% |
-| Macro recall mean | **99.7%** | 97.6% |
-| Safety errors (total) | **0** | **0** |
-
-Std on GNB (2.0%) is expected with only 3 speakers — will decrease with 4.
-
-**GaussianNB is the recommended model for ROS 2 integration** (fastest inference, 0 safety errors).
-
-## Phase 7 — HMM (Hidden Markov Model)
-
-A third classifier will be added using a discrete-observation HMM trained on
-frame-level MFCCs — implemented entirely from scratch with NumPy only.
-
-### Why HMM?
-- KMeans and GNB treat each audio sample as a static feature vector, ignoring
-  temporal dynamics (how a word evolves over time).
-- HMM explicitly models the sequence of MFCC frames as transitions between
-  hidden states, which is the classical approach for speech recognition.
-- Expected to outperform KMeans and GNB on commands with similar spectral
-  content but different duration/rhythm (e.g. `avanzar` vs `retroceder`).
-
-### Design (from scratch, NumPy only)
-
-| Component | Description |
-|-----------|-------------|
-| Observation quantization | K-Means codebook (reuse existing) to map MFCC frames → discrete symbols |
-| HMM topology | Left-to-right (Bakis) — states flow forward only, matching speech progression |
-| Training | Baum-Welch algorithm (EM) — forward-backward to estimate A, B, π |
-| Inference | Viterbi algorithm — most likely state sequence → log-likelihood score |
-| Classifier | One HMM per class; argmax of log-likelihoods across all models |
-| Parameters | `n_states` (default 5), `n_iter` (default 20), `n_symbols` from codebook |
-
-### Files added
-
-```
-models/
-└── hmm.py              — HiddenMarkovModel + Baum-Welch + Viterbi
-scripts/
-└── train_hmm.py        — CLI: train_hmm_models  (saves hmm_model.pkl)
-```
-
-`evaluate_models.py`, `predict_file.py`, `cross_validate.py`, `learning_curve.py`,
-and `speaker_test.py` now support `--model hmm` and `--model all`.
-
-### Results (3 speakers, tuned params: n_states=8, n_symbols=64, n_iter=50, --cmvn)
-
-| Metric | KMeans | GaussianNB | HMM |
-|--------|--------|------------|-----|
-| Test accuracy | 100% | **100%** | 70.0% |
-| Safety errors | 0 | **0** | 5 |
-| Avg inference | 0.46 ms | **0.17 ms** | 39.7 ms |
-
-HMM still underperforms; the primary bottleneck is the 4th speaker (more training diversity).
-Use `tune_hmm_models` to find the best `n_states`/`n_symbols`/`n_iter` for your dataset.
-
-## Phase 8 — Feature engineering
-
-Per-model MFCC configurations and new feature options implemented in this phase.
-
-### New MFCCConfig flags
-
-| Flag | Affects | Effect |
-|------|---------|--------|
-| `--delta` / `--kmeans-delta` | GNB / KMeans | Append velocity (Δ) coefficients to MFCC frames |
-| `--delta-delta` / `--kmeans-delta-delta` | GNB / KMeans | Append acceleration (ΔΔ) coefficients |
-| `--cmvn` / `--kmeans-cmvn` | GNB / KMeans | Per-utterance cepstral mean-variance normalization |
-| `--min-max` | GNB only | Append per-coefficient min and max to summary vector |
-
-### Why separate configs?
-
-CMVN normalizes each utterance to zero mean — useful for frame-level models (KMeans, HMM)
-where speaker-level offsets cause codebook mismatch. For GNB, which classifies from a
-summary vector of [mean, std, min, max], CMVN collapses mean≈0 and std≈1 for all classes,
-destroying discriminative signal.
-
-### Per-model optimal config (3 speakers)
-
-| Model | Flags | Feature dim | CV acc (k=5) |
-|-------|-------|-------------|-------------|
-| **GNB** | `--delta --min-max` | 104 (mean+std+min+max × 26) | 97.7% ± 2.0% |
-| **KMeans** | `--kmeans-delta --kmeans-cmvn` | 26 frames | 99.7% ± 0.7% |
-| **HMM** | `--cmvn` | 13 frames | — |
-
-### Artifact files
-
-Each model's config is saved independently so `evaluate_models` uses the right features:
-
-```
-artifacts/
-├── feature_config.json         — GNB MFCC config
-├── kmeans_feature_config.json  — KMeans MFCC config (may differ from GNB)
-└── hmm_config.json             — HMM params + embedded MFCC config
-```
-
-### New script: `tune_hmm_models`
-
-Grid search over `n_states × n_symbols × n_iter` using k-fold CV:
-
-```powershell
-python -m puzzlebot_voice_commands.scripts.tune_hmm `
-  --dataset   datasets\voice_commands_dataset `
-  --n-states  5 8 10 --n-symbols 32 64 --n-iter 20 50 `
-  --k 3 --cmvn
-```
-
-Prints results sorted by mean accuracy and shows the exact `train_hmm` command for the best config.
 
 ## Implementation phases
 
 | Phase | Content | Status |
 |-------|---------|--------|
-| 1 | Package structure, stubs, buildable skeleton | **Done** |
-| 2 | Audio I/O, MFCC extraction, dataset split | **Done** |
-| 3 | KMeansCodebookClassifier + training script | **Done** |
-| 4 | GaussianNaiveBayesClassifier + training script | **Done** |
-| 5 | Full metrics, report generation, model comparison | **Done** |
-| 6 | Documentation cleanup, validation checklist | **Done** |
-| 7 | Hidden Markov Model (HMM) classifier from scratch | **Done** |
-| 8 | Feature engineering: delta, CMVN, min/max, per-model configs, HMM grid search | **Done** |
-| 9+ | ROS 2 inference node, Puzzlebot integration | Future |
-
-## CLI scripts
-
-| Command | Mode | Description |
-|---------|------|-------------|
-| `grabar` | standalone | Record 20 clips per command interactively |
-| `merge_voice_datasets` | standalone | Merge per-person folders into one dataset |
-| `prepare_voice_dataset` | ROS 2 / standalone | Discover → split → extract MFCCs → JSON |
-| `train_voice_models` | ROS 2 / standalone | Train KMeans and/or GNB with independent feature configs |
-| `train_hmm_models` | ROS 2 / standalone | Train HMM classifiers, save `hmm_model.pkl` and MFCC config |
-| `tune_hmm_models` | standalone | Grid search over n_states × n_symbols × n_iter via k-fold CV |
-| `evaluate_voice_models` | ROS 2 / standalone | Evaluate all models, each with its own MFCC config |
-| `predict_voice_file` | ROS 2 / standalone | Single-file inference with ranked output |
-| `cross_validate_voice` | standalone | K-fold CV with independent KMeans/GNB feature flags |
-| `learning_curve_voice` | standalone | Accuracy vs training size, detects overfitting |
-| `speaker_test_voice` | standalone | Per-speaker recall, all-train or leave-one-out |
+| 1 | Package structure, stubs, buildable skeleton | Done |
+| 2 | Audio I/O, MFCC extraction, dataset split | Done |
+| 3 | KMeansCodebookClassifier + training script | Done |
+| 4 | GaussianNaiveBayesClassifier + training script | Done |
+| 5 | Full metrics, report generation, model comparison | Done |
+| 6 | Documentation cleanup, validation checklist | Done |
+| 7 | HMM classifier from scratch (Baum-Welch + Viterbi) | Done |
+| 8 | Feature engineering: delta, CMVN, librosa, per-model configs, grid search | Done |
+| 8b | 4th speaker (jesus), data augmentation 4x, syllable-states HMM | Done |
+| **9** | **ROS 2 inference node, trigger subscriber, /voice/* publishers** | **In progress** |
