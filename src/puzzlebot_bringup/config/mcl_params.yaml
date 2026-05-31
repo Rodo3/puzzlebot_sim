@@ -25,15 +25,34 @@
 #     slam:=false mcl:=true avoidance:=false viewer:=false lidar_topic:=/scan
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Parámetros compartidos por map_server_node, mcl y cualquier nodo que lea el mapa guardado.
+# Actualizar map_path (y map_resolution/origin si cambia el mapa) cuando haya un mapa nuevo.
+map_server_node:
+  ros__parameters:
+    map_path:        '/home/jesus/Documents/puzzlebot_sim/slam_map_20260529_235356.png'
+    map_resolution:   0.05
+    map_origin_x:   -0.25
+    map_origin_y:   -0.25
+    map_frame:       'map'
+    occupied_thresh:  0.65    # pixel >= 0.65*255=166 → libre (suelo blanco)
+    free_thresh:      0.196   # pixel <= 0.196*255=50 → ocupado (pared negra)
+
+# Parámetros de slam_node en modo localization_only (use_map:=true slam:=false).
+# Solo se leen los campos relevantes; el resto viene de slam_params.yaml.
+slam_node:
+  ros__parameters:
+    localization_map_path: '/home/jesus/Documents/puzzlebot_sim/slam_map_20260529_235356.png'
+    scan_match_min_score:  15.0
+
 mcl:
   ros__parameters:
     # ── Ruta al mapa PNG (rellenar tras la sesión 1) ──────────────────────────
-    map_path:        '/home/jesus/puzzlebot_map.png'
+    map_path:        '/home/jesus/Documents/puzzlebot_sim/slam_map_20260529_235356.png'
 
-    # ── Geometría del mapa (copiar de ~/puzzlebot_map.yaml tras map_saver) ────
+    # ── Geometría del mapa (debe coincidir con slam_params.yaml) ─────────────
     map_resolution:   0.05     # metros por píxel
-    map_origin_x:   -12.5     # coordenada X del píxel (col=0, row=bottom)
-    map_origin_y:   -12.5     # coordenada Y del píxel (col=0, row=bottom)
+    map_origin_x:   -0.25     # coordenada X del píxel (col=0, row=bottom)
+    map_origin_y:   -0.25     # coordenada Y del píxel (col=0, row=bottom)
 
     # ── Partículas ────────────────────────────────────────────────────────────
     num_particles:    300      # menos que 500 para ahorrar CPU

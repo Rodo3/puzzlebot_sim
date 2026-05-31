@@ -131,6 +131,32 @@ class OccupancyGridMap:
                 self.grid[end_row, end_col] + self.l_free,
             )
 
+    def load_from_png(self, path: str) -> None:
+        """Load a saved PNG into the log-odds grid (inverse of to_png).
+
+        Expected pixel convention (same as to_png / ROS map_server):
+          255 = free     → log-odds = -l_clamp
+          127 = unknown  → log-odds =  0.0
+            0 = occupied → log-odds = +l_clamp
+        Pixels are clamped to [-l_clamp, +l_clamp] to match the SLAM saturation.
+        The image is flipped vertically because PNG row-0 is top while the grid
+        row-0 is bottom (OccupancyGrid convention).
+        """
+        from PIL import Image
+        img = Image.open(path).convert('L')
+        arr = np.array(img, dtype=np.float32)
+        arr = np.flipud(arr)          # PNG top-left → grid bottom-left
+
+        # Resize if the saved map has different pixel dimensions than the grid.
+        if arr.shape != (self.height_pixels, self.width_pixels):
+            img_resized = Image.fromarray(arr.astype(np.uint8)).resize(
+                (self.width_pixels, self.height_pixels), Image.NEAREST)
+            arr = np.array(img_resized, dtype=np.float32)
+
+        # pixel 255→−l_clamp (free), 0→+l_clamp (occupied), 127→0 (unknown)
+        self.grid = (127.0 - arr) / 127.0 * self.l_clamp
+        self.grid = np.clip(self.grid, -self.l_clamp, self.l_clamp).astype(np.float32)
+
     def to_png(self, path: str) -> None:
         """Save the current occupancy grid as a grayscale PNG.
 
