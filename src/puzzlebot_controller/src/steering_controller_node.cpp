@@ -29,11 +29,13 @@ public:
     declare_parameter("max_angular_vel",     1.50);   // rad/s
     declare_parameter("goal_tolerance",      0.10);   // metres — stop when reached
     declare_parameter("control_frequency",  20.0);   // Hz
+    declare_parameter("path_timeout_sec",    3.0);   // s — clear path if no update
 
-    lookahead_  = get_parameter("lookahead_distance").as_double();
-    max_v_      = get_parameter("max_linear_vel").as_double();
-    max_w_      = get_parameter("max_angular_vel").as_double();
-    goal_tol_   = get_parameter("goal_tolerance").as_double();
+    lookahead_     = get_parameter("lookahead_distance").as_double();
+    max_v_         = get_parameter("max_linear_vel").as_double();
+    max_w_         = get_parameter("max_angular_vel").as_double();
+    goal_tol_      = get_parameter("goal_tolerance").as_double();
+    path_timeout_  = get_parameter("path_timeout_sec").as_double();
 
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom", 10, std::bind(&SteeringControllerNode::odom_cb, this, std::placeholders::_1));
@@ -65,8 +67,9 @@ private:
 
   void path_cb(const nav_msgs::msg::Path::SharedPtr msg)
   {
-    path_         = msg->poses;
-    goal_reached_ = false;
+    last_path_time_ = get_clock()->now();
+    path_           = msg->poses;
+    goal_reached_   = false;
 
     // Al recibir ruta nueva, empezar desde el waypoint más cercano al robot.
     // Esto evita que el controlador intente ir hacia puntos detrás del robot
@@ -94,6 +97,17 @@ private:
   void control_loop()
   {
     geometry_msgs::msg::Twist cmd;
+
+    // If no path update has arrived recently, the planner may have crashed.
+    // Clear the stale path and stop rather than following indefinitely.
+    // Only applies once a path has been received (last_path_time_ > 0).
+    if (!path_.empty() && !goal_reached_ && last_path_time_.nanoseconds() > 0) {
+      double age = (get_clock()->now() - last_path_time_).seconds();
+      if (age > path_timeout_) {
+        RCLCPP_WARN(get_logger(), "Path timeout (%.1f s > %.1f s) — stopping", age, path_timeout_);
+        path_.clear();
+      }
+    }
 
     if (!have_pose_ || path_.empty() || goal_reached_) {
       pub_cmd_->publish(cmd);  // zero velocity
@@ -172,7 +186,8 @@ private:
   bool   have_pose_{false};
 
   double robot_x_{0.0}, robot_y_{0.0}, robot_th_{0.0};
-  double lookahead_, max_v_, max_w_, goal_tol_;
+  double lookahead_, max_v_, max_w_, goal_tol_, path_timeout_;
+  rclcpp::Time last_path_time_{0, 0, RCL_ROS_TIME};
 };
 
 int main(int argc, char ** argv)

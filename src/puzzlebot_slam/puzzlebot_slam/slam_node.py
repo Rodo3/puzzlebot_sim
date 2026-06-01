@@ -278,6 +278,14 @@ class SlamNode(Node):
         )
 
     def _scan_cb(self, scan: LaserScan) -> None:
+        try:
+            self._scan_cb_impl(scan)
+        except Exception as exc:
+            self.get_logger().error(
+                f'scan_cb unhandled exception: {exc}',
+                throttle_duration_sec=2.0)
+
+    def _scan_cb_impl(self, scan: LaserScan) -> None:
         odom_pose = self._odom_buffer.lookup(scan.header.stamp)
         if odom_pose is None:
             self.get_logger().warn(
@@ -423,8 +431,17 @@ class SlamNode(Node):
             math.cos(map_pose.yaw - odom_pose.yaw))
         c = math.cos(yaw_tf)
         s = math.sin(yaw_tf)
-        self._map_odom_x   = map_pose.x - (odom_pose.x * c - odom_pose.y * s)
-        self._map_odom_y   = map_pose.y - (odom_pose.x * s + odom_pose.y * c)
+        x_tf = map_pose.x - (odom_pose.x * c - odom_pose.y * s)
+        y_tf = map_pose.y - (odom_pose.x * s + odom_pose.y * c)
+        # Reject NaN/inf to prevent corrupted TF from crashing downstream nodes.
+        if not (math.isfinite(x_tf) and math.isfinite(y_tf) and math.isfinite(yaw_tf)):
+            self.get_logger().warn(
+                f'map→odom update rejected: NaN/inf values '
+                f'(x={x_tf} y={y_tf} yaw={yaw_tf})',
+                throttle_duration_sec=2.0)
+            return
+        self._map_odom_x   = x_tf
+        self._map_odom_y   = y_tf
         self._map_odom_yaw = yaw_tf
 
     def _publish_map(self) -> None:
