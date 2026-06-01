@@ -21,10 +21,12 @@ is configurable via cmd_vel_out_topic (default /cmd_vel; use
 /model/puzzlebot/cmd_vel for Gazebo).
 """
 
+import glob
 import io
 import json
 import logging
 import math
+import os
 import time
 
 import numpy as np
@@ -77,6 +79,9 @@ class BridgeNode(Node):
         self.declare_parameter('websocket_port',                WEBSOCKET_PORT_DEFAULT)
         # artifact_dir: path to trained voice models. Empty string disables voice inference.
         self.declare_parameter('artifact_dir', '')
+        # maps_dir: directory to scan for saved maps (.pgm / .png).
+        # Defaults to current working directory (usually the workspace root).
+        self.declare_parameter('maps_dir', '')
         # cmd_vel_out_topic: topic to publish teleop commands.
         # Default /cmd_vel for real robot; use /model/puzzlebot/cmd_vel for Gazebo.
         self.declare_parameter('cmd_vel_out_topic', DEFAULT_TOPICS['cmd_vel_out'])
@@ -375,6 +380,41 @@ class BridgeNode(Node):
             elif msg_type == 'slam_reset':
                 self._pub_slam_reset.publish(Bool(data=True))
                 self.get_logger().info('SLAM reset requested from dashboard')
+
+            elif msg_type == 'list_maps':
+                maps_dir = self.get_parameter('maps_dir').get_parameter_value().string_value
+                if not maps_dir:
+                    maps_dir = os.getcwd()
+                pattern_pgm = os.path.join(maps_dir, '*.pgm')
+                pattern_png = os.path.join(maps_dir, '*.png')
+                files = sorted(
+                    os.path.basename(f)
+                    for f in glob.glob(pattern_pgm) + glob.glob(pattern_png)
+                )
+                self._ws.broadcast_sync({'type': 'available_maps', 'maps': files})
+                self.get_logger().info(f'list_maps → {len(files)} maps in {maps_dir}')
+
+            elif msg_type == 'load_map':
+                filename = str(data.get('filename', '')).strip()
+                maps_dir = self.get_parameter('maps_dir').get_parameter_value().string_value
+                if not maps_dir:
+                    maps_dir = os.getcwd()
+                full_path = os.path.join(maps_dir, filename)
+                if os.path.isfile(full_path):
+                    # Publish the map path to a ROS topic for slam_node / map_server to load.
+                    self._pub_nav_wp.publish(String(data=f'load_map:{full_path}'))
+                    self.get_logger().info(f'load_map → {full_path}')
+                else:
+                    self.get_logger().warn(f'load_map: file not found: {full_path}')
+
+            elif msg_type == 'use_slam_map':
+                # Switch back to live SLAM by resetting the map.
+                self._pub_slam_reset.publish(Bool(data=True))
+                self.get_logger().info('use_slam_map → SLAM reset to live mode')
+
+            elif msg_type == 'elevator':
+                action = str(data.get('action', '')).strip()
+                self.get_logger().info(f'elevator command: {action} (backend pending)')
 
             else:
                 self.get_logger().debug(f'Unknown command type: {msg_type}')

@@ -144,9 +144,9 @@ html, body, #root {
   overflow-x: hidden;
 }
 
-/* ── Footer (130px, 2 cols) ───────────────────────────── */
+/* ── Footer (90px, 2 cols) ────────────────────────────── */
 .footer {
-  height: 130px;
+  height: 90px;
   flex-shrink: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -348,6 +348,7 @@ hr {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 320px;
 }
 
 .tabs-header {
