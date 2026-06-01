@@ -140,6 +140,15 @@ class BridgeNode(Node):
         # Cache for map-frame robot pose from slam_node (overrides odom frame pose).
         self._map_pose: dict | None = None
 
+        # Voice command executor state
+        self.declare_parameter('voice_linear_speed',  0.20)
+        self.declare_parameter('voice_angular_speed', 0.50)
+        self.declare_parameter('voice_cmd_duration',  1.00)   # seconds per command
+        self._voice_lin   = self.get_parameter('voice_linear_speed').value
+        self._voice_ang   = self.get_parameter('voice_angular_speed').value
+        self._voice_dur   = self.get_parameter('voice_cmd_duration').value
+        self._voice_timer = None   # threading.Timer to stop after duration
+
         # Start WebSocket server.
         host = self.get_parameter('websocket_host').get_parameter_value().string_value
         port = self.get_parameter('websocket_port').get_parameter_value().integer_value
@@ -184,6 +193,10 @@ class BridgeNode(Node):
         # Map-frame robot pose from slam_node — overrides odom-frame pose for drawing.
         self.create_subscription(
             PoseStamped, '/slam/robot_pose_in_map', self._slam_pose_cb, 10)
+
+        # Execute voice commands as robot actions.
+        self.create_subscription(
+            String, DEFAULT_TOPICS['voice_command'], self._voice_exec_cb, 10)
 
         # Optional subscribers — tolerate missing topics.
         self.create_subscription(
@@ -237,6 +250,49 @@ class BridgeNode(Node):
             'y': round(msg.pose.position.y, 4),
             'theta': round(_math.atan2(siny, cosy), 4),
         }
+
+    def _voice_exec_cb(self, msg: String):
+        import threading
+        cmd = msg.data.strip().lower()
+
+        # Cancel any in-progress timed command
+        if self._voice_timer is not None:
+            self._voice_timer.cancel()
+            self._voice_timer = None
+
+        twist = Twist()
+        if cmd == 'avanzar':
+            twist.linear.x = self._voice_lin
+        elif cmd == 'retroceder':
+            twist.linear.x = -self._voice_lin
+        elif cmd == 'izquierda':
+            twist.angular.z = self._voice_ang
+        elif cmd == 'derecha':
+            twist.angular.z = -self._voice_ang
+        elif cmd == 'alto':
+            pass  # zero twist = stop, publish once and return
+        elif cmd == 'inicio':
+            self._pub_nav_wp.publish(String(data='inicio'))
+            self.get_logger().info('voice → navigate_to_waypoint: inicio')
+            return
+        else:
+            self.get_logger().warn(f'voice_exec: unknown command "{cmd}"')
+            return
+
+        self._pub_cmd_vel_out.publish(twist)
+        self._pub_cmd_vel_teleop.publish(twist)
+        self.get_logger().info(
+            f'voice → cmd_vel: {cmd}  '
+            f'(lin={twist.linear.x:.2f} ang={twist.angular.z:.2f})')
+
+        if cmd != 'alto':
+            def _stop():
+                stop = Twist()
+                self._pub_cmd_vel_out.publish(stop)
+                self._pub_cmd_vel_teleop.publish(stop)
+            self._voice_timer = threading.Timer(self._voice_dur, _stop)
+            self._voice_timer.daemon = True
+            self._voice_timer.start()
 
     def _odom_cb(self, msg: Odometry):
         if self._rl['odom'].should_send():
