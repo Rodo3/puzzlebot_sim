@@ -121,7 +121,10 @@ def generate_launch_description():
     world_flat  = os.path.join(desc_pkg, 'worlds', 'flat_plane.sdf')
     world_maze  = os.path.join(desc_pkg, 'worlds', 'maze.sdf')
 
-    default_map = '/home/alejandro/puzzlebot_sim/slam_map_20260529_235356.png'
+    import glob as _glob
+    ws_root = os.path.abspath(os.path.join(bringup_pkg, '..', '..', '..', '..'))
+    _maps = sorted(_glob.glob(os.path.join(ws_root, 'slam_map_*.png')))
+    default_map = _maps[-1] if _maps else ''
 
     with open(urdf_file, 'r') as f:
         robot_description = f.read()

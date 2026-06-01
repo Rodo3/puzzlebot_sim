@@ -63,8 +63,10 @@ def generate_launch_description():
 
     rviz_cfg = os.path.join(desc_pkg, 'rviz', 'nav_test_rviz.rviz')
 
-    # Mapa por defecto: el mejor (20260529 tiene más paredes completas)
-    default_map = '/home/alejandro/puzzlebot_sim/slam_map_20260529_235356.png'
+    import glob as _glob
+    ws_root = os.path.abspath(os.path.join(bringup_pkg, '..', '..', '..', '..'))
+    _maps = sorted(_glob.glob(os.path.join(ws_root, 'slam_map_*.png')))
+    default_map = _maps[-1] if _maps else ''
 
     # ── Argumentos ─────────────────────────────────────────────────────────────
     arg_map_file = DeclareLaunchArgument(

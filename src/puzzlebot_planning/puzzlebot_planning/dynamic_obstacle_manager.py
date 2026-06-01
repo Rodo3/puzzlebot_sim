@@ -418,7 +418,7 @@ class DynamicObstacleManager(Node):
                 self._log('Ruta actual bloqueada por obstáculo dinámico — '
                           'triggering global replan to persistent goal')
                 self._path_valid = False
-                self._detect_and_add_obstacle()
+                self._detect_and_add_obstacle()  # intenta refinar posición del obs
                 self._transition(BRAKE_FOR_REPLAN)
                 return
 
@@ -464,9 +464,9 @@ class DynamicObstacleManager(Node):
 
     def _state_normal(self, now: float):
         if self._min_front < self._front_stop and self._obstacle_toward_goal():
-            self._log(f'Obstáculo frontal a {self._min_front:.2f}m → BRAKE_FOR_REPLAN')
-            self._detect_and_add_obstacle()
-            self._transition(BRAKE_FOR_REPLAN)
+            self._log(f'Obstáculo frontal a {self._min_front:.2f}m — verificando si es dinámico')
+            if self._detect_and_add_obstacle():
+                self._transition(BRAKE_FOR_REPLAN)
 
     def _state_brake(self, now: float):
         elapsed = now - self._state_entry
@@ -505,10 +505,10 @@ class DynamicObstacleManager(Node):
     def _state_follow(self, now: float):
         # Detectar nuevo obstáculo mientras seguimos ruta
         if self._min_front < self._front_stop and self._obstacle_toward_goal():
-            self._log(f'Nuevo obstáculo a {self._min_front:.2f}m durante FOLLOW_NEW_PATH')
-            self._detect_and_add_obstacle()
-            self._transition(BRAKE_FOR_REPLAN)
-            return
+            self._log(f'Obstáculo a {self._min_front:.2f}m durante FOLLOW_NEW_PATH — verificando')
+            if self._detect_and_add_obstacle():
+                self._transition(BRAKE_FOR_REPLAN)
+                return
 
         # Verificar que el goal no se ha alcanzado
         if self._goal_x is not None:
@@ -608,15 +608,14 @@ class DynamicObstacleManager(Node):
                         return True
         return False
 
-    def _detect_and_add_obstacle(self):
+    def _detect_and_add_obstacle(self) -> bool:
         """Detecta posición del obstáculo desde el LaserScan y lo agrega a la capa dinámica.
 
         Solo procesa puntos que NO están en el mapa base conocido (paredes estáticas).
-        Los puntos que caen sobre celdas ya ocupadas del mapa base se ignoran.
-        Esto implementa la regla: el robot solo reacciona a obstáculos NO conocidos.
+        Retorna True si se creó o actualizó un obstáculo dinámico, False en caso contrario.
         """
         if not self._have_pose or self._scan_ranges is None:
-            return
+            return False
 
         # Proyectar todos los puntos frontales del scan al frame world
         fm = np.abs(self._scan_angles) <= self._front_a
@@ -624,7 +623,7 @@ class DynamicObstacleManager(Node):
                                  & (self._scan_ranges < self._front_stop))[0]
 
         if len(front_indices) == 0:
-            return
+            return False
 
         # Filtrar puntos que ya están en el mapa estático
         dynamic_pts = []
@@ -638,8 +637,8 @@ class DynamicObstacleManager(Node):
 
         if not dynamic_pts:
             self._log('Puntos frontales dentro de stop_distance son paredes estáticas — '
-                      'no se crea obstáculo dinámico')
-            return
+                      'ignorando, sin BRAKE_FOR_REPLAN')
+            return False
 
         # Usar centroide de los puntos dinámicos detectados
         xs = [p[0] for p in dynamic_pts]
@@ -653,6 +652,7 @@ class DynamicObstacleManager(Node):
 
         now = time.monotonic()
         self._add_or_update_obstacle(obs_x, obs_y, now)
+        return True
 
     def _add_or_update_obstacle(self, obs_x: float, obs_y: float, now: float):
         """Clustering: actualiza obstáculo existente o crea uno nuevo."""

@@ -62,11 +62,16 @@ def generate_launch_description():
     rviz_file   = os.path.join(desc_pkg, 'rviz',   'mapping_rviz.rviz')
     slam_cfg    = os.path.join(bringup_pkg, 'config', 'slam_params.yaml')
     ctrl_cfg    = os.path.join(bringup_pkg, 'config', 'controller_params.yaml')
+    kalman_cfg  = os.path.join(bringup_pkg, 'config', 'kalman_params.yaml')
+    aruco_map_yaml = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
 
-    # Mapa PNG previo — el más completo disponible (1522 celdas de pared).
-    # El SLAM lo carga como estado inicial del grid de log-odds y sigue mapeando
-    # encima de él: el robot ya "sabe" las paredes desde el arranque.
-    default_map_png = '/home/alejandro/puzzlebot_sim/slam_map_20260529_235356.png'
+    # Workspace root: src/puzzlebot_bringup/share/puzzlebot_bringup → ../../../../
+    ws_root = os.path.abspath(os.path.join(bringup_pkg, '..', '..', '..', '..'))
+
+    # Mapa PNG previo — busca el más reciente en el workspace root, o vacío si no hay.
+    import glob as _glob
+    _maps = sorted(_glob.glob(os.path.join(ws_root, 'slam_map_*.png')))
+    default_map_png = _maps[-1] if _maps else ''
 
     with open(urdf_file, 'r') as f:
         robot_description = f.read()
@@ -89,10 +94,10 @@ def generate_launch_description():
         'initial_map', default_value=default_map_png,
         description='PNG del mapa previo para inicializar SLAM. Vacío = empezar desde cero.')
     arg_nav = DeclareLaunchArgument(
-        'navigation', default_value='true',
+        'navigation', default_value='false',
         description='Lanzar A* + steering + DOM')
     arg_dyn = DeclareLaunchArgument(
-        'dynamic_obstacles', default_value='true',
+        'dynamic_obstacles', default_value='false',
         description='Lanzar dynamic_obstacle_spawner')
     arg_obs_mgr = DeclareLaunchArgument(
         'obstacle_manager', default_value='dynamic',
@@ -327,41 +332,92 @@ def generate_launch_description():
         condition=IfCondition(PythonExpression(["'", world, "' == 'maze'"])),
     )
 
-    # ── Odometría de ruedas → /odom + TF odom→base_footprint ────────────────
-    wheel_odom = Node(
-        package='puzzlebot_localization',
-        executable='odometry_node',
-        name='odometry_node',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'wheel_radius': 0.05,
-            'wheel_separation': 0.19,
-            'odom_topic': '/odom',
-            'odom_frame': 'odom',
-            'base_frame': 'base_footprint',
-            'input_source': 'joint_states',
-            'publish_tf': True,
-        }],
-        # /joint_states ya viene del joint_relay correspondiente
+    # ── Odometría de encoders → /odom_raw (predicción EKF, sin TF) ──────────
+    # publish_tf: False porque el TF odom→base_footprint lo publica kalman_filter_node
+    # después de fusionar con ArUco. El slam_node lee ese TF corregido.
+    wheel_odom_raw = TimerAction(
+        period=6.0,
+        actions=[Node(
+            package='puzzlebot_localization',
+            executable='odometry_node',
+            name='odometry_node',
+            output='screen',
+            parameters=[{
+                'use_sim_time':    True,
+                'wheel_radius':    0.05,
+                'wheel_separation': 0.19,
+                'odom_topic':      '/odom_raw',
+                'odom_frame':      'odom',
+                'base_frame':      'base_footprint',
+                'input_source':    'joint_states',
+                'publish_tf':      False,
+            }],
+        )],
+    )
+
+    # ── ArUco Oracle — Ground truth de Gazebo → /aruco/pose sintético ────────
+    # Lee la pose real del robot de Gazebo y simula detecciones ArUco con ruido.
+    # Requiere que el bridge ya publique /world/real_arena/dynamic_pose/info.
+    aruco_oracle = TimerAction(
+        period=6.0,
+        actions=[Node(
+            package='puzzlebot_localization',
+            executable='aruco_oracle',
+            name='aruco_oracle',
+            output='screen',
+            parameters=[{
+                'use_sim_time':       True,
+                'pose_topic':         '/world/real_arena/dynamic_pose/info',
+                'aruco_map_file':     aruco_map_yaml,
+                'max_detection_dist': 2.0,
+                'sigma_lateral':      0.015,
+                'sigma_depth_base':   0.020,
+                'sigma_yaw':          0.015,
+                'publish_rate_hz':    10.0,
+                'detection_prob':     1.0,
+            }],
+        )],
+    )
+
+    # ── Kalman EKF — fusiona /odom_raw + /aruco/pose → /odom + TF ───────────
+    # init_from_aruco: false → arranca inmediatamente con la pose del spawn (0.30, 0.30, π/2).
+    # Así el SLAM tiene TF válido desde el primer scan en lugar de esperar la primera
+    # detección ArUco, que puede tardar si el robot no está frente a un marcador.
+    kalman = TimerAction(
+        period=6.0,
+        actions=[Node(
+            package='puzzlebot_localization',
+            executable='kalman_filter_node',
+            name='kalman_filter_node',
+            output='screen',
+            parameters=[kalman_cfg, {
+                'use_sim_time':   True,
+                'init_from_aruco': False,
+                'initial_x':      0.30,
+                'initial_y':      0.30,
+                'initial_theta':  1.5708,
+            }],
+        )],
     )
 
     # ── SLAM mapping con mapa inicial ─────────────────────────────────────────
-    # localization_map_path = PNG previo → el grid de log-odds arranca ya con las
-    # paredes conocidas. El robot navega desde el primer segundo sin necesidad de
-    # explorar. El SLAM sigue integrando nuevos scans: detecta obstáculos dinámicos
-    # físicos en Gazebo y los agrega al mapa vivo → /map se actualiza en tiempo real.
-    # localization_only=False → sigue mapeando (no solo localiza).
-    slam_node = Node(
-        package='puzzlebot_slam',
-        executable='slam_node',
-        name='slam_node',
-        parameters=[slam_cfg, {
-            'use_sim_time': True,
-            'localization_map_path': initial_map,
-            'localization_only':     False,
-        }],
-        output='screen',
+    # Arranca 8 s después para que kalman haya publicado al menos un TF
+    # odom→base_footprint antes de que llegue el primer scan.
+    # scan_match_updates_map_odom: True → el matcher corrige drift acumulado.
+    slam_node = TimerAction(
+        period=8.0,
+        actions=[Node(
+            package='puzzlebot_slam',
+            executable='slam_node',
+            name='slam_node',
+            parameters=[slam_cfg, {
+                'use_sim_time':               True,
+                'localization_map_path':      initial_map,
+                'localization_only':          False,
+                'scan_match_updates_map_odom': True,
+            }],
+            output='screen',
+        )],
     )
 
     # ── Navegación A* + steering + obstacle_avoidance + DOM ─────────────────
@@ -373,6 +429,7 @@ def generate_launch_description():
             'use_sim_time':     'true',
             'cmd_vel_topic':    '/model/puzzlebot/cmd_vel',
             'obstacle_manager': obs_mgr,
+            'scan_topic':       '/scan',
         }.items(),
         condition=IfCondition(nav_en),
     )
@@ -429,9 +486,13 @@ def generate_launch_description():
         spawn_arena,
         spawn_flat,
         spawn_maze,
-        # Odometría
-        wheel_odom,
-        # SLAM
+        # Odometría de encoders (predicción EKF)
+        wheel_odom_raw,
+        # ArUco oracle (ground truth → /aruco/pose sintético)
+        aruco_oracle,
+        # Kalman EKF (fusiona encoders + ArUco → /odom + TF)
+        kalman,
+        # SLAM (arranca 8s después, cuando kalman ya tiene TF publicado)
         slam_node,
         # Navegación (condicional)
         navigation,
