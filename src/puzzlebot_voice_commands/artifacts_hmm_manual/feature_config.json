@@ -1,0 +1,13 @@
+{
+  "sample_rate": 16000,
+  "pre_emphasis": 0.97,
+  "frame_size": 0.025,
+  "frame_stride": 0.01,
+  "n_fft": 512,
+  "n_filters": 26,
+  "n_mfcc": 20,
+  "include_delta": true,
+  "include_delta_delta": false,
+  "cmvn": false,
+  "include_min_max": true
+}

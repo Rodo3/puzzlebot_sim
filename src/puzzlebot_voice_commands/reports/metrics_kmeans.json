@@ -1,0 +1,144 @@
+{
+  "n_samples": 576,
+  "labels": [
+    "alto",
+    "avanzar",
+    "derecha",
+    "inicio",
+    "izquierda",
+    "retroceder"
+  ],
+  "accuracy": 0.977431,
+  "macro_f1": 0.977447,
+  "macro_recall": 0.977431,
+  "top2_accuracy": 0.998264,
+  "per_class": {
+    "alto": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "avanzar": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "derecha": {
+      "precision": 1.0,
+      "recall": 0.989583,
+      "f1": 0.994764
+    },
+    "inicio": {
+      "precision": 1.0,
+      "recall": 0.875,
+      "f1": 0.933333
+    },
+    "izquierda": {
+      "precision": 0.880734,
+      "recall": 1.0,
+      "f1": 0.936585
+    },
+    "retroceder": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    }
+  },
+  "per_command_accuracy": {
+    "alto": 1.0,
+    "avanzar": 1.0,
+    "derecha": 0.989583,
+    "inicio": 0.875,
+    "izquierda": 1.0,
+    "retroceder": 1.0
+  },
+  "confusion_matrix_list": [
+    [
+      96,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      96,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      95,
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      84,
+      12,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      96,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      96
+    ]
+  ],
+  "safety": {
+    "safety_critical_count": 0,
+    "safety_critical_rate": 0.0,
+    "safety_critical_cases": [],
+    "opposite_direction_count": 1,
+    "opposite_direction_rate": 0.001736,
+    "opposite_direction_cases": [
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      }
+    ],
+    "stop_recall": {
+      "alto": 1.0
+    }
+  },
+  "safety_critical_count": 0,
+  "safety_critical_rate": 0.0,
+  "opposite_direction_count": 1,
+  "confidence_stats": {
+    "mean": 0.235285879288761,
+    "std": 0.09326891025417254,
+    "min": 0.003653333420163385,
+    "max": 0.47730371152288953
+  },
+  "inference_time": {
+    "mean": 0.5317015545895427,
+    "std": 0.1670999829688232,
+    "min": 0.39279996417462826,
+    "max": 1.4943999703973532
+  },
+  "avg_inference_ms": 0.5317,
+  "artifact_size_kb": 15.59,
+  "model_config": {
+    "n_clusters": 16,
+    "max_iter": 300,
+    "tolerance": 0.0001,
+    "random_state": 42
+  }
+}

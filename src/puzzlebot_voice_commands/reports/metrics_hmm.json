@@ -1,0 +1,204 @@
+{
+  "n_samples": 576,
+  "labels": [
+    "alto",
+    "avanzar",
+    "derecha",
+    "inicio",
+    "izquierda",
+    "retroceder"
+  ],
+  "accuracy": 0.920139,
+  "macro_f1": 0.922311,
+  "macro_recall": 0.920139,
+  "top2_accuracy": 0.998264,
+  "per_class": {
+    "alto": {
+      "precision": 1.0,
+      "recall": 0.947917,
+      "f1": 0.973262
+    },
+    "avanzar": {
+      "precision": 1.0,
+      "recall": 0.885417,
+      "f1": 0.939227
+    },
+    "derecha": {
+      "precision": 1.0,
+      "recall": 0.791667,
+      "f1": 0.883721
+    },
+    "inicio": {
+      "precision": 1.0,
+      "recall": 0.895833,
+      "f1": 0.945055
+    },
+    "izquierda": {
+      "precision": 0.90566,
+      "recall": 1.0,
+      "f1": 0.950495
+    },
+    "retroceder": {
+      "precision": 0.727273,
+      "recall": 1.0,
+      "f1": 0.842105
+    }
+  },
+  "per_command_accuracy": {
+    "alto": 0.947917,
+    "avanzar": 0.885417,
+    "derecha": 0.791667,
+    "inicio": 0.895833,
+    "izquierda": 1.0,
+    "retroceder": 1.0
+  },
+  "confusion_matrix_list": [
+    [
+      91,
+      0,
+      0,
+      0,
+      1,
+      4
+    ],
+    [
+      0,
+      85,
+      0,
+      0,
+      0,
+      11
+    ],
+    [
+      0,
+      0,
+      76,
+      0,
+      0,
+      20
+    ],
+    [
+      0,
+      0,
+      0,
+      86,
+      9,
+      1
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      96,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      96
+    ]
+  ],
+  "safety": {
+    "safety_critical_count": 5,
+    "safety_critical_rate": 0.008681,
+    "safety_critical_cases": [
+      {
+        "true": "alto",
+        "pred": "izquierda"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      }
+    ],
+    "opposite_direction_count": 11,
+    "opposite_direction_rate": 0.019097,
+    "opposite_direction_cases": [
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      }
+    ],
+    "stop_recall": {
+      "alto": 0.947917
+    }
+  },
+  "safety_critical_count": 5,
+  "safety_critical_rate": 0.008681,
+  "opposite_direction_count": 11,
+  "confidence_stats": {
+    "mean": 49.30329265835592,
+    "std": 31.223458578403964,
+    "min": 0.012674477958910302,
+    "max": 262.35760674146843
+  },
+  "inference_time": {
+    "mean": 53.468262847470925,
+    "std": 8.376010325600214,
+    "min": 41.88990010879934,
+    "max": 170.7474000286311
+  },
+  "avg_inference_ms": 53.4683,
+  "artifact_size_kb": 15.06,
+  "model_config": {
+    "n_states": 5,
+    "n_symbols": 32,
+    "n_iter": 20
+  }
+}

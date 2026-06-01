@@ -1,0 +1,323 @@
+{
+  "hmm": {
+    "safety_critical_count": 40,
+    "safety_critical_rate": 0.069444,
+    "safety_critical_cases": [
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      }
+    ],
+    "opposite_direction_count": 37,
+    "opposite_direction_rate": 0.064236,
+    "opposite_direction_cases": [
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "retroceder",
+        "pred": "avanzar"
+      },
+      {
+        "true": "retroceder",
+        "pred": "avanzar"
+      }
+    ],
+    "stop_recall": {
+      "alto": 0.583333
+    }
+  }
+}
