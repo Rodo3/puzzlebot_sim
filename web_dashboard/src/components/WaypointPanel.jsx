@@ -2,36 +2,38 @@ import React, { useState } from 'react';
 
 // Waypoints from src/puzzlebot_bringup/config/waypoints.yaml
 const WAYPOINTS = [
-  { name: 'home',       label: 'Home       (0.50, 0.50)' },
-  { name: 'centro',     label: 'Centro     (1.88, 2.43)' },
-  { name: 'esquina_sw', label: 'Esq SW     (0.30, 0.30)' },
-  { name: 'esquina_se', label: 'Esq SE     (3.46, 0.30)' },
-  { name: 'esquina_ne', label: 'Esq NE     (3.46, 4.56)' },
-  { name: 'esquina_nw', label: 'Esq NW     (0.30, 4.56)' },
-  { name: 'estacion_a', label: 'Estación A (0.60, 1.20)' },
-  { name: 'estacion_b', label: 'Estación B (1.88, 0.50)' },
-  { name: 'estacion_c', label: 'Estación C (3.10, 2.43)' },
-  { name: 'estacion_d', label: 'Estación D (1.88, 4.20)' },
-  { name: 'estacion_e', label: 'Estación E (0.60, 3.50)' },
+  { name: 'home',       label: 'Home       (0.50, 0.50)',  x: 0.50, y: 0.50 },
+  { name: 'centro',     label: 'Centro     (1.88, 2.43)',  x: 1.88, y: 2.43 },
+  { name: 'esquina_sw', label: 'Esq SW     (0.30, 0.30)',  x: 0.30, y: 0.30 },
+  { name: 'esquina_se', label: 'Esq SE     (3.46, 0.30)',  x: 3.46, y: 0.30 },
+  { name: 'esquina_ne', label: 'Esq NE     (3.46, 4.56)',  x: 3.46, y: 4.56 },
+  { name: 'esquina_nw', label: 'Esq NW     (0.30, 4.56)',  x: 0.30, y: 4.56 },
+  { name: 'estacion_a', label: 'Estación A (0.60, 1.20)',  x: 0.60, y: 1.20 },
+  { name: 'estacion_b', label: 'Estación B (1.88, 0.50)',  x: 1.88, y: 0.50 },
+  { name: 'estacion_c', label: 'Estación C (3.10, 2.43)',  x: 3.10, y: 2.43 },
+  { name: 'estacion_d', label: 'Estación D (1.88, 4.20)',  x: 1.88, y: 4.20 },
+  { name: 'estacion_e', label: 'Estación E (0.60, 3.50)',  x: 0.60, y: 3.50 },
 ];
 
-export default function WaypointPanel({ connected, mode, onCommand, addLog }) {
+export default function WaypointPanel({ connected, mode, onGoalPose, onCommand, addLog }) {
   const [selected, setSelected] = useState('');
   const disabled = !connected || mode !== 'navigation';
 
   const sendWaypoint = () => {
     if (!selected || disabled) return;
-    onCommand({ type: 'navigate_to_waypoint', name: selected });
+    const wp = WAYPOINTS.find(w => w.name === selected);
+    if (!wp) return;
+    onGoalPose({ x: wp.x, y: wp.y, theta: 0 });
     addLog(`Waypoint → ${selected}`);
   };
 
   const sendStop = () => {
-    onCommand({ type: 'navigate_to_waypoint', name: 'stop' });
-    addLog('Navigation stop requested');
+    onCommand({ type: 'cmd_vel', linear_x: 0, angular_z: 0 });
+    addLog('Navigation stop');
   };
 
   return (
-    <div className="panel waypoint-panel">
+    <div className="panel">
       <h3>Waypoints</h3>
       {mode !== 'navigation' && (
         <div className="muted small" style={{ marginBottom: 6 }}>
@@ -54,16 +56,12 @@ export default function WaypointPanel({ connected, mode, onCommand, addLog }) {
           className="btn-waypoint"
           onClick={sendWaypoint}
           disabled={disabled || !selected}
-        >
-          Ir al Waypoint
-        </button>
+        >Ir al Waypoint</button>
         <button
           className="btn-waypoint btn-stop-nav"
           onClick={sendStop}
-          disabled={disabled}
-        >
-          Detener
-        </button>
+          disabled={!connected}
+        >Stop</button>
       </div>
     </div>
   );

@@ -1,40 +1,92 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
-export default function ModePanel({ mode, connected, onModeChange, onSlamReset }) {
+export default function ModePanel({
+  mode, connected, onModeChange, onSlamReset,
+  availableMaps, mapSource, onCommand,
+}) {
+  const [selectedMap, setSelectedMap] = useState('');
+
+  // Auto-request map list when connection is established
+  useEffect(() => {
+    if (connected) onCommand({ type: 'list_maps' });
+  }, [connected]); // eslint-disable-line
+
   const handleMapping = () => {
     onModeChange('mapping');
     onSlamReset();
   };
 
-  const handleNavigation = () => {
-    onModeChange('navigation');
-  };
-
   return (
-    <div className="panel mode-panel">
-      <h3>Mode</h3>
+    <div className="panel">
+      <h3>Modo</h3>
       <div className="mode-buttons">
         <button
           className={`btn-mode ${mode === 'mapping' ? 'btn-mode-active' : ''}`}
           onClick={handleMapping}
           disabled={!connected}
-          title="Reset SLAM map and start mapping"
-        >
-          Iniciar Mapeo
-        </button>
+          title="Resetea el mapa SLAM e inicia mapeo"
+        >Iniciar Mapeo</button>
         <button
           className={`btn-mode ${mode === 'navigation' ? 'btn-mode-active' : ''}`}
-          onClick={handleNavigation}
+          onClick={() => onModeChange('navigation')}
           disabled={!connected}
-          title="Enable click-to-goal on the map"
-        >
-          Navegar
-        </button>
+          title="Activa click-to-goal en el mapa"
+        >Navegar</button>
       </div>
-      <div className="mode-hint muted small">
+
+      <div className="muted small">
         {mode === 'mapping'
           ? 'SLAM activo — recorre el entorno para construir el mapa'
           : 'Modo navegación — clic en el mapa para enviar goal'}
+      </div>
+
+      <hr />
+
+      <div className="map-source-section">
+        <div className="map-source-header">
+          <span className="muted small">Mapa guardado</span>
+          {mapSource === 'static'
+            ? <span className="badge badge-warning">Mapa estático</span>
+            : <span className="badge badge-ok">SLAM en vivo</span>
+          }
+        </div>
+
+        <div className="map-source-row">
+          <select
+            className="map-select"
+            value={selectedMap}
+            onChange={e => setSelectedMap(e.target.value)}
+            disabled={!connected}
+          >
+            <option value="">-- seleccionar mapa --</option>
+            {(availableMaps ?? []).map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <button
+            className="btn-sm"
+            onClick={() => onCommand({ type: 'list_maps' })}
+            disabled={!connected}
+            title="Refrescar lista de mapas"
+          >↻</button>
+        </div>
+
+        <div className="map-actions">
+          <button
+            className="btn-sm btn-sm-accent"
+            style={{ flex: 1 }}
+            onClick={() => { if (selectedMap) onCommand({ type: 'load_map', filename: selectedMap }); }}
+            disabled={!connected || !selectedMap}
+          >Cargar mapa</button>
+          {mapSource === 'static' && (
+            <button
+              className="btn-sm btn-sm-green"
+              style={{ flex: 1 }}
+              onClick={() => onCommand({ type: 'use_slam_map' })}
+              disabled={!connected}
+            >SLAM live</button>
+          )}
+        </div>
       </div>
     </div>
   );

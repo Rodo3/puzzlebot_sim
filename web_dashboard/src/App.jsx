@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createWebSocketClient } from './services/websocketClient.js';
-import StatusPanel       from './components/StatusPanel.jsx';
 import SlamMap           from './components/SlamMap.jsx';
 import LidarView         from './components/LidarView.jsx';
 import CameraPanel       from './components/CameraPanel.jsx';
@@ -10,44 +9,42 @@ import ModePanel         from './components/ModePanel.jsx';
 import TeleopPanel       from './components/TeleopPanel.jsx';
 import WaypointPanel     from './components/WaypointPanel.jsx';
 import LogsPanel         from './components/LogsPanel.jsx';
+import ElevatorPanel     from './components/ElevatorPanel.jsx';
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
-const MAX_TRAJECTORY = 500;
-const MAX_LOGS = 50;
+const WS_URL            = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
+const MAX_TRAJECTORY    = 500;
+const MAX_LOGS          = 50;
 const MAX_VOICE_HISTORY = 20;
 
-function nowStr() {
-  return new Date().toLocaleTimeString();
-}
+function nowStr() { return new Date().toLocaleTimeString(); }
+
+const TABS = [
+  { id: 'mode',      label: 'Modo' },
+  { id: 'waypoints', label: 'Waypoints' },
+  { id: 'voice',     label: 'Voz' },
+  { id: 'elevator',  label: 'Elevador' },
+];
 
 export default function App() {
-  const [connected,    setConnected]    = useState(false);
-  const [lastUpdate,   setLastUpdate]   = useState(null);
-  const [robotState,   setRobotState]   = useState(null);
-  const [scanData,     setScanData]     = useState(null);
-  const [mapData,      setMapData]      = useState(null);
-  const [cmdVel,       setCmdVel]       = useState(null);
-  const [cmdVelIn,     setCmdVelIn]     = useState(null);
-  const [voiceData,    setVoiceData]    = useState(null);
-  const [cameraData,   setCameraData]   = useState(null);
-  const [trajectory,   setTrajectory]   = useState([]);
-  const [voiceHistory, setVoiceHistory] = useState([]);
-  const [logs,         setLogs]         = useState([]);
-
-  // Control state
-  const [mode,       setMode]       = useState('mapping');   // 'mapping' | 'navigation'
-  const [goalMarker, setGoalMarker] = useState(null);        // {x, y} in world coords
+  const [connected,     setConnected]     = useState(false);
+  const [lastUpdate,    setLastUpdate]    = useState(null);
+  const [robotState,    setRobotState]    = useState(null);
+  const [scanData,      setScanData]      = useState(null);
+  const [mapData,       setMapData]       = useState(null);
+  const [cmdVel,        setCmdVel]        = useState(null);
+  const [cmdVelIn,      setCmdVelIn]      = useState(null);
+  const [voiceData,     setVoiceData]     = useState(null);
+  const [cameraData,    setCameraData]    = useState(null);
+  const [trajectory,    setTrajectory]    = useState([]);
+  const [voiceHistory,  setVoiceHistory]  = useState([]);
+  const [logs,          setLogs]          = useState([]);
+  const [mode,          setMode]          = useState('mapping');
+  const [goalMarker,    setGoalMarker]    = useState(null);
+  const [activeTab,     setActiveTab]     = useState('mode');
+  const [availableMaps, setAvailableMaps] = useState([]);
+  const [mapSource,     setMapSource]     = useState('live');
 
   const clientRef = useRef(null);
-
-  const topicStatus = {
-    odom:   !!robotState,
-    scan:   !!scanData,
-    map:    !!mapData,
-    cmdVel: !!cmdVel,
-    camera: !!cameraData,
-    voice:  !!voiceData,
-  };
 
   const addLog = useCallback((msg) => {
     setLogs(prev => [...prev.slice(-(MAX_LOGS - 1)), { time: nowStr(), msg }]);
@@ -56,6 +53,13 @@ export default function App() {
   const sendCommand = useCallback((data) => {
     clientRef.current?.send(data);
   }, []);
+
+  // Wraps sendCommand to also update mapSource locally
+  const handleCommand = useCallback((data) => {
+    if (data.type === 'load_map')    setMapSource('static');
+    if (data.type === 'use_slam_map') setMapSource('live');
+    sendCommand(data);
+  }, [sendCommand]);
 
   const handleMessage = useCallback((msg) => {
     setLastUpdate(msg.timestamp ?? Date.now() / 1000);
@@ -68,33 +72,29 @@ export default function App() {
           return next.length > MAX_TRAJECTORY ? next.slice(-MAX_TRAJECTORY) : next;
         });
         break;
-
       case 'scan':
         setScanData(msg);
         break;
-
       case 'map':
         setMapData(msg);
-        addLog('Receiving map update');
         break;
-
       case 'velocity_command':
         if (msg.source === 'cmd_vel')    setCmdVel(msg);
         if (msg.source === 'cmd_vel_in') setCmdVelIn(msg);
         break;
-
       case 'voice_command':
         setVoiceData(msg);
         if (msg.command) {
           setVoiceHistory(prev => [...prev.slice(-(MAX_VOICE_HISTORY - 1)), msg.command]);
-          addLog(`Voice command detected: ${msg.command}`);
+          addLog(`Voice: ${msg.command}`);
         }
         break;
-
       case 'camera_frame':
         setCameraData(msg);
         break;
-
+      case 'available_maps':
+        setAvailableMaps(msg.maps ?? []);
+        break;
       default:
         break;
     }
@@ -123,22 +123,51 @@ export default function App() {
     addLog('SLAM map reset');
   }, [sendCommand, addLog]);
 
+  const handleModeChange = useCallback((newMode) => {
+    setMode(newMode);
+    addLog(`Mode → ${newMode}`);
+  }, [addLog]);
+
+  const topicDots = [
+    { key: 'odom',  label: 'odom',  active: !!robotState },
+    { key: 'scan',  label: 'scan',  active: !!scanData },
+    { key: 'map',   label: 'map',   active: !!mapData },
+    { key: 'vel',   label: 'vel',   active: !!cmdVel },
+    { key: 'cam',   label: 'cam',   active: !!cameraData },
+    { key: 'voice', label: 'voice', active: !!voiceData },
+  ];
+
   return (
     <div className="app">
+      {/* ── Header ── */}
       <header className="header">
-        <h1>Puzzlebot Live Dashboard</h1>
-        <div className={`conn-badge ${connected ? 'conn-ok' : 'conn-err'}`}>
+        <span className="header-title">PUZZLEBOT LIVE DASHBOARD</span>
+        <span className="header-sep">|</span>
+        <span className={`conn-badge ${connected ? 'conn-ok' : 'conn-err'}`}>
           {connected ? 'Connected' : 'Disconnected'}
-        </div>
+        </span>
         {lastUpdate && (
-          <span className="muted small">
-            Last update: {new Date(lastUpdate * 1000).toLocaleTimeString()}
+          <span className="header-timestamp">
+            {new Date(lastUpdate * 1000).toLocaleTimeString()}
           </span>
         )}
+        <div className="topic-dots">
+          {topicDots.map(({ key, label, active }) => (
+            <div key={key} className="topic-dot">
+              <div className={`dot ${active ? 'dot-ok' : 'dot-err'}`} />
+              {label}
+            </div>
+          ))}
+        </div>
+        <span className={`mode-pill mode-pill-${mode}`}>
+          {mode === 'mapping' ? 'MAPPING' : 'NAVIGATION'}
+        </span>
       </header>
 
-      <main className="main-grid">
-        <section className="col-left">
+      {/* ── Main area ── */}
+      <div className="main-area">
+        {/* SLAM map column */}
+        <div className="col-slam">
           <SlamMap
             mapData={mapData}
             robotPose={robotState?.pose}
@@ -147,39 +176,67 @@ export default function App() {
             goalMarker={goalMarker}
             onGoalPose={handleGoalPose}
           />
-          <div className="col-left-bottom">
+        </div>
+
+        {/* Right column */}
+        <div className="col-right">
+          {/* Sensors row: LiDAR + Camera */}
+          <div className="sensors-row">
             <LidarView scanData={scanData} />
             <CameraPanel cameraData={cameraData} />
           </div>
-        </section>
 
-        <aside className="col-right">
-          <StatusPanel
-            connected={connected}
-            lastUpdate={lastUpdate}
-            topicStatus={topicStatus}
-          />
-          <ModePanel
-            mode={mode}
-            connected={connected}
-            onModeChange={setMode}
-            onSlamReset={handleSlamReset}
-          />
-          <TeleopPanel
-            connected={connected}
-            onCommand={sendCommand}
-          />
-          <WaypointPanel
-            connected={connected}
-            mode={mode}
-            onCommand={sendCommand}
-            addLog={addLog}
-          />
-          <VelocityPanel cmdVel={cmdVel} cmdVelIn={cmdVelIn} />
-          <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />
-          <LogsPanel logs={logs} />
-        </aside>
-      </main>
+          {/* Teleop */}
+          <TeleopPanel connected={connected} onCommand={sendCommand} />
+
+          {/* Tabs card */}
+          <div className="tabs-card">
+            <div className="tabs-header">
+              {TABS.map(t => (
+                <button
+                  key={t.id}
+                  className={`tab-btn ${activeTab === t.id ? 'tab-btn-active' : ''}`}
+                  onClick={() => setActiveTab(t.id)}
+                >{t.label}</button>
+              ))}
+            </div>
+            <div className="tab-content">
+              {activeTab === 'mode' && (
+                <ModePanel
+                  mode={mode}
+                  connected={connected}
+                  onModeChange={handleModeChange}
+                  onSlamReset={handleSlamReset}
+                  availableMaps={availableMaps}
+                  mapSource={mapSource}
+                  onCommand={handleCommand}
+                />
+              )}
+              {activeTab === 'waypoints' && (
+                <WaypointPanel
+                  connected={connected}
+                  mode={mode}
+                  onGoalPose={handleGoalPose}
+                  onCommand={sendCommand}
+                  addLog={addLog}
+                />
+              )}
+              {activeTab === 'voice' && (
+                <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />
+              )}
+              {activeTab === 'elevator' && (
+                <ElevatorPanel connected={connected} onCommand={handleCommand} />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Footer ── */}
+      <footer className="footer">
+        <VelocityPanel cmdVel={cmdVel} cmdVelIn={cmdVelIn} />
+        <LogsPanel logs={logs} />
+      </footer>
     </div>
   );
 }
