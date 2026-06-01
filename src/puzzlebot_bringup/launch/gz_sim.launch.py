@@ -94,6 +94,12 @@ def generate_launch_description():
         description='Lanza puzzlebot_web_bridge (WebSocket dashboard). '
                     'Deshabilitar con web_bridge:=false si no se usa el dashboard.',
     )
+    arg_artifact_dir = DeclareLaunchArgument(
+        'artifact_dir',
+        default_value='',
+        description='Ruta a artifacts_final/ con modelos de voz. '
+                    'Vacío deshabilita inferencia de voz en el bridge.',
+    )
 
     world_name    = LaunchConfiguration('world')
     slam_en       = LaunchConfiguration('slam')
@@ -722,7 +728,7 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time':       True,
             'cmd_vel_out_topic':  '/model/puzzlebot/cmd_vel',
-            'artifact_dir':       '',
+            'artifact_dir':       LaunchConfiguration('artifact_dir'),
         }],
         condition=IfCondition(web_bridge_en),
     )
@@ -731,7 +737,7 @@ def generate_launch_description():
         set_resource_path,
         # Argumentos
         arg_world, arg_gui, arg_slam, arg_rviz, arg_mode, arg_odom_source,
-        arg_kalman, arg_aruco_oracle, arg_navigation, arg_web_bridge,
+        arg_kalman, arg_aruco_oracle, arg_navigation, arg_web_bridge, arg_artifact_dir,
         gz_sim,
         rsp,
         # Bridges (uno activo según world)
