@@ -128,9 +128,10 @@ class BridgeNode(Node):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self._pub_goal_pose = self.create_publisher(PoseStamped, DEFAULT_TOPICS['goal_pose'], _latched_qos)
-        self._pub_nav_wp    = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
+        self._pub_goal_pose  = self.create_publisher(PoseStamped, DEFAULT_TOPICS['goal_pose'], _latched_qos)
+        self._pub_nav_wp     = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
         self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
+        self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
 
         self.get_logger().info(f'Control publishers ready — cmd_vel_out: {cmd_vel_out}')
 
@@ -401,8 +402,7 @@ class BridgeNode(Node):
                     maps_dir = os.getcwd()
                 full_path = os.path.join(maps_dir, filename)
                 if os.path.isfile(full_path):
-                    # Publish the map path to a ROS topic for slam_node / map_server to load.
-                    self._pub_nav_wp.publish(String(data=f'load_map:{full_path}'))
+                    self._pub_load_map.publish(String(data=full_path))
                     self.get_logger().info(f'load_map → {full_path}')
                 else:
                     self.get_logger().warn(f'load_map: file not found: {full_path}')
