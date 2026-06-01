@@ -325,7 +325,7 @@ class BridgeNode(Node):
 
     def _voice_command_cb(self, msg: String):
         self._voice['command'] = msg.data
-        self._ws.broadcast_sync(self._build_voice_payload())
+        # Don't broadcast yet — wait for ranked_predictions which arrives right after.
 
     def _voice_confidence_cb(self, msg: Float32):
         self._voice['confidence'] = msg.data
@@ -334,7 +334,10 @@ class BridgeNode(Node):
         self._voice['status'] = msg.data
 
     def _voice_ranked_cb(self, msg: String):
+        # ranked_predictions is published last by voice_commands_node, so by here
+        # all other fields (command, confidence, inference_time_ms) are already set.
         self._voice['ranked_predictions'] = msg.data
+        self._ws.broadcast_sync(self._build_voice_payload())
 
     def _voice_inference_cb(self, msg: Float32):
         self._voice['inference_time_ms'] = msg.data
