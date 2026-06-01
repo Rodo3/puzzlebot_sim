@@ -137,6 +137,9 @@ class BridgeNode(Node):
 
         self.get_logger().info(f'Control publishers ready — cmd_vel_out: {cmd_vel_out}')
 
+        # Cache for map-frame robot pose from slam_node (overrides odom frame pose).
+        self._map_pose: dict | None = None
+
         # Start WebSocket server.
         host = self.get_parameter('websocket_host').get_parameter_value().string_value
         port = self.get_parameter('websocket_port').get_parameter_value().integer_value
@@ -177,6 +180,10 @@ class BridgeNode(Node):
             Twist,
             self.get_parameter('cmd_vel_topic').get_parameter_value().string_value,
             lambda msg: self._twist_cb(msg, 'cmd_vel'), 10)
+
+        # Map-frame robot pose from slam_node — overrides odom-frame pose for drawing.
+        self.create_subscription(
+            PoseStamped, '/slam/robot_pose_in_map', self._slam_pose_cb, 10)
 
         # Optional subscribers — tolerate missing topics.
         self.create_subscription(
@@ -220,9 +227,24 @@ class BridgeNode(Node):
     #  Core callbacks
     # ------------------------------------------------------------------ #
 
+    def _slam_pose_cb(self, msg: PoseStamped):
+        import math as _math
+        q = msg.pose.orientation
+        siny = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        self._map_pose = {
+            'x': round(msg.pose.position.x, 4),
+            'y': round(msg.pose.position.y, 4),
+            'theta': round(_math.atan2(siny, cosy), 4),
+        }
+
     def _odom_cb(self, msg: Odometry):
         if self._rl['odom'].should_send():
-            self._ws.broadcast_sync(odom_to_json(msg))
+            payload = odom_to_json(msg)
+            # Override pose with map-frame pose from slam_node when available
+            if self._map_pose is not None:
+                payload['pose'] = self._map_pose
+            self._ws.broadcast_sync(payload)
 
     def _scan_cb(self, msg: LaserScan):
         if self._rl['scan'].should_send():

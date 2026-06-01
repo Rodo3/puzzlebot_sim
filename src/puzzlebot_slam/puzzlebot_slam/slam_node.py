@@ -35,7 +35,7 @@ import os
 from datetime import datetime
 
 import rclpy
-from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
@@ -149,6 +149,7 @@ class SlamNode(Node):
             reliability=ReliabilityPolicy.RELIABLE,
         )
         self._pub_map        = self.create_publisher(OccupancyGrid, '/map', map_qos)
+        self._pub_robot_pose = self.create_publisher(PoseStamped, '/slam/robot_pose_in_map', 10)
         self._pub_scan_match = self.create_publisher(
             PoseWithCovarianceStamped, '/scan_match/pose', 10)
         self._tf = tf2_ros.TransformBroadcaster(self)
@@ -329,6 +330,10 @@ class SlamNode(Node):
         if scan_matched:
             self._publish_scan_match(map_pose, scan.header.stamp)
 
+        # Publish map-frame pose so the dashboard can draw the robot correctly
+        # regardless of map→odom drift.
+        self._publish_robot_pose(map_pose, scan.header.stamp)
+
         # localization_only: no modificar el mapa, solo usar scan matching para EKF.
         if self._localization_only:
             return
@@ -340,6 +345,16 @@ class SlamNode(Node):
             self.get_logger().warn(
                 'Skipping scan: robot pose is outside the map bounds',
                 throttle_duration_sec=2.0)
+
+    def _publish_robot_pose(self, map_pose: Pose2D, stamp) -> None:
+        msg = PoseStamped()
+        msg.header.stamp    = stamp
+        msg.header.frame_id = self._map_frame
+        msg.pose.position.x = map_pose.x
+        msg.pose.position.y = map_pose.y
+        msg.pose.orientation.z = math.sin(map_pose.yaw / 2.0)
+        msg.pose.orientation.w = math.cos(map_pose.yaw / 2.0)
+        self._pub_robot_pose.publish(msg)
 
     def _publish_scan_match(self, map_pose: Pose2D, stamp) -> None:
         # Fase 3: escalar covarianza inversamente al score del matcher.
