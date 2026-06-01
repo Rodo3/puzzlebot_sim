@@ -386,12 +386,16 @@ class BridgeNode(Node):
                 maps_dir = self.get_parameter('maps_dir').get_parameter_value().string_value
                 if not maps_dir:
                     maps_dir = os.getcwd()
-                pattern_pgm = os.path.join(maps_dir, '*.pgm')
-                pattern_png = os.path.join(maps_dir, '*.png')
-                files = sorted(
-                    os.path.basename(f)
-                    for f in glob.glob(pattern_pgm) + glob.glob(pattern_png)
-                )
+                raw = (glob.glob(os.path.join(maps_dir, '*.pgm')) +
+                       glob.glob(os.path.join(maps_dir, '*.png')))
+                # Deduplicate by stem — prefer .png over .pgm for same base name
+                stems: dict = {}
+                for f in sorted(raw):
+                    stem = os.path.splitext(os.path.basename(f))[0]
+                    ext  = os.path.splitext(f)[1].lower()
+                    if stem not in stems or ext == '.png':
+                        stems[stem] = os.path.basename(f)
+                files = sorted(stems.values())
                 self._ws.broadcast_sync({'type': 'available_maps', 'maps': files})
                 self.get_logger().info(f'list_maps → {len(files)} maps in {maps_dir}')
 

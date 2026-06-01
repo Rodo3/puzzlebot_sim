@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 export default function ModePanel({
   mode, connected, onModeChange, onSlamReset,
   availableMaps, mapSource, onCommand,
 }) {
   const [selectedMap, setSelectedMap] = useState('');
+  const [loading,     setLoading]     = useState(false);
+  const loadTimerRef = useRef(null);
 
   // Auto-request map list when connection is established
   useEffect(() => {
@@ -75,9 +77,16 @@ export default function ModePanel({
           <button
             className="btn-sm btn-sm-accent"
             style={{ flex: 1 }}
-            onClick={() => { if (selectedMap) onCommand({ type: 'load_map', filename: selectedMap }); }}
-            disabled={!connected || !selectedMap}
-          >Cargar mapa</button>
+            onClick={() => {
+              if (!selectedMap || loading) return;
+              setLoading(true);
+              onCommand({ type: 'load_map', filename: selectedMap });
+              // Re-enable after 3s regardless of response
+              clearTimeout(loadTimerRef.current);
+              loadTimerRef.current = setTimeout(() => setLoading(false), 3000);
+            }}
+            disabled={!connected || !selectedMap || loading}
+          >{loading ? 'Cargando…' : 'Cargar mapa'}</button>
           {mapSource === 'static' && (
             <button
               className="btn-sm btn-sm-green"

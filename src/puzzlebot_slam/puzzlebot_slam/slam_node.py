@@ -38,7 +38,7 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from rclpy.qos import (
     DurabilityPolicy,
     QoSProfile,
@@ -158,7 +158,8 @@ class SlamNode(Node):
             LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
         self.create_subscription(
             TransformStamped, '/map_to_odom', self._map_to_odom_cb, 10)
-        self.create_subscription(Bool, '/slam/reset', self._slam_reset_cb, 10)
+        self.create_subscription(Bool,   '/slam/reset',    self._slam_reset_cb, 10)
+        self.create_subscription(String, '/slam/load_map', self._load_map_cb,   10)
 
         self.create_timer(0.1, self._broadcast_tf)
         self.create_timer(1.0, self._publish_map)
@@ -239,6 +240,19 @@ class SlamNode(Node):
         # En real_robot.launch.py con aruco:=true, publish_map_odom_tf se pone en false
         # automáticamente, y se recomienda pasar scan_match_updates_map_odom:=false también.
         self.declare_parameter('scan_match_updates_map_odom', True)
+
+    def _load_map_cb(self, msg: String) -> None:
+        path = msg.data.strip()
+        if not path or not os.path.isfile(path):
+            self.get_logger().warn(f'load_map: file not found: {path}')
+            return
+        try:
+            self._grid_map.load_from_png(path)
+            self._localization_only = True
+            self.get_logger().info(f'Static map loaded: {path}')
+            self._publish_map()
+        except Exception as exc:
+            self.get_logger().error(f'load_map error: {exc}')
 
     def _slam_reset_cb(self, msg: Bool) -> None:
         if not msg.data:
