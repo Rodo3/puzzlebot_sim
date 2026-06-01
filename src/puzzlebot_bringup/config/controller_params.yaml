@@ -68,3 +68,7 @@ obstacle_avoidance_node:
     stuck_timeout_sec:    3.0   # [s] tiempo bloqueado antes de retroceder
     reverse_speed:        0.07  # [m/s] velocidad de retroceso
     reverse_duration_sec: 2.0   # [s] duración del retroceso
+
+    # Teleop/voice priority: suprimir navegación este tiempo después del último
+    # mensaje en /cmd_vel_teleop. Debe ser > voice_cmd_duration (1.0 s) del bridge.
+    teleop_timeout_sec:   1.5   # [s]

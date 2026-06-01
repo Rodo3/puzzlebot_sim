@@ -130,10 +130,11 @@ class BridgeNode(Node):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self._pub_goal_pose  = self.create_publisher(PoseStamped, DEFAULT_TOPICS['goal_pose'], _latched_qos)
-        self._pub_nav_wp     = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
-        self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
-        self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
+        self._pub_goal_pose     = self.create_publisher(PoseStamped, DEFAULT_TOPICS['goal_pose'], _latched_qos)
+        self._pub_nav_wp        = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
+        self._pub_slam_reset    = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
+        self._pub_load_map      = self.create_publisher(String, '/slam/load_map', 10)
+        self._pub_nav_cancel    = self.create_publisher(Bool, '/navigation/cancel', 10)
 
         self.get_logger().info(f'Control publishers ready — cmd_vel_out: {cmd_vel_out}')
 
@@ -270,7 +271,21 @@ class BridgeNode(Node):
         elif cmd == 'derecha':
             twist.angular.z = -self._voice_ang
         elif cmd == 'alto':
-            pass  # zero twist = stop, publish once and return
+            # Cancel active navigation goal so path_planner stops publishing paths.
+            self._pub_nav_cancel.publish(Bool(data=True))
+            # Publish zero velocity directly and suppress navigation for 3 s.
+            self._pub_cmd_vel_out.publish(twist)
+            self._pub_cmd_vel_teleop.publish(twist)
+            self.get_logger().info('voice → alto: navigation cancelled, robot stopped')
+            # Keep publishing teleop suppression so obstacle_avoidance stays quiet.
+            def _teleop_pulse(remaining: int):
+                self._pub_cmd_vel_teleop.publish(Twist())
+                if remaining > 0:
+                    t = threading.Timer(0.4, _teleop_pulse, args=[remaining - 1])
+                    t.daemon = True
+                    t.start()
+            _teleop_pulse(6)   # 6 × 0.4 s = 2.4 s of suppression
+            return
         elif cmd == 'inicio':
             self._pub_nav_wp.publish(String(data='inicio'))
             self.get_logger().info('voice → navigate_to_waypoint: inicio')
@@ -285,14 +300,13 @@ class BridgeNode(Node):
             f'voice → cmd_vel: {cmd}  '
             f'(lin={twist.linear.x:.2f} ang={twist.angular.z:.2f})')
 
-        if cmd != 'alto':
-            def _stop():
-                stop = Twist()
-                self._pub_cmd_vel_out.publish(stop)
-                self._pub_cmd_vel_teleop.publish(stop)
-            self._voice_timer = threading.Timer(self._voice_dur, _stop)
-            self._voice_timer.daemon = True
-            self._voice_timer.start()
+        def _stop():
+            stop = Twist()
+            self._pub_cmd_vel_out.publish(stop)
+            self._pub_cmd_vel_teleop.publish(stop)
+        self._voice_timer = threading.Timer(self._voice_dur, _stop)
+        self._voice_timer.daemon = True
+        self._voice_timer.start()
 
     def _odom_cb(self, msg: Odometry):
         if self._rl['odom'].should_send():
