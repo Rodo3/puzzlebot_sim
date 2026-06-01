@@ -71,12 +71,20 @@ class ObstacleAvoidanceNode(Node):
         self._reversing_since = None  # cuando empezó el retroceso activo
 
         # ── Subscriptions ────────────────────────────────────────────────────
-        self.sub_scan_ = self.create_subscription(
+        # Teleop priority: if a recent message arrives on /cmd_vel_teleop, navigation
+        # commands are suppressed so the bridge's direct cmd_vel wins uncontested.
+        self.declare_parameter('teleop_timeout_sec', 0.5)
+        self._teleop_timeout = self.get_parameter('teleop_timeout_sec').value
+        self._last_teleop_t  = None
+
+        self.sub_scan_   = self.create_subscription(
             LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
-        self.sub_cmd_  = self.create_subscription(
+        self.sub_cmd_    = self.create_subscription(
             Twist, '/cmd_vel_in', self.cmd_cb, 10)
-        self.sub_odom_ = self.create_subscription(
+        self.sub_odom_   = self.create_subscription(
             Odometry, '/odom', self.odom_cb, 10)
+        self.sub_teleop_ = self.create_subscription(
+            Twist, '/cmd_vel_teleop', self._teleop_cb, 10)
 
         self.pub_cmd_  = self.create_publisher(Twist, '/cmd_vel', 10)
 
@@ -86,6 +94,16 @@ class ObstacleAvoidanceNode(Node):
             f'cov_slow={self.cov_slow} m², cov_stop={self.cov_stop} m²)')
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
+
+    def _teleop_cb(self, msg: Twist):
+        import time as _time
+        self._last_teleop_t = _time.monotonic()
+
+    def _teleop_active(self):
+        if self._last_teleop_t is None:
+            return False
+        import time as _time
+        return (_time.monotonic() - self._last_teleop_t) < self._teleop_timeout
 
     def odom_cb(self, msg: Odometry):
         self.trace_p_xy  = msg.pose.covariance[0] + msg.pose.covariance[7]
@@ -100,6 +118,9 @@ class ObstacleAvoidanceNode(Node):
         self.min_front = float(np.min(ranges[mask])) if mask.any() else float('inf')
 
     def cmd_cb(self, msg: Twist):
+        # Teleop has priority: suppress navigation commands while user is driving
+        if self._teleop_active():
+            return
         out = Twist()
         import time as _time
         now_mono = _time.monotonic()

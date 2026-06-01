@@ -121,7 +121,9 @@ class BridgeNode(Node):
 
         # ── Control publishers (outgoing: dashboard → ROS) ─────────────────
         cmd_vel_out = self.get_parameter('cmd_vel_out_topic').get_parameter_value().string_value
-        self._pub_cmd_vel_out = self.create_publisher(Twist, cmd_vel_out, 10)
+        self._pub_cmd_vel_out    = self.create_publisher(Twist, cmd_vel_out, 10)
+        # Teleop-priority signal: obstacle_avoidance suppresses navigation while this arrives
+        self._pub_cmd_vel_teleop = self.create_publisher(Twist, '/cmd_vel_teleop', 10)
 
         _latched_qos = QoSProfile(
             depth=1,
@@ -357,6 +359,7 @@ class BridgeNode(Node):
                 msg.linear.x  = float(data.get('linear_x', 0.0))
                 msg.angular.z = float(data.get('angular_z', 0.0))
                 self._pub_cmd_vel_out.publish(msg)
+                self._pub_cmd_vel_teleop.publish(msg)
 
             elif msg_type == 'goal_pose':
                 msg = PoseStamped()
