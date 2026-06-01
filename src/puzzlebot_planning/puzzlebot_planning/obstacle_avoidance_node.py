@@ -73,7 +73,7 @@ class ObstacleAvoidanceNode(Node):
         # ── Subscriptions ────────────────────────────────────────────────────
         # Teleop priority: if a recent message arrives on /cmd_vel_teleop, navigation
         # commands are suppressed so the bridge's direct cmd_vel wins uncontested.
-        self.declare_parameter('teleop_timeout_sec', 1.5)
+        self.declare_parameter('teleop_timeout_sec', 0.5)
         self._teleop_timeout = self.get_parameter('teleop_timeout_sec').value
         self._last_teleop_t  = None
 

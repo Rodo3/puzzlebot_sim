@@ -18,7 +18,6 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import OccupancyGrid, Path
-from std_msgs.msg import Bool
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.ndimage import binary_closing, binary_dilation, distance_transform_edt
@@ -180,10 +179,6 @@ class PathPlannerNode(Node):
         # ── Path safety check parameter ────────────────────────────────────────
         # min_path_obstacle_distance: warn if any waypoint is closer to a wall.
         self.declare_parameter('min_path_obstacle_distance', 0.15)   # metres
-        # Stop replanning on every map update once the robot is within this
-        # distance of the goal — prevents the steering_controller from being
-        # reset just as it reaches the goal, causing overshoot.
-        self.declare_parameter('replan_goal_tolerance', 0.25)        # metres
 
         self.inflation_radius_m      = self.get_parameter('inflation_radius').value
         self.occ_thresh              = self.get_parameter('occupied_threshold').value
@@ -200,7 +195,6 @@ class PathPlannerNode(Node):
         self.allow_reprojection      = self.get_parameter('allow_goal_reprojection').value
         self.reproject_radius        = self.get_parameter('goal_reprojection_radius').value
         self.min_path_dist           = self.get_parameter('min_path_obstacle_distance').value
-        self.replan_goal_tol         = self.get_parameter('replan_goal_tolerance').value
 
         # ── State ─────────────────────────────────────────────────────────────
         self.map_      = None
@@ -227,8 +221,6 @@ class PathPlannerNode(Node):
         self.sub_pose_ = self.create_subscription(
             PoseWithCovarianceStamped, '/initialpose', self.pose_cb, 10)
         self.sub_goal_ = self.create_subscription(PoseStamped, '/goal_pose', self.goal_cb, 10)
-        self.sub_cancel_ = self.create_subscription(
-            Bool, '/navigation/cancel', self._cancel_cb, 10)
         self.pub_path_ = self.create_publisher(Path, '/planned_path', 1)
 
         self.get_logger().info(
@@ -242,25 +234,10 @@ class PathPlannerNode(Node):
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
-    def _cancel_cb(self, msg: Bool):
-        if not msg.data:
-            return
-        self.goal_msg_ = None
-        self.pub_path_.publish(Path())   # empty path → steering_controller stops
-        self.get_logger().info('Navigation cancelled via /navigation/cancel')
-
     def map_cb(self, msg: OccupancyGrid):
         self.map_ = msg
         if self.replan_on_new_map and self.goal_msg_ is not None:
             self._update_robot_pose_from_tf()
-            # Skip replan if robot is already within tolerance of the goal.
-            # This prevents steering_controller being reset (goal_reached_=false)
-            # just as it arrives, which causes overshoot.
-            goal_wx = self.goal_msg_.pose.position.x
-            goal_wy = self.goal_msg_.pose.position.y
-            dist = math.hypot(goal_wx - self.robot_x_, goal_wy - self.robot_y_)
-            if dist <= self.replan_goal_tol:
-                return
             self._plan(self.goal_msg_)
 
     def pose_cb(self, msg: PoseWithCovarianceStamped):
