@@ -12,12 +12,35 @@ static double norm_angle(double a) {
 }
 
 /**
- * Pure-pursuit steering controller.
- * Subscribes to /odom (filtered pose) and /planned_path.
- * Publishes Twist to /cmd_vel_in (obstacle avoidance node sits downstream).
+ * steering_controller_node — Controlador de seguimiento de trayectoria (Pure Pursuit).
  *
- * Pure pursuit chooses a look-ahead point on the path and computes the
- * curvature needed to reach it, giving smooth curved trajectories.
+ * POSICIÓN EN EL PIPELINE:
+ *   path_planner_node → /planned_path ─┐
+ *   kalman_filter_node → /odom ────────┤→ [ESTE NODO] → /cmd_vel_in → obstacle_avoidance_node
+ *
+ * FUNCIÓN:
+ *   Recorre la ruta en /planned_path usando el algoritmo Pure Pursuit:
+ *   1. Encuentra el punto de la ruta que está a "lookahead_distance" metros adelante.
+ *   2. Calcula la curvatura necesaria para alcanzarlo (κ = 2y / L²).
+ *   3. Publica velocidad lineal constante y velocidad angular proporcional a la curvatura.
+ *   4. Se detiene cuando la distancia al último punto < goal_tolerance.
+ *
+ *   Pure Pursuit da trayectorias suaves incluso con rutas en escalera (A* en grid).
+ *   Si el ángulo de heading error es > 45°, reduce la velocidad al 50% para girar antes.
+ *
+ * TOPICS SUSCRITOS:
+ *   /odom          (nav_msgs/Odometry) — pose filtrada del robot (desde kalman_filter_node)
+ *   /planned_path  (nav_msgs/Path)     — ruta calculada por path_planner_node
+ *
+ * TOPICS PUBLICADOS:
+ *   /cmd_vel_in    (geometry_msgs/Twist) — velocidad hacia obstacle_avoidance_node
+ *
+ * PARÁMETROS:
+ *   lookahead_distance  [0.30 m]   — distancia del punto de mira
+ *   max_linear_vel      [0.30 m/s] — velocidad máxima hacia adelante
+ *   max_angular_vel     [1.50 rad/s] — velocidad angular máxima
+ *   goal_tolerance      [0.10 m]   — radio de aceptación del goal
+ *   control_frequency   [20.0 Hz]  — frecuencia del loop de control
  */
 class SteeringControllerNode : public rclcpp::Node
 {
