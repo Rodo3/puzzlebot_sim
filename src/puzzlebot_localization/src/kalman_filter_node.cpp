@@ -59,38 +59,22 @@ public:
     declare_parameter("initial_y",     0.0);
     declare_parameter("initial_theta", 0.0);
     declare_parameter("init_from_aruco", true);
+    // ZUPT — Zero Velocity Update: escala Q por la velocidad observada.
+    // Cuando el robot está quieto (|v|+|ω| < threshold), Q_scale ≈ 0 y P
+    // deja de crecer. Esto evita que el elipse de incertidumbre se expanda
+    // indefinidamente entre correcciones ArUco aunque el robot no se mueva.
+    // zupt_speed_threshold: velocidad (m/s + rad/s) por debajo de la cual
+    // el robot se considera estático. Empezar con 0.02 y subir si no converge.
     declare_parameter("zupt_speed_threshold", 0.02);
+    // P_max: techo de covarianza por eje. Evita que P explote si ArUco
+    // desaparece por mucho tiempo. Unidades: m² para x/y, rad² para theta.
     declare_parameter("p_max_xy",    1.0);
     declare_parameter("p_max_theta", 2.0);
+    // Scan match → EKF feedback: ruido mínimo de la medición de scan matching.
+    // Más conservador que ArUco porque el matcher trabaja con un mapa imperfecto.
     declare_parameter("scan_match_noise_x",     0.04);
     declare_parameter("scan_match_noise_y",     0.04);
     declare_parameter("scan_match_noise_theta", 0.03);
-
-    // ── Fase 2: gating por covarianza actual del EKF ─────────────────────────
-    // Cuando trace(P_xy) = P[0]+P[4] es pequeña (ArUco activo, pose confiable),
-    // se infla R_scan para reducir el peso del scan matching.
-    // Cuando trace(P_xy) es grande (sin ArUco, deriva acumulada), R_scan es normal.
-    //
-    // R_scan_eff = R_scan_base * (1 + alpha * low_cov_thresh / (trace_P + eps))
-    //   → trace_P << low_cov_thresh : R_scan_eff ≈ R_scan_base * (1 + alpha) → gating fuerte
-    //   → trace_P >> high_cov_thresh: R_scan_eff ≈ R_scan_base               → sin gating
-    //
-    // Ajuste recomendado:
-    //   low_cov_thresh:  0.05 m²  → trace_P < 0.05: ArUco activo y confiable
-    //   high_cov_thresh: 0.30 m²  → trace_P > 0.30: pérdida de ArUco o drift acumulado
-    //   gate_alpha:      5.0      → factor máximo de inflación de R cuando P es pequeña
-    declare_parameter("scan_match_gate_alpha",       5.0);
-    declare_parameter("scan_match_low_cov_thresh",   0.05);
-    declare_parameter("scan_match_high_cov_thresh",  0.30);
-
-    // ── Fase 4: Mahalanobis gate ─────────────────────────────────────────────
-    // Rechaza correcciones de scan matching cuya innovación sea estadísticamente
-    // incompatible con el estado actual del EKF.
-    // d² = inn[0]²/S[0] + inn[1]²/S[4] + inn[2]²/S[8]
-    // Si d > mahal_gate → corrección rechazada (outlier).
-    // Valor por defecto 3.5 ≈ 3.5σ: conservador, rechaza saltos grandes sin
-    // bloquear correcciones pequeñas válidas.
-    declare_parameter("scan_match_mahal_gate", 3.5);
 
     double ic = get_parameter("initial_covariance").as_double();
     x_  = {get_parameter("initial_x").as_double(),
@@ -115,13 +99,9 @@ public:
     double smt = get_parameter("scan_match_noise_theta").as_double();
     R_scan_ = {smx,0,0, 0,smy,0, 0,0,smt};
 
-    zupt_threshold_      = get_parameter("zupt_speed_threshold").as_double();
-    p_max_xy_            = get_parameter("p_max_xy").as_double();
-    p_max_theta_         = get_parameter("p_max_theta").as_double();
-    sm_gate_alpha_       = get_parameter("scan_match_gate_alpha").as_double();
-    sm_low_cov_thresh_   = get_parameter("scan_match_low_cov_thresh").as_double();
-    sm_high_cov_thresh_  = get_parameter("scan_match_high_cov_thresh").as_double();
-    sm_mahal_gate_       = get_parameter("scan_match_mahal_gate").as_double();
+    zupt_threshold_ = get_parameter("zupt_speed_threshold").as_double();
+    p_max_xy_       = get_parameter("p_max_xy").as_double();
+    p_max_theta_    = get_parameter("p_max_theta").as_double();
 
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom_raw", 10,
@@ -141,9 +121,7 @@ public:
     last_time_ = now();
     if (init_from_aruco_) {
       RCLCPP_INFO(get_logger(),
-        "kalman_filter_node iniciando — esperando primer ArUco para establecer pose...\n"
-        "  scan_match gating: alpha=%.1f low_cov=%.3f high_cov=%.3f mahal_gate=%.1f",
-        sm_gate_alpha_, sm_low_cov_thresh_, sm_high_cov_thresh_, sm_mahal_gate_);
+        "kalman_filter_node iniciando — esperando primer ArUco para establecer pose...");
     } else {
       RCLCPP_INFO(get_logger(),
         "kalman_filter_node started — pose inicial: x=%.3f y=%.3f theta=%.3f rad",
@@ -155,6 +133,8 @@ private:
   void odom_cb(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
     auto t = rclcpp::Time(msg->header.stamp);
+    // Mientras esperamos el primer ArUco: actualizar last_time_ para que
+    // cuando llegue el ArUco y empecemos a fusionar, el dt no sea enorme.
     if (!initialized_) {
       last_time_ = t;
       return;
@@ -171,14 +151,21 @@ private:
     double delta_d  = v * dt;
     double delta_th = w * dt;
 
+    // Prediction
     x_[0] += delta_d * std::cos(th);
     x_[1] += delta_d * std::sin(th);
     x_[2]  = norm_angle(x_[2] + delta_th);
 
+    // Jacobian F
     Mat3 F = {1,0,-delta_d*std::sin(th),
               0,1, delta_d*std::cos(th),
               0,0,1};
 
+    // ZUPT: escalar Q por velocidad observada.
+    // Cuando |v|+|ω| < zupt_threshold → q_scale ≈ 0 → P no crece.
+    // Cuando el robot se mueve → q_scale → 1.0 → comportamiento normal.
+    // Físicamente correcto: si el robot no se mueve, la incertidumbre
+    // de posición no debería crecer (los encoders confirman que hay 0 desplazamiento).
     double speed    = std::abs(v) + std::abs(w);
     double q_scale  = std::min(speed / std::max(zupt_threshold_, 1e-6), 1.0);
 
@@ -186,6 +173,8 @@ private:
     for (int i = 0; i < 9; ++i) Q_dt[i] = Q_[i] * dt * q_scale;
     P_ = mat_add(mat_mul(mat_mul(F, P_), mat_transpose(F)), Q_dt);
 
+    // P_max clamp: techo de seguridad para que P no explote si ArUco
+    // desaparece durante un tiempo prolongado (p.ej. zona sin cobertura).
     P_[0] = std::min(P_[0], p_max_xy_);
     P_[4] = std::min(P_[4], p_max_xy_);
     P_[8] = std::min(P_[8], p_max_theta_);
@@ -201,12 +190,18 @@ private:
     double z[3] = {p.position.x, p.position.y, tf2::getYaw(q)};
 
     const auto & cov = msg->pose.covariance;
+    // Validar covarianza — si es degenerada ignorar el mensaje
     if (cov[0] <= 1e-9 || cov[7] <= 1e-9) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
         "ArUco: covarianza degenerada — ignorando");
       return;
     }
 
+    // ── MODO BOOTSTRAP: primer ArUco inicializa el estado ─────────────────
+    // En lugar de fusionar (que requiere un estado previo válido), se hace
+    // un reset directo usando la pose ArUco como verdad absoluta.
+    // La covarianza inicial se toma de la covarianza del mensaje ArUco,
+    // con floor desde R_ para no asumir precisión imposible en el robot real.
     if (!initialized_) {
       x_[0] = z[0];
       x_[1] = z[1];
@@ -216,7 +211,7 @@ private:
             0.0,     std::max(cov[7], R_[4]),    0.0,
             0.0,     0.0,                         p_theta0};
       initialized_ = true;
-      last_time_   = now();
+      last_time_   = now();   // reset del reloj para el primer dt de odom
       RCLCPP_INFO(get_logger(),
         "✅ Pose inicial desde ArUco: x=%.3f y=%.3f theta=%.3f rad  "
         "std=(%.3f, %.3f) m",
@@ -225,11 +220,18 @@ private:
       return;
     }
 
+    // ── MODO NORMAL: fusión EKF con la corrección ArUco ───────────────────
+    // Construye R aplicando un floor desde meas_noise_* para cada eje.
+    // Sin floor, ArUco reporta cov[35] ≈ 2.25e-4 rad² (σ≈0.86°), dando
+    // K_theta ≈ 0.98 — el EKF prácticamente sobreescribe el yaw en cada
+    // detección, amplificando el ruido real de solvePnP a 1.5–2.5 m.
+    // Con meas_noise_theta: 0.07 rad² (σ_min≈15°), K_theta baja a ~0.12.
     double r_x     = std::max(cov[0],                          R_[0]);
     double r_y     = std::max(cov[7],                          R_[4]);
     double r_theta = std::max(cov[35] > 1e-9 ? cov[35] : R_[8], R_[8]);
     Mat3 R = {r_x, 0.0, 0.0,  0.0, r_y, 0.0,  0.0, 0.0, r_theta};
 
+    // H = I (medición directa de pose), S = P + R, K = P * S^-1
     Mat3 S = mat_add(P_, R);
     Mat3 K = mat_mul(P_, mat_inv3(S));
 
@@ -238,6 +240,7 @@ private:
     x_[1] += K[3]*inn[0] + K[4]*inn[1] + K[5]*inn[2];
     x_[2]  = norm_angle(x_[2] + K[6]*inn[0] + K[7]*inn[1] + K[8]*inn[2]);
 
+    // P = (I - K) P
     Mat3 IK = {1-K[0],-K[1],-K[2], -K[3],1-K[4],-K[5], -K[6],-K[7],1-K[8]};
     P_ = mat_mul(IK, P_);
 
@@ -246,6 +249,8 @@ private:
 
   void scan_match_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
   {
+    // Solo fusiona si el EKF ya tiene pose válida (primer ArUco ya llegó).
+    // La corrección de scan matching NO inicializa el estado — rol exclusivo de ArUco.
     if (!initialized_) return;
 
     const auto & p = msg->pose.pose;
@@ -254,68 +259,23 @@ private:
     double z[3] = {p.position.x, p.position.y, tf2::getYaw(q)};
 
     const auto & cov = msg->pose.covariance;
-
-    // ── Fase 2: R adaptativo según trace(P_xy) ───────────────────────────────
-    // Cuando P es pequeña (ArUco activo), se infla R_scan para reducir la
-    // autoridad del scan matching. La inflación desaparece suavemente cuando
-    // P crece (ArUco perdido, drift acumulado).
-    //
-    // trace_P = P[0] + P[4]  (incertidumbre en x + incertidumbre en y)
-    // factor  = 1 + alpha * max(0, low_thresh - trace_P) / (trace_P + eps)
-    //
-    // Con trace_P = 0.01 (ArUco activo):  factor ≈ 1 + 5*(0.05/0.01) = 26× → gating fuerte
-    // Con trace_P = 0.05 (low_thresh):    factor = 1 + 5*0 = 1.0              → sin gating
-    // Con trace_P = 0.30 (high_thresh):   factor = 1.0                         → sin gating
-    double trace_P = P_[0] + P_[4];
-    double cov_gate_factor = 1.0;
-    if (trace_P < sm_low_cov_thresh_) {
-      double deficit = sm_low_cov_thresh_ - trace_P;
-      cov_gate_factor = 1.0 + sm_gate_alpha_ * deficit / (trace_P + 1e-9);
-    }
-    // Factor clampeado para no inflar R en exceso (máximo 50×)
-    cov_gate_factor = std::min(cov_gate_factor, 50.0);
-
-    double r_x     = std::max(cov[0]  > 1e-9 ? cov[0]  : R_scan_[0], R_scan_[0]) * cov_gate_factor;
-    double r_y     = std::max(cov[7]  > 1e-9 ? cov[7]  : R_scan_[4], R_scan_[4]) * cov_gate_factor;
-    double r_theta = std::max(cov[35] > 1e-9 ? cov[35] : R_scan_[8], R_scan_[8]) * cov_gate_factor;
+    // Aplicar floor de R_scan_. El mensaje trae la covarianza de slam_params.yaml
+    // pero R_scan_ actúa como mínimo irrevocable para no sobreconfiar al matcher.
+    double r_x     = std::max(cov[0]  > 1e-9 ? cov[0]  : R_scan_[0], R_scan_[0]);
+    double r_y     = std::max(cov[7]  > 1e-9 ? cov[7]  : R_scan_[4], R_scan_[4]);
+    double r_theta = std::max(cov[35] > 1e-9 ? cov[35] : R_scan_[8], R_scan_[8]);
     Mat3 R = {r_x, 0.0, 0.0,  0.0, r_y, 0.0,  0.0, 0.0, r_theta};
 
-    // ── Fase 4: Mahalanobis gate ─────────────────────────────────────────────
-    // Rechaza correcciones cuya innovación sea estadísticamente incompatible
-    // con el estado actual. S = P + R, d² = sum(inn[i]² / S[i,i]).
-    // Si d > mahal_gate → outlier, descartado.
     Mat3 S = mat_add(P_, R);
-    double inn[3] = {z[0]-x_[0], z[1]-x_[1], norm_angle(z[2]-x_[2])};
-
-    double mahal2 = 0.0;
-    if (S[0] > 1e-12) mahal2 += inn[0]*inn[0] / S[0];
-    if (S[4] > 1e-12) mahal2 += inn[1]*inn[1] / S[4];
-    if (S[8] > 1e-12) mahal2 += inn[2]*inn[2] / S[8];
-    double mahal = std::sqrt(mahal2);
-
-    if (mahal > sm_mahal_gate_) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
-        "Scan match RECHAZADO — Mahalanobis=%.2f > %.1f  "
-        "(inn=[%.3f, %.3f, %.3f]°  trace_P=%.4f  cov_factor=%.1f)",
-        mahal, sm_mahal_gate_,
-        inn[0], inn[1], inn[2]*180.0/M_PI,
-        trace_P, cov_gate_factor);
-      return;
-    }
-
-    // ── Fusión EKF ───────────────────────────────────────────────────────────
     Mat3 K = mat_mul(P_, mat_inv3(S));
 
+    double inn[3] = {z[0]-x_[0], z[1]-x_[1], norm_angle(z[2]-x_[2])};
     x_[0] += K[0]*inn[0] + K[1]*inn[1] + K[2]*inn[2];
     x_[1] += K[3]*inn[0] + K[4]*inn[1] + K[5]*inn[2];
     x_[2]  = norm_angle(x_[2] + K[6]*inn[0] + K[7]*inn[1] + K[8]*inn[2]);
 
     Mat3 IK = {1-K[0],-K[1],-K[2], -K[3],1-K[4],-K[5], -K[6],-K[7],1-K[8]};
     P_ = mat_mul(IK, P_);
-
-    RCLCPP_DEBUG(get_logger(),
-      "Scan match aceptado — Mahalanobis=%.2f  trace_P=%.4f  cov_factor=%.1f",
-      mahal, trace_P, cov_gate_factor);
 
     publish();
   }
@@ -335,6 +295,7 @@ private:
     odom.pose.pose.orientation.y = q.y();
     odom.pose.pose.orientation.z = q.z();
     odom.pose.pose.orientation.w = q.w();
+    // Fill covariance diagonal
     odom.pose.covariance[0]  = P_[0];
     odom.pose.covariance[7]  = P_[4];
     odom.pose.covariance[35] = P_[8];
@@ -363,11 +324,6 @@ private:
   double zupt_threshold_;
   double p_max_xy_;
   double p_max_theta_;
-  // Fase 2 + 4
-  double sm_gate_alpha_;
-  double sm_low_cov_thresh_;
-  double sm_high_cov_thresh_;
-  double sm_mahal_gate_;
 };
 
 int main(int argc, char ** argv)
