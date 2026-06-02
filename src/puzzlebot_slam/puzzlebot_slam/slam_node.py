@@ -31,8 +31,6 @@ Esto evita el feedback loop: scan_matcher → sobreescribe corrección de ArUco
 """
 
 import math
-import os
-from datetime import datetime
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
@@ -386,22 +384,9 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        _save_map_on_exit(node)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-
-
-def _save_map_on_exit(node: SlamNode) -> None:
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'slam_map_{timestamp}.png'
-    save_dir = os.environ.get('SLAM_MAP_DIR', os.getcwd())
-    path = os.path.join(save_dir, filename)
-    try:
-        node._grid_map.to_png(path)
-        node.get_logger().info(f'Map saved to: {path}')
-    except Exception as e:
-        node.get_logger().error(f'Failed to save map: {e}')
 
 
 if __name__ == '__main__':
