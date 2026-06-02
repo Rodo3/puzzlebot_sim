@@ -70,30 +70,12 @@ slam_node:
     # scan_match_min_score: mínimo de log-odds acumulado para confiar en el match.
     #   A 0.05m/px, l_occ≈1.39 por celda → score=15 ≈ 11 celdas de pared vistas.
     #   Sube si hay falsos loop closures; baja si las correcciones no llegan.
-    scan_match_min_score:     15.0                #15 funciona bien 
+    scan_match_min_score:      15.0
 
     # Covarianza de la medición de scan match enviada al EKF.
     # Más conservadora que ArUco (que da σ_xy≈9cm): el matcher trabaja con un
     # mapa imperfecto, así que no es tan preciso como un marcador conocido.
     # scan_match_cov_xy: 0.04 m²  → σ_xy ≈ 20 cm  (floor de posición)
     # scan_match_cov_theta: 0.03 rad²  → σ_θ ≈ 10°  (floor de yaw)
-    scan_match_cov_xy:         0.04      
+    scan_match_cov_xy:         0.04
     scan_match_cov_theta:      0.03
-
-    # ── Fase 3: Covarianza adaptativa según score del matcher ────────────────
-    #
-    # Cuando el score del matcher es bajo (match marginal, pocas paredes visibles,
-    # zona sin features), se infla la covarianza publicada en /scan_match/pose.
-    # El EKF (kalman_filter_node) le dará menos peso automáticamente.
-    # Cuando el score es alto (match limpio), la covarianza baja al valor base.
-    #
-    # Fórmula: cov_scale = min_score / score  (clampado entre [1/max_scale, 1.0])
-    #   score = scan_match_min_score (15.0): cov_scale = 1.0   → cov base
-    #   score = 2 × min_score        (30.0): cov_scale = 0.5   → cov × 0.5 (más confiable)
-    #   score = 4 × min_score        (60.0): cov_scale = 0.25  → cov × 0.25 (muy confiable)
-    #
-    # Con max_scale=4.0: el piso de cov_scale es 0.25 (score muy alto no reduce más).
-    # Efecto neto: zonas con pocas paredes → cov grande → EKF ignora match.
-    #              Zonas con muchas paredes → cov pequeña → EKF acepta corrección.
-    scan_match_cov_scale_by_score: true
-    scan_match_max_cov_scale:      4.0

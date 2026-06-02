@@ -17,19 +17,12 @@ todo el cómputo (odometría, SLAM, percepción, control) ocurre en el PC.
                                  kalman_filter_node produce /odom + TF odom→base_footprint
                        Estrategia A: kalman:=true aruco:=false (solo predicción de ruedas)
                        Estrategia B: kalman:=true aruco:=true  (fusión encoders + ArUco)
-                       NOTA: cuando kalman:=true y use_map:=false, aruco_map_odom se
-                             desactiva (el Kalman incorpora ArUco en odom→base_footprint).
-                             Con use_map:=true el Kalman sigue fusionando para
-                             odom→base_footprint Y aruco_map_odom publica map→odom.
-  use_map     [false]  Carga mapa PNG conocido: activa map_server_node (/map) y
-                       aruco_map_odom (map→odom) aunque kalman:=true.
-                       Usar con slam:=false mcl:=false para localización EKF+ArUco
-                       sobre mapa estático. Más rápida que MCL.
+                       NOTA: cuando kalman:=true, aruco_map_odom se desactiva
+                             automáticamente (el Kalman ya incorpora la corrección ArUco).
   avoidance   [false]  obstacle_avoidance_node
   aruco       [true]   aruco_node (detección visual de marcadores)
-                         Con kalman:=false y use_map:=false → activa aruco_map_odom
-                         Con kalman:=true  y use_map:=false → /aruco/pose va al Kalman
-                         Con use_map:=true → activa aruco_map_odom siempre (map→odom)
+                         Con kalman:=false → también activa aruco_map_odom (map→odom TF)
+                         Con kalman:=true  → /aruco/pose va directo al Kalman
   viewer      [false]  image_viewer_node con corrección de distorsión
   rviz        [true]   RViz2
   lidar_topic [/Lidar] /Lidar (micro-ROS) o /scan (sllidar directo)
@@ -46,17 +39,8 @@ todo el cómputo (odometría, SLAM, percepción, control) ocurre en el PC.
   # Sesión 1 — Mapeo con Kalman EKF + ArUco (Estrategia B):
   ros2 launch puzzlebot_bringup real_robot.launch.py slam:=true kalman:=true aruco:=true
 
-  # Sesión 2 — Localización MCL (converge lento):
+  # Sesión 2 — Localización MCL:
   ros2 launch puzzlebot_bringup real_robot.launch.py slam:=false mcl:=true aruco:=true
-
-  # Sesión 2 — Localización EKF+ArUco con mapa conocido (converge instantáneo):
-  #   EKF fusiona encoders+ArUco para odom→base_footprint (suave, sin saltos).
-  #   aruco_map_odom publica map→odom en cuanto hay un ArUco visible (absoluto).
-  #   map_server_node publica el PNG como /map para path_planner y RViz.
-  #   NO usar mcl:=true — sería redundante y causaría conflicto en map→odom.
-  ros2 launch puzzlebot_bringup real_robot.launch.py \
-    slam:=false mcl:=false kalman:=true aruco:=true use_map:=true \
-    rviz:=true lidar_topic:=/scan navigation:=true
 """
 
 import os
@@ -84,9 +68,8 @@ def generate_launch_description():
     calib_yaml      = os.path.join(bringup_pkg, 'config', 'camera_calibration.yaml')
     extrinsics_yaml = os.path.join(bringup_pkg, 'config', 'camera_extrinsics.yaml')
     aruco_map_yaml  = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
-    urdf_file        = os.path.join(desc_pkg, 'urdf', 'puzzlebot_gz.urdf')
-    rviz_cfg_slam    = os.path.join(desc_pkg, 'rviz', 'puzzlebot_rviz.rviz')
-    rviz_cfg_mcl     = os.path.join(desc_pkg, 'rviz', 'mcl_rviz.rviz')
+    urdf_file       = os.path.join(desc_pkg,    'urdf',   'puzzlebot_gz.urdf')
+    rviz_cfg        = os.path.join(desc_pkg,    'rviz',   'puzzlebot_rviz.rviz')
 
     with open(urdf_file, 'r') as f:
         robot_description = f.read()
@@ -117,10 +100,6 @@ def generate_launch_description():
     arg_navigation = DeclareLaunchArgument('navigation', default_value='false',
                           description='Navegación autónoma A* + steering_controller + obstacle_avoidance. '
                                       'Requiere /map disponible. Enviar /goal_pose por RViz (G → 2D Nav Goal).')
-    arg_use_map    = DeclareLaunchArgument('use_map', default_value='false',
-                          description='Carga mapa PNG estático: activa map_server_node (/map) y '
-                                      'aruco_map_odom (map→odom). Combinar con slam:=false mcl:=false '
-                                      'kalman:=true aruco:=true para localización EKF sobre mapa conocido.')
 
     slam_en      = LaunchConfiguration('slam')
     mcl_en       = LaunchConfiguration('mcl')
@@ -130,7 +109,6 @@ def generate_launch_description():
     aruco_en     = LaunchConfiguration('aruco')
     viewer_en    = LaunchConfiguration('viewer')
     rviz_en      = LaunchConfiguration('rviz')
-    use_map_en   = LaunchConfiguration('use_map')
     lidar_topic  = LaunchConfiguration('lidar_topic')
     invert_lidar = LaunchConfiguration('invert_lidar')
     lidar_yaw_offset = LaunchConfiguration('lidar_yaw_offset')
@@ -146,13 +124,13 @@ def generate_launch_description():
     # aruco_map_odom se desactiva cuando kalman:=true, así que si aruco está
     # activo pero kalman también, slam_node DEBE publicar map→odom.
     # Condición: slam publica map→odom cuando aruco_map_odom NO está activo Y mcl NO está activo.
-    # aruco_map_odom activo ↔ aruco==true AND mcl==false AND (kalman==false OR use_map==true)
-    # → slam publica ↔ aruco_map_odom NO activo AND mcl==false AND use_map==false
-    #                ↔ (aruco==false OR (kalman==true AND use_map==false)) AND mcl==false
+    # aruco_map_odom activo ↔ aruco==true AND mcl==false AND kalman==false
+    # → slam publica ↔ NOT(aruco==true AND kalman==false) AND mcl==false
+    #                ↔ (aruco==false OR kalman==true)   AND mcl==false
     slam_publishes_map_odom = ParameterValue(
         PythonExpression([
-            "('", aruco_en, "' == 'false' or ('", kalman_en, "' == 'true' and '",
-            use_map_en, "' == 'false')) and '", mcl_en, "' == 'false'"
+            "('", aruco_en, "' == 'false' or '", kalman_en, "' == 'true') and '",
+            mcl_en, "' == 'false'"
         ]),
         value_type=bool,
     )
@@ -257,15 +235,12 @@ def generate_launch_description():
 
     # ── 4. ArUco map→odom correction ─────────────────────────────────────
     # Convierte /aruco/pose (pose absoluta en map) + /odom (ruedas) en una
-    # corrección global map→odom via TF. Activo cuando:
-    #   • aruco:=true                     — hay detecciones ArUco disponibles
-    #   • mcl:=false                      — MCL no compite por map→odom
-    #   • kalman:=false OR use_map:=true  — modo clásico, o modo EKF+mapa
-    #
-    # Modo EKF+mapa (kalman:=true use_map:=true):
-    #   El EKF fusiona ArUco para odom→base_footprint (posición suave).
-    #   aruco_map_odom publica map→odom (referencia absoluta en el mapa).
-    #   No hay doble corrección porque actúan en TFs distintos.
+    # corrección global map→odom via TF. Solo activo cuando:
+    #   • aruco:=true  — hay detecciones ArUco disponibles
+    #   • mcl:=false   — MCL no está compitiendo por el TF map→odom
+    #   • kalman:=false — el Kalman incorpora la corrección ArUco internamente
+    #                     en odom→base_footprint; aruco_map_odom sería redundante
+    #                     y causaría doble corrección.
     aruco_map_odom = Node(
         package='puzzlebot_localization',
         executable='aruco_map_odom',
@@ -285,8 +260,8 @@ def generate_launch_description():
         }],
         condition=IfCondition(PythonExpression([
             "'", aruco_en, "' == 'true' and '",
-            mcl_en, "' == 'false' and "
-            "('", kalman_en, "' == 'false' or '", use_map_en, "' == 'true')",
+            mcl_en, "' == 'false' and '",
+            kalman_en, "' == 'false'",
         ])),
     )
 
@@ -367,7 +342,6 @@ def generate_launch_description():
         value_type=bool,
     )
 
-    # ── 8a-1. SLAM en modo mapeo normal (slam:=true) ─────────────────────────
     slam = Node(
         package='puzzlebot_slam',
         executable='slam_node',
@@ -380,27 +354,6 @@ def generate_launch_description():
         }],
         remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(slam_en),
-    )
-
-    # ── 8a-2. SLAM en modo localización (use_map:=true slam:=false) ──────────
-    # Carga el mapa PNG guardado, hace scan matching contra él y publica
-    # /scan_match/pose al EKF. NO integra nuevos scans (mapa inmutable).
-    # publish_map_odom_tf=false: aruco_map_odom es el dueño de map→odom.
-    # scan_match_updates_map_odom=false: no interferir con aruco_map_odom.
-    slam_loc = Node(
-        package='puzzlebot_slam',
-        executable='slam_node',
-        name='slam_node',
-        output='screen',
-        parameters=[slam_cfg, mcl_cfg, {
-            'use_sim_time':                False,
-            'publish_map_odom_tf':         False,
-            'scan_match_updates_map_odom': False,
-            'scan_matching_enabled':       True,
-            'localization_only':           True,
-        }],
-        remappings=[('/scan', '/scan_stamped')],
-        condition=IfCondition(PythonExpression(["'", use_map_en, "' == 'true' and '", slam_en, "' == 'false'"])),
     )
 
     # ── 8b. MCL localización (sesión 2) ──────────────────────────────────
@@ -419,20 +372,6 @@ def generate_launch_description():
         condition=IfCondition(mcl_en),
     )
 
-    # ── 8c. Map server — publica el PNG guardado como /map ───────────────────
-    # Activo cuando mcl:=true (sesión MCL) o use_map:=true (sesión EKF+mapa).
-    # Necesario para que path_planner_node y RViz vean el mapa estático.
-    map_server = Node(
-        package='puzzlebot_slam',
-        executable='map_server_node',
-        name='map_server_node',
-        output='screen',
-        parameters=[mcl_cfg, {'use_sim_time': False}],
-        condition=IfCondition(PythonExpression([
-            "'", mcl_en, "' == 'true' or '", use_map_en, "' == 'true'",
-        ])),
-    )
-
     # ── 9. Obstacle Avoidance ─────────────────────────────────────────────
     obstacle_avoidance = Node(
         package='puzzlebot_planning',
@@ -445,36 +384,14 @@ def generate_launch_description():
     )
 
     # ── 10. RViz ──────────────────────────────────────────────────────────
-    # mcl:=true  → mcl_rviz.rviz  (Fixed Frame: map, Map display /map TRANSIENT_LOCAL,
-    #                               herramientas SetInitialPose y SetGoal)
-    # mcl:=false → puzzlebot_rviz.rviz (Fixed Frame: odom, para sesión de mapeo)
-    # mcl_rviz.rviz: Fixed Frame=map, display /map con TRANSIENT_LOCAL, P y G tools.
-    # Se usa cuando hay un mapa estático activo: mcl:=true o use_map:=true.
-    rviz_slam = Node(
+    rviz = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
-        arguments=['-d', rviz_cfg_slam],
+        arguments=['-d', rviz_cfg],
         parameters=[{'use_sim_time': False}],
         remappings=[('/scan', '/scan_stamped')],
-        condition=IfCondition(PythonExpression([
-            "'", rviz_en, "' == 'true' and '",
-            mcl_en, "' == 'false' and '", use_map_en, "' == 'false'",
-        ])),
-        output='screen',
-    )
-
-    rviz_mcl = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        arguments=['-d', rviz_cfg_mcl],
-        parameters=[{'use_sim_time': False}],
-        remappings=[('/scan', '/scan_stamped')],
-        condition=IfCondition(PythonExpression([
-            "'", rviz_en, "' == 'true' and "
-            "('", mcl_en, "' == 'true' or '", use_map_en, "' == 'true')",
-        ])),
+        condition=IfCondition(rviz_en),
         output='screen',
     )
 
@@ -497,7 +414,6 @@ def generate_launch_description():
         arg_slam,
         arg_mcl,
         arg_kalman,
-        arg_use_map,
         arg_avoidance,
         arg_navigation,
         arg_aruco,
@@ -522,13 +438,10 @@ def generate_launch_description():
         viewer,
         # Navegación / SLAM
         slam,
-        slam_loc,    # localization_only: scan match contra mapa conocido → /scan_match/pose
         mcl,
-        map_server,
         obstacle_avoidance,
         # Navegación autónoma A* completa (navigation:=true)
         navigation_stack,
-        # Visualización — archivo RViz según modo
-        rviz_slam,   # mcl:=false → puzzlebot_rviz.rviz (Fixed Frame: odom)
-        rviz_mcl,    # mcl:=true  → mcl_rviz.rviz       (Fixed Frame: map, TRANSIENT_LOCAL)
+        # Visualización
+        rviz,
     ])

@@ -1,70 +1,13 @@
-bug_navigation_node:
-  ros__parameters:
-    # Algoritmo: bug2 | bug0 | none (none = pass-through sin detección)
-    bug_algorithm:              "bug2"
-
-    # Detección de obstáculo frontal
-    # Debe ser > obstacle_avoidance_node.stop_distance para actuar antes.
-    front_stop_distance:        0.70    # [m] subido de 0.50 — detectar antes
-    front_angle_deg:            40.0    # [°] semióngulo del cono frontal — más amplio
-    obstacle_confirm_cycles:    1       # 1 ciclo = reacción inmediata sin esperar confirmación
-
-    # Inyección normal (primera detección)
-    # Blob central sobre el obstáculo detectado
-    obstacle_inject_radius_m:   0.45   # [m] radio blob central
-    obstacle_inject_decay_sec:  90.0   # [s] subido: blobs duran hasta que el robot rodee
-
-    # Inyección en recovery
-    blocked_inject_radius_m:    1.20   # [m]
-    blocked_inject_decay_sec:   120.0  # [s]
-
-    enable_rviz_markers:        true
-    replan_stop_duration_sec:   2.5    # [s]
-
-    # Pared virtual perpendicular al movimiento del robot.
-    # Se inyectan blobs a ±wall_blob_step_m hasta ±wall_half_width_m del centro.
-    # Con step=0.35 y half_width=0.75 → blobs en 0, ±0.35, ±0.70 = 5 blobs totales.
-    # Esto bloquea ~1.5 m de ancho → el A* DEBE buscar ruta por el otro lado.
-    wall_half_width_m:          0.75   # [m] mitad del ancho de la pared
-    wall_blob_step_m:           0.35   # [m] separación entre blobs
-    wall_blob_radius_m:         0.40   # [m] radio de blobs laterales
-
 steering_controller_node:
   ros__parameters:
-    lookahead_distance:  0.30  # metres — más corto = sigue curvas más cerradas
-    max_linear_vel:      0.14  # m/s — más lento = más tiempo para girar
-    max_angular_vel:     0.8   # rad/s — más angular para girar rápido
-    goal_tolerance:      0.12  # metres
+    lookahead_distance:  0.30   # metres
+    max_linear_vel:      0.30   # m/s
+    max_angular_vel:     1.50   # rad/s
+    goal_tolerance:      0.10   # metres
     control_frequency:   20.0  # Hz
 
 obstacle_avoidance_node:
   ros__parameters:
-    # stop_distance bajado a 0.22 m para que bug_navigation_node (0.50 m)
-    # actúe ANTES y el obstacle_avoidance solo sea el último freno de emergencia.
-    stop_distance:   0.22   # metres — solo colisión inminente real
-    slow_distance:   0.45   # metres — zona de frenado gradual
+    stop_distance:   0.30   # metres
+    slow_distance:   0.60   # metres
     front_angle_deg: 30.0
-
-    # ── Fase 5: Safety layer por incertidumbre de localización ───────────────
-    #
-    # trace(P_xy) = odom.pose.covariance[0] + odom.pose.covariance[7]
-    # Mide la incertidumbre combinada en x e y del EKF.
-    #
-    # cov_slow_threshold: traza por encima de este valor → empieza a escalar vel.
-    #   σ_combined ≈ sqrt(0.15) ≈ 0.39 m — pose algo incierta (sin ArUco reciente).
-    #   Arrancar con 0.50 si el robot se detiene demasiado pronto; bajar a 0.10
-    #   si los choques siguen ocurriendo con drift leve.
-    #
-    # cov_stop_threshold: traza por encima → parada completa (localización perdida).
-    #   σ_combined ≈ sqrt(0.80) ≈ 0.89 m — localización completamente perdida.
-    #   Debe ser mayor que cov_slow_threshold.
-    #
-    # cov_timeout_sec: si /odom no llega en N segundos → parada (nodo EKF muerto).
-    cov_slow_threshold: 0.15   # [m²]
-    cov_stop_threshold: 0.8
-    cov_timeout_sec:    2.0    # [s]
-
-    # Retroceso automático cuando el robot lleva bloqueado más de N segundos
-    stuck_timeout_sec:    3.0   # [s] tiempo bloqueado antes de retroceder
-    reverse_speed:        0.07  # [m/s] velocidad de retroceso
-    reverse_duration_sec: 2.0   # [s] duración del retroceso
