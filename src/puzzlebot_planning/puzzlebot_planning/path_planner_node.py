@@ -1,12 +1,34 @@
 """
-A* path planner node for Puzzlebot.
+path_planner_node.py — Planeador de rutas con algoritmo A*.
 
-Mejoras respecto a la versión anterior:
-- Inflación morfológica de obstáculos antes de planear.
-- Pose actual del robot desde TF (map→base_footprint) en lugar de solo /initialpose.
-- Replanning automático cuando llega un mapa nuevo (si hay un goal activo).
-- Emergency-stop: no publica ruta si el robot ya está en una celda ocupada.
-- Parámetros configurables desde YAML.
+POSICIÓN EN EL PIPELINE:
+  slam_node → /map ──┐
+  /goal_pose ────────┤→ [ESTE NODO] → /planned_path → steering_controller_node
+  TF map→base ───────┘
+
+FUNCIÓN:
+  Recibe el mapa de ocupación (/map) y un destino (/goal_pose).
+  Aplica inflación morfológica a los obstáculos del mapa (para mantener
+  margen de seguridad con el cuerpo del robot) y luego ejecuta A* para
+  encontrar la ruta óptima en celdas libres.
+
+  La pose actual del robot se obtiene preferentemente del árbol TF
+  (transformación map→base_footprint). Si TF no está disponible, usa
+  /initialpose como respaldo (pose manual desde RViz).
+
+TOPICS SUSCRITOS:
+  /map          (nav_msgs/OccupancyGrid)           — mapa construido por slam_node
+  /goal_pose    (geometry_msgs/PoseStamped)        — destino enviado desde RViz o waypoint_navigator
+  /initialpose  (geometry_msgs/PoseWithCovarianceStamped) — pose manual de respaldo
+
+TOPICS PUBLICADOS:
+  /planned_path (nav_msgs/Path) — secuencia de poses desde robot hasta goal
+
+PARÁMETROS:
+  inflation_radius   [0.15 m]  — radio de inflación de obstáculos
+  occupied_threshold [50]      — umbral para considerar celda ocupada (0–100)
+  use_tf_pose        [True]    — usar TF en lugar de /initialpose
+  replan_on_new_map  [True]    — replanear automáticamente al recibir nuevo mapa
 """
 import heapq
 import math
@@ -28,14 +50,17 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# A* algorithm (pure function, no ROS deps)
+# Algoritmo A* (función pura, sin dependencias de ROS)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _astar(grid: np.ndarray, start: tuple, goal: tuple):
     """
-    A* search on a binary grid (0 = free, 1 = blocked).
-    Returns list of (row, col) from start to goal, or None if no path exists.
-    Uses 8-connected neighbors.
+    A* en un grid binario (0 = libre, 1 = bloqueado).
+    Retorna lista de (fila, columna) de start a goal, o None si no hay camino.
+    Usa conectividad de 8 vecinos (diagonal + ortogonal).
+
+    Heurística: distancia euclidiana al goal (h admisible para 8-conectividad).
+    Costo de paso: 1.0 ortogonal, √2 diagonal (distancia real en celdas).
     """
     rows, cols = grid.shape
     if grid[start] or grid[goal]:

@@ -1,4 +1,30 @@
-"""Log-odds occupancy grid map and lidar ray integration."""
+"""
+occupancy_grid_map.py — Mapa de ocupación con log-odds e integración de rayos LiDAR.
+
+FUNCIÓN:
+  Mantiene un grid 2D donde cada celda almacena la probabilidad acumulada
+  de que esté ocupada, representada en escala log-odds para facilitar la
+  actualización bayesiana con sumas en lugar de multiplicaciones.
+
+  Representación log-odds:
+    l = log(p / (1-p))   → libre: l < 0,  ocupado: l > 0,  desconocido: l = 0
+
+  Por cada scan integrado:
+    1. Calcula la pose del LiDAR en el frame map (incluye offset lidar_x/y/yaw).
+    2. Para cada rayo válido traza una línea Bresenham desde el sensor al hit.
+    3. Celdas a lo largo del rayo → actualización libre (+l_free, negativo).
+    4. Celda final (hit) → actualización ocupada (+l_occ, positivo).
+    5. Los valores se recortan en ±l_clamp para evitar celdas "permanentemente" ocupadas.
+
+  Al publicar (/map):
+    l > 0.5  → 100 (ocupado)
+    l < -0.5 → 0   (libre)
+    resto    → -1  (desconocido)
+
+USADO POR:
+  slam_node.py — llama a integrate_scan() por cada keyframe y to_msg() cada segundo.
+  path_planner_node.py — lee /map para construir el grid binario de A*.
+"""
 
 import math
 

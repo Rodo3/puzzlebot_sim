@@ -8,7 +8,45 @@
 #include <cmath>
 #include <string>
 
-// Simple 3x3 matrix operations (row-major)
+/**
+ * kalman_filter_node — Filtro de Kalman Extendido (EKF) para localización del Puzzlebot.
+ *
+ * POSICIÓN EN EL PIPELINE:
+ *   odometry_node → /odom_raw ─────────────────┐
+ *   aruco_node    → /aruco/pose ────────────────┤→ [ESTE NODO] → /odom → steering_controller
+ *   slam_node     → /scan_match/pose ───────────┘              → TF odom→base_footprint
+ *
+ * FUNCIÓN:
+ *   Fusiona tres fuentes de información para estimar la pose del robot (x, y, θ):
+ *
+ *   1. PREDICCIÓN  (odometría /odom_raw):
+ *      Modelo cinemático diferencial: integra velocidad lineal y angular.
+ *      ZUPT: cuando el robot está quieto (|v|+|ω| < threshold), no crece P.
+ *
+ *   2. CORRECCIÓN PRIMARIA  (ArUco /aruco/pose):
+ *      Medición absoluta de pose; inicializa el estado en la primera detección.
+ *      Floor de ruido (meas_noise_*) para no confiar demasiado en solvePnP.
+ *
+ *   3. CORRECCIÓN SECUNDARIA  (scan match /scan_match/pose):
+ *      Refinamiento adicional desde slam_node cuando el matcher es confiable.
+ *      Solo fusiona si ArUco ya inicializó el estado (no puede bootstrapear solo).
+ *
+ * TOPICS SUSCRITOS:
+ *   /odom_raw        (nav_msgs/Odometry)                     — odometría cruda
+ *   /aruco/pose      (geometry_msgs/PoseWithCovarianceStamped) — pose absoluta ArUco
+ *   /scan_match/pose (geometry_msgs/PoseWithCovarianceStamped) — corrección de SLAM
+ *
+ * TOPICS PUBLICADOS:
+ *   /odom            (nav_msgs/Odometry) — pose filtrada del robot
+ *   TF odom→base_footprint               — necesario para TF tree
+ *
+ * PARÁMETROS CLAVE:
+ *   init_from_aruco      [true]  — espera el primer ArUco para inicializar
+ *   zupt_speed_threshold [0.02]  — umbral de velocidad para ZUPT
+ *   p_max_xy / p_max_theta       — techo de covarianza para evitar explosión de P
+ */
+
+// Operaciones matriciales 3×3 (almacenamiento row-major)
 using Mat3 = std::array<double, 9>;
 
 static Mat3 mat_add(const Mat3 & A, const Mat3 & B) {
