@@ -1,94 +1,247 @@
 """
-obstacle_avoidance_node.py — Capa de seguridad reactiva ante obstáculos.
+obstacle_avoidance_node.py — Capa de seguridad reactiva ante obstáculos y localización.
 
 POSICIÓN EN EL PIPELINE:
   steering_controller_node  →  /cmd_vel_in  →  [ESTE NODO]  →  /cmd_vel  →  robot/Gazebo
 
 FUNCIÓN:
   Intercepta el comando de velocidad del controlador antes de enviarlo al robot.
-  Lee el LiDAR (/scan) y decide si el comando es seguro:
-    - Obstáculo < stop_distance  → publica velocidad cero (freno total)
-    - Obstáculo < slow_distance  → escala la velocidad linealmente (frenado gradual)
-    - Sin obstáculo cercano      → pasa el comando sin modificar
+  Combina dos fuentes de información para decidir si el comando es seguro:
+
+    1. LiDAR (/scan): obstáculos físicos detectados en tiempo real.
+    2. EKF covarianza (/odom): incertidumbre de localización del robot.
+
+  Prioridades (de mayor a menor):
+    1. EMERGENCY   — obstáculo < stop_distance → freno total + retroceso si lleva mucho tiempo bloqueado
+    2. LOC_TIMEOUT — no llega /odom en > cov_timeout_sec → freno total
+    3. LOC_LOST    — trace(P_xy) > cov_stop_threshold → freno total (localización perdida)
+    4. SLOW        — zona LiDAR entre stop/slow O trace(P_xy) > cov_slow_threshold → escala velocidad
+    5. NORMAL      — pasa el comando sin modificar
 
 TOPICS SUSCRITOS:
-  /cmd_vel_in  (geometry_msgs/Twist)  — velocidad calculada por el controlador
+  /cmd_vel_in  (geometry_msgs/Twist)   — velocidad calculada por el controlador
   /scan        (sensor_msgs/LaserScan) — datos del LiDAR
+  /odom        (nav_msgs/Odometry)     — covarianza del EKF (para monitoreo de localización)
 
 TOPICS PUBLICADOS:
-  /cmd_vel     (geometry_msgs/Twist)  — velocidad final hacia el robot
+  /cmd_vel     (geometry_msgs/Twist)   — velocidad final hacia el robot
 
 PARÁMETROS:
-  stop_distance   [0.30 m] — distancia mínima; por debajo → freno total
-  slow_distance   [0.60 m] — zona de frenado gradual
-  front_angle_deg [30.0°]  — semi-ángulo del cono frontal que se monitorea
+  stop_distance        [0.30 m]   — distancia mínima al obstáculo; por debajo → freno total
+  slow_distance        [0.60 m]   — inicio del frenado gradual por LiDAR
+  front_angle_deg      [30.0°]    — semi-ángulo del cono frontal monitoreado
+  cov_slow_threshold   [0.15 m²]  — trace(P_xy) arriba de este → frenado gradual
+  cov_stop_threshold   [0.80 m²]  — trace(P_xy) arriba de este → freno total
+  cov_timeout_sec      [2.0 s]    — sin /odom por este tiempo → freno total
+  stuck_timeout_sec    [3.0 s]    — bloqueado más de esto → activa retroceso automático
+  reverse_speed        [0.07 m/s] — velocidad de retroceso
+  reverse_duration_sec [2.0 s]    — duración del retroceso
 """
 
 import math
+import time as _time
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
 
 class ObstacleAvoidanceNode(Node):
+    """
+    Reactive obstacle avoidance + localization-uncertainty safety layer.
+
+    Receives /cmd_vel_in from the steering controller and /scan from the LiDAR.
+    Reads /odom covariance to scale velocity when localization is uncertain.
+
+    Priority (highest to lowest):
+      1. EMERGENCY  — obstacle within stop_distance → full stop (ignores all else)
+      2. UNCERTAIN  — LiDAR slow zone OR trace(P_xy) > cov_slow_threshold → scale speed
+      3. DEGRADED   — trace(P_xy) > cov_stop_threshold → full stop (lost localization)
+      4. NORMAL     — pass /cmd_vel_in through unchanged
+    """
 
     def __init__(self):
         super().__init__('obstacle_avoidance_node')
-        self.declare_parameter('stop_distance',   0.30)   # metros — freno total
-        self.declare_parameter('slow_distance',   0.60)   # metros — inicio frenado gradual
-        self.declare_parameter('front_angle_deg', 30.0)   # semi-ángulo del cono frontal
 
-        self.stop_d  = self.get_parameter('stop_distance').value
-        self.slow_d  = self.get_parameter('slow_distance').value
-        self.front_a = math.radians(self.get_parameter('front_angle_deg').value)
+        # ── LiDAR safety parameters ──────────────────────────────────────────
+        self.declare_parameter('stop_distance',   0.30)   # metres — full stop
+        self.declare_parameter('slow_distance',   0.60)   # metres — scale speed
+        self.declare_parameter('front_angle_deg', 30.0)   # half-cone ahead
 
-        # Distancia mínima al obstáculo más cercano en el cono frontal.
-        # Inicia en inf para no frenar antes de recibir el primer scan.
-        self.min_front = float('inf')
+        # ── Localization uncertainty parameters ──────────────────────────────
+        # trace(P_xy) = odom.pose.covariance[0] + odom.pose.covariance[7]
+        # cov_slow_threshold: por encima → inicio de frenado gradual (σ ≈ 38 cm)
+        # cov_stop_threshold: por encima → freno total (localización perdida, σ ≈ 63 cm)
+        self.declare_parameter('cov_slow_threshold', 0.15)
+        self.declare_parameter('cov_stop_threshold', 0.80)
+        self.declare_parameter('cov_timeout_sec',    2.0)
 
+        # ── Anti-stuck: retroceso automático cuando lleva mucho tiempo bloqueado
+        self.declare_parameter('stuck_timeout_sec',    3.0)
+        self.declare_parameter('reverse_speed',        0.07)
+        self.declare_parameter('reverse_duration_sec', 2.0)
+
+        self.stop_d        = self.get_parameter('stop_distance').value
+        self.slow_d        = self.get_parameter('slow_distance').value
+        self.front_a       = math.radians(self.get_parameter('front_angle_deg').value)
+        self.cov_slow      = self.get_parameter('cov_slow_threshold').value
+        self.cov_stop      = self.get_parameter('cov_stop_threshold').value
+        self.cov_timeout   = self.get_parameter('cov_timeout_sec').value
+        self.stuck_timeout = self.get_parameter('stuck_timeout_sec').value
+        self.reverse_speed = self.get_parameter('reverse_speed').value
+        self.reverse_dur   = self.get_parameter('reverse_duration_sec').value
+
+        # Distancia mínima al obstáculo más cercano en el cono frontal
+        self.min_front      = float('inf')
+        # trace(P_xy) del EKF: suma de varianzas de posición x e y
+        self.trace_p_xy     = 0.0
+        self._last_odom_t   = None
+
+        # Timestamps para control del retroceso automático
+        self._blocked_since   = None   # cuando empezó el emergency stop continuo
+        self._reversing_since = None   # cuando empezó el retroceso activo
+
+        # ── Subscriptions ────────────────────────────────────────────────────
         self.sub_scan_ = self.create_subscription(
             LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
         self.sub_cmd_  = self.create_subscription(
             Twist, '/cmd_vel_in', self.cmd_cb, 10)
-        self.pub_cmd_  = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.sub_odom_ = self.create_subscription(
+            Odometry, '/odom', self.odom_cb, 10)
+
+        self.pub_cmd_ = self.create_publisher(Twist, '/cmd_vel', 10)
 
         self.get_logger().info(
             f'obstacle_avoidance_node iniciado '
-            f'(stop={self.stop_d} m, slow={self.slow_d} m, cono=±{math.degrees(self.front_a):.0f}°)')
+            f'(stop={self.stop_d} m, slow={self.slow_d} m, '
+            f'cov_slow={self.cov_slow} m², cov_stop={self.cov_stop} m²)')
+
+    # ── Callbacks ─────────────────────────────────────────────────────────────
+
+    def odom_cb(self, msg: Odometry):
+        # Extrae la traza de la covarianza de posición xy del EKF
+        self.trace_p_xy   = msg.pose.covariance[0] + msg.pose.covariance[7]
+        self._last_odom_t = self.get_clock().now()
 
     def scan_cb(self, msg: LaserScan):
-        # Calcula el ángulo de cada rayo y filtra los que están en el cono frontal.
-        # Se descartan rangos infinitos/NaN y los fuera del rango válido del sensor.
+        # Calcula ángulo de cada rayo y filtra los del cono frontal ±front_angle_deg
         angles = np.arange(len(msg.ranges)) * msg.angle_increment + msg.angle_min
         ranges = np.array(msg.ranges)
         valid  = np.isfinite(ranges) & (ranges > msg.range_min) & (ranges < msg.range_max)
         front  = np.abs(angles) <= self.front_a
         mask   = valid & front
-        # Si no hay rayos válidos en el cono frontal, asume campo libre (inf).
+        # Si no hay rayos válidos en el cono, asume campo libre (inf)
         self.min_front = float(np.min(ranges[mask])) if mask.any() else float('inf')
 
     def cmd_cb(self, msg: Twist):
-        out = Twist()  # velocidad cero por defecto
+        out      = Twist()  # velocidad cero por defecto
+        now_mono = _time.monotonic()
 
+        # ── Prioridad 1: LiDAR — freno total + retroceso automático ──────────
         if self.min_front <= self.stop_d:
-            # Obstáculo demasiado cerca — freno total, ignora el comando del controlador.
+            if self._blocked_since is None:
+                self._blocked_since = now_mono
+
+            blocked_secs = now_mono - self._blocked_since
+
+            if blocked_secs >= self.stuck_timeout:
+                # Bloqueado demasiado tiempo → activar retroceso
+                if self._reversing_since is None:
+                    self._reversing_since = now_mono
+                    self.get_logger().warn(
+                        f'STUCK {blocked_secs:.1f}s → iniciando retroceso',
+                        throttle_duration_sec=1.0)
+
+                reverse_elapsed = now_mono - self._reversing_since
+                if reverse_elapsed < self.reverse_dur:
+                    out.linear.x  = -self.reverse_speed
+                    out.angular.z = 0.20   # giro suave durante retroceso
+                    self.pub_cmd_.publish(out)
+                    self.get_logger().info(
+                        f'REVERSING {reverse_elapsed:.1f}s/{self.reverse_dur}s',
+                        throttle_duration_sec=0.5)
+                    return
+                else:
+                    # Retroceso completado — resetear contadores
+                    self.get_logger().info('Retroceso completado → reanudando navegación')
+                    self._blocked_since   = None
+                    self._reversing_since = None
+                    self.pub_cmd_.publish(out)
+                    return
+            else:
+                # Aún dentro del timeout de stuck → parada normal
+                self._reversing_since = None
+                self.pub_cmd_.publish(out)
+                self.get_logger().warn(
+                    f'EMERGENCY STOP — obstáculo a {self.min_front:.2f} m '
+                    f'(bloqueado {blocked_secs:.1f}s/{self.stuck_timeout}s)',
+                    throttle_duration_sec=1.0)
+                return
+        else:
+            # Frontal libre — resetear contadores de bloqueo
+            self._blocked_since   = None
+            self._reversing_since = None
+
+        # ── Prioridad 2: timeout de localización (fuente /odom muerta) ────────
+        odom_age = self._odom_age_sec()
+        if odom_age is not None and odom_age > self.cov_timeout:
             self.pub_cmd_.publish(out)
+            self.get_logger().warn(
+                f'LOCALIZATION TIMEOUT — sin /odom por {odom_age:.1f}s → parado',
+                throttle_duration_sec=2.0)
             return
 
+        # ── Prioridad 3: localización perdida (P_xy demasiado grande) ─────────
+        if self.trace_p_xy > self.cov_stop:
+            self.pub_cmd_.publish(out)
+            self.get_logger().warn(
+                f'LOCALIZATION LOST — trace(P_xy)={self.trace_p_xy:.3f} m² '
+                f'> {self.cov_stop} m² → parado',
+                throttle_duration_sec=2.0)
+            return
+
+        # ── Factor de escala combinado (LiDAR + covarianza EKF) ───────────────
+        # Toma el más restrictivo de los dos factores.
+
+        # Fuente A: zona de frenado LiDAR
         if self.min_front <= self.slow_d and msg.linear.x > 0:
-            # Zona de frenado gradual: escala la velocidad lineal de forma proporcional.
-            # A stop_d → scale=0 (parado), a slow_d → scale=1 (velocidad completa).
-            scale = (self.min_front - self.stop_d) / (self.slow_d - self.stop_d)
-            out.linear.x  = msg.linear.x * scale
-            out.angular.z = msg.angular.z  # giro sin escalar para mantener la trayectoria
+            lidar_scale = (self.min_front - self.stop_d) / (self.slow_d - self.stop_d)
+            lidar_scale = max(0.0, min(lidar_scale, 1.0))
         else:
-            out = msg  # campo libre — pasa el comando sin modificar
+            lidar_scale = 1.0
+
+        # Fuente B: covarianza del EKF — frenado gradual entre cov_slow y cov_stop
+        if self.trace_p_xy > self.cov_slow:
+            span      = max(self.cov_stop - self.cov_slow, 1e-6)
+            cov_scale = 1.0 - (self.trace_p_xy - self.cov_slow) / span
+            cov_scale = max(0.0, min(cov_scale, 1.0))
+            self.get_logger().info(
+                f'UNCERTAIN — trace(P_xy)={self.trace_p_xy:.3f} m² '
+                f'→ vel_scale={cov_scale:.2f}',
+                throttle_duration_sec=2.0)
+        else:
+            cov_scale = 1.0
+
+        scale = min(lidar_scale, cov_scale)
+
+        if scale < 1.0:
+            out.linear.x  = msg.linear.x  * scale
+            out.angular.z = msg.angular.z  * scale
+        else:
+            out = msg   # campo libre — pasa el comando sin modificar
 
         self.pub_cmd_.publish(out)
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _odom_age_sec(self):
+        if self._last_odom_t is None:
+            return None
+        return (self.get_clock().now() - self._last_odom_t).nanoseconds * 1e-9
 
 
 def main(args=None):

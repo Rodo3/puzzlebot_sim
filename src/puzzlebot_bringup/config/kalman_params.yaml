@@ -30,6 +30,40 @@ kalman_filter_node:
     scan_match_noise_x:     0.04
     scan_match_noise_y:     0.04
     scan_match_noise_theta: 0.03
+
+    # ── Fase 2: Gating del scan matching por covarianza del EKF ──────────────
+    #
+    # Cuando trace(P_xy) = P[0]+P[4] es pequeña (ArUco activo, pose confiable),
+    # se infla R_scan para reducir la autoridad del scan matching.
+    # Cuando P crece (ArUco perdido, drift acumulado), R_scan vuelve a su valor base.
+    #
+    # Formula: cov_factor = 1 + alpha * max(0, low_thresh - trace_P) / (trace_P + eps)
+    #   trace_P < low_cov_thresh  → gating fuerte (scan match muy suavizado)
+    #   trace_P > low_cov_thresh  → sin gating (scan match con peso normal)
+    #
+    # Ejemplo con alpha=5.0, low_thresh=0.05:
+    #   trace_P = 0.01 (ArUco activo):  cov_factor ≈ 26× → scan match casi ignorado
+    #   trace_P = 0.05 (umbral):        cov_factor = 1.0  → peso normal
+    #   trace_P = 0.30 (sin ArUco):     cov_factor = 1.0  → peso normal
+    #
+    # Ajuste: subir alpha si el robot sigue perturbándose con ArUco activo.
+    #         bajar alpha si el scan matching nunca corrige el drift.
+    scan_match_gate_alpha:      5.0    # factor de inflación de R cuando P es pequeña
+    scan_match_low_cov_thresh:  0.05   # [m²] trace(P_xy) por debajo → gating activo
+    scan_match_high_cov_thresh: 0.30   # [m²] trace(P_xy) por encima → sin gating (referencia)
+
+    # ── Fase 4: Mahalanobis gate ──────────────────────────────────────────────
+    #
+    # Rechaza correcciones de scan matching cuya innovación sea estadísticamente
+    # incompatible con el estado del EKF. Previene saltos bruscos de pose causados
+    # por matches espurios (zona sin paredes, mapa incompleto, obstáculo dinámico).
+    #
+    # d = sqrt(inn_x²/S_xx + inn_y²/S_yy + inn_th²/S_thth)
+    # Si d > mahal_gate → corrección rechazada.
+    #
+    # Valor 3.5: conservador, rechaza innovaciones > 3.5σ sin bloquear correcciones válidas.
+    # Bajar a 2.5 si siguen ocurriendo saltos; subir a 5.0 si el matcher nunca corrige.
+    scan_match_mahal_gate: 3.5
     # ── Inicialización desde ArUco (RECOMENDADO para robot real) ─────────────
     #
     # init_from_aruco: true

@@ -88,10 +88,30 @@ private:
 
   void path_cb(const nav_msgs::msg::Path::SharedPtr msg)
   {
-    path_       = msg->poses;
-    path_idx_   = 0;
+    path_         = msg->poses;
     goal_reached_ = false;
-    RCLCPP_INFO(get_logger(), "New path received: %zu waypoints", path_.size());
+
+    // Al recibir ruta nueva, empezar desde el waypoint más cercano al robot.
+    // Esto evita que el controlador intente ir hacia puntos detrás del robot
+    // cuando el A* replaneó mientras el robot estaba en movimiento.
+    path_idx_ = 0;
+    if (have_pose_ && path_.size() > 1) {
+      double best_dist = std::numeric_limits<double>::max();
+      for (int i = 0; i < static_cast<int>(path_.size()); ++i) {
+        double dx = path_[i].pose.position.x - robot_x_;
+        double dy = path_[i].pose.position.y - robot_y_;
+        double d  = std::hypot(dx, dy);
+        if (d < best_dist) {
+          best_dist = d;
+          path_idx_ = i;
+        }
+      }
+      // No ir más allá del penúltimo punto para que el goal final sea correcto
+      path_idx_ = std::min(path_idx_, static_cast<int>(path_.size()) - 2);
+    }
+
+    RCLCPP_INFO(get_logger(), "New path received: %zu waypoints (starting at idx %d)",
+                path_.size(), path_idx_);
   }
 
   void control_loop()
@@ -142,12 +162,24 @@ private:
     double v = max_v_;
     double w = std::clamp(v * curvature, -max_w_, max_w_);
 
-    // Slow down when heading angle error is large
+    // Reducir velocidad lineal proporcionalmente al ángulo de giro requerido.
+    // A 0° error → velocidad máxima. A 90° error → velocidad mínima (20%).
+    // Esto evita que el robot choque cuando recibe una ruta que gira bruscamente.
     double heading_err = std::atan2(local_y, local_x);
-    if (std::abs(heading_err) > M_PI / 4.0)
-      v *= 0.5;
+    double abs_err = std::abs(heading_err);
+    double speed_scale = 1.0;
+    if (abs_err > 0.35) {  // > ~20 grados
+      // Escala lineal: 20° → 1.0,  90° → 0.20
+      speed_scale = 1.0 - 0.8 * ((abs_err - 0.35) / (M_PI / 2.0 - 0.35));
+      speed_scale = std::max(0.20, std::min(1.0, speed_scale));
+    }
+    v *= speed_scale;
 
-    cmd.linear.x  = v;
+    // Freno adicional cerca del goal final
+    if (dist_to_goal < 0.40)
+      v = std::min(v, max_v_ * (dist_to_goal / 0.40));
+
+    cmd.linear.x  = std::max(0.0, v);
     cmd.angular.z = w;
     pub_cmd_->publish(cmd);
   }
