@@ -99,52 +99,117 @@ def generate_launch_description():
         name='path_planner_node',
         parameters=[{
             'use_sim_time':       use_sim_time,
-            'inflation_radius':   0.15,      # metros — radio inflación obstáculos
-            'occupied_threshold': 50,        # celdas con valor > 50 se tratan como ocupadas
             'map_frame':          'map',
             'base_frame':         'base_footprint',
-            'use_tf_pose':        True,      # pose desde TF map→base_footprint
-            'replan_on_new_map':  False,     # False: replana solo cuando llega un goal nuevo
+            'use_tf_pose':        True,
+            'replan_on_new_map':  True,
+
+            # ── Obstacle inflation ──────────────────────────────────────────
+            # Cells within this radius of a wall are BLOCKED — the A* never
+            # routes through them.  Keep this small enough so narrow corridors
+            # between internal structures remain open for navigation.
+            # 0.15 m = just enough to keep the robot body off the wall.
+            # The distance costmap (below) handles keeping the path centred.
+            'inflation_radius':    0.15,
+
+            # Cells with occupancy > this threshold are treated as obstacles.
+            'occupied_threshold':  50,
+
+            # Unknown cells (-1 in the map) treated as occupied.
+            'unknown_as_occupied': True,
+
+            # Morphological closing disabled — walls stay as mapped so all
+            # corridors between internal structures remain open.
+            'wall_closing_radius': 0,
+
+            # ── Distance costmap ────────────────────────────────────────────
+            # Adds a per-cell penalty inversely proportional to distance to
+            # the nearest wall.  A* routes through corridor centres instead
+            # of grazing walls.
+            #
+            # cost_weight: multiplier on the per-cell cost added to each A*
+            #   step.  Higher → stronger wall avoidance.
+            #   0.0  → classic A* (no wall avoidance, shortest path only)
+            #   1.0  → light avoidance
+            #   2.0  → moderate (recommended default)
+            #   4.0+ → strong avoidance (paths through corridor centres)
+            #
+            # max_obstacle_cost: cap on the per-cell cost value.
+            #   Higher → sharper gradient near walls.
+            'use_cost_map':       True,
+            'cost_weight':        2.0,
+            'max_obstacle_cost':  5.0,
+
+            # ── Goal safety ─────────────────────────────────────────────────
+            # Goals closer than min_goal_obstacle_distance to a wall are
+            # moved to the nearest safe free cell automatically.
+            # Set allow_goal_reprojection: false to reject instead of move.
+            'min_goal_obstacle_distance': 0.15,
+            'allow_goal_reprojection':    True,
+            'goal_reprojection_radius':   0.50,
+
+            # ── Path safety warning ─────────────────────────────────────────
+            # Log a warning if any waypoint ends up closer than this to a wall.
+            'min_path_obstacle_distance': 0.15,
         }],
         output='screen',
     )
 
     # ── Steering Controller (pure pursuit) — DEFAULT ──────────────────────
     # Suscribe: /odom, /planned_path
-    # Publica:  /cmd_vel_in
+    # Publica:  /cmd_vel_steering  (antes /cmd_vel_in — ahora va al bug_navigation_node)
     steering_controller = Node(
         package='puzzlebot_controller',
         executable='steering_controller_node',
         name='steering_controller_node',
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
+        remappings=[('/cmd_vel_in', '/cmd_vel_steering')],
         output='screen',
         condition=UnlessCondition(use_pd),
     )
 
     # ── PD Controller — ALTERNATIVA para navegación punto a punto ─────────
     # Suscribe: /odom, /goal_pose (directo, no usa /planned_path)
-    # Publica:  /cmd_vel_in
+    # Publica:  /cmd_vel_steering
     pd_controller = Node(
         package='puzzlebot_controller',
         executable='pd_controller_node',
         name='pd_controller_node',
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
+        remappings=[('/cmd_vel_in', '/cmd_vel_steering')],
         output='screen',
         condition=IfCondition(use_pd),
     )
 
-    # ── Obstacle Avoidance (safety layer entre controller y cmd_vel) ───────
-    # Suscribe: /scan, /cmd_vel_in
+    # ── Bug Navigation (capa reactiva entre controller y obstacle_avoidance) ──
+    # Suscribe: /cmd_vel_steering, /scan_stamped, /odom, /goal_pose
+    # Publica:  /cmd_vel_in
+    # Lógica:   pasa comandos sin modificar en GO_TO_WAYPOINT.
+    #           Al detectar obstáculo frontal activa wall-following (Bug0/Bug2).
+    #           Cuando encuentra leave point seguro reanuda el pure-pursuit.
+    bug_navigation = Node(
+        package='puzzlebot_planning',
+        executable='bug_navigation_node',
+        name='bug_navigation_node',
+        parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
+        # scan_restamper publica en /scan_stamped — conectar explícitamente
+        remappings=[('/scan_stamped', '/scan_stamped')],
+        output='screen',
+    )
+
+    # ── Obstacle Avoidance (safety layer final entre bug_nav y cmd_vel) ───
+    # Suscribe: /scan_stamped, /cmd_vel_in, /odom
     # Publica:  /cmd_vel
-    # Lógica:   si obstáculo < stop_distance → velocidad cero
-    #           si obstáculo < slow_distance → escala velocidad
+    # Lógica:   parada de emergencia si LiDAR < stop_distance (último filtro)
     obstacle_avoidance = Node(
         package='puzzlebot_planning',
         executable='obstacle_avoidance_node',
         name='obstacle_avoidance_node',
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
-        # Remapea /cmd_vel → topic real del robot (Gazebo o hardware)
-        remappings=[('/cmd_vel', cmd_vel_topic)],
+        remappings=[
+            ('/cmd_vel', cmd_vel_topic),
+            ('/scan',    '/scan_stamped'),   # obstacle_avoidance suscribe /scan internamente
+        ],
         output='screen',
     )
 
@@ -155,5 +220,6 @@ def generate_launch_description():
         path_planner,
         steering_controller,
         pd_controller,
+        bug_navigation,
         obstacle_avoidance,
     ])

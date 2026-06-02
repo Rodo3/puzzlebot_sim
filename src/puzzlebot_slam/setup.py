@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'slam_node          = puzzlebot_slam.slam_node:main',
             'mcl                = puzzlebot_slam.mcl:main',
+            'map_server_node    = puzzlebot_slam.map_server_node:main',
         ],
     },
 )

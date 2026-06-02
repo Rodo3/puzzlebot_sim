@@ -22,6 +22,7 @@ setup(
             'path_planner_node        = puzzlebot_planning.path_planner_node:main',
             'obstacle_avoidance_node  = puzzlebot_planning.obstacle_avoidance_node:main',
             'waypoint_navigator_node  = puzzlebot_planning.waypoint_navigator_node:main',
+            'bug_navigation_node      = puzzlebot_planning.bug_navigation_node:main',
         ],
     },
 )
