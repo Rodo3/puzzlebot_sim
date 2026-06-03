@@ -161,16 +161,23 @@ class OccupancyGridMap:
                 self.grid[end_row, end_col] + self.l_free,
             )
 
-    def load_from_png(self, path: str) -> None:
-        """Load a saved PNG into the log-odds grid (inverse of to_png).
+    def load_from_png(
+        self,
+        path: str,
+        occupied_thresh: float = 0.196,
+        free_thresh: float = 0.65,
+    ) -> None:
+        """Load a saved PNG into the log-odds grid using the same thresholds
+        as map_server_node, so the scan_matcher sees identical walls to RViz.
 
-        Expected pixel convention (same as to_png / ROS map_server):
-          255 = free     → log-odds = -l_clamp
-          127 = unknown  → log-odds =  0.0
-            0 = occupied → log-odds = +l_clamp
-        Pixels are clamped to [-l_clamp, +l_clamp] to match the SLAM saturation.
-        The image is flipped vertically because PNG row-0 is top while the grid
-        row-0 is bottom (OccupancyGrid convention).
+        Pixel convention (nav2_map_server compatible):
+          pixel/255 >= free_thresh     → free     → log-odds = -l_clamp
+          pixel/255 <= occupied_thresh → occupied → log-odds = +l_clamp
+          between both thresholds      → unknown  → log-odds =  0.0
+
+        Using thresholds instead of a linear ramp eliminates the diffuse halo
+        of semi-occupied cells around walls that the old linear formula produced,
+        and removes artefact blobs in gray areas from contributing to match scores.
         """
         from PIL import Image
         img = Image.open(path).convert('L')
@@ -183,9 +190,11 @@ class OccupancyGridMap:
                 (self.width_pixels, self.height_pixels), Image.NEAREST)
             arr = np.array(img_resized, dtype=np.float32)
 
-        # pixel 255→−l_clamp (free), 0→+l_clamp (occupied), 127→0 (unknown)
-        self.grid = (127.0 - arr) / 127.0 * self.l_clamp
-        self.grid = np.clip(self.grid, -self.l_clamp, self.l_clamp).astype(np.float32)
+        norm = arr / 255.0
+        grid = np.zeros_like(arr)                        # unknown → 0.0
+        grid[norm >= free_thresh]     = -self.l_clamp    # free
+        grid[norm <= occupied_thresh] =  self.l_clamp    # occupied
+        self.grid = grid.astype(np.float32)
 
     def to_png(self, path: str) -> None:
         """Save the current occupancy grid as a grayscale PNG.
