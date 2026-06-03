@@ -196,7 +196,7 @@ class ArucoNode(Node):
         # Tiempo máximo sin detección válida antes de liberar el filtro de salto.
         # Si last_pose tiene más de N segundos de antigüedad se descarta, permitiendo
         # que el primer marcador nuevo sea aceptado aunque esté lejos del anterior.
-        self.declare_parameter('last_pose_timeout',        2.0)
+        self.declare_parameter('last_pose_timeout',        1.5)
         # Frecuencia máxima de procesamiento de imagen [Hz].
         # Limita cuántos frames se procesan por segundo independientemente de
         # la frecuencia de llegada de la cámara. Esto evita que el callback se

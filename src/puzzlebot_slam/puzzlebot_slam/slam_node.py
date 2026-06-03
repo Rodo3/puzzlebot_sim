@@ -38,6 +38,8 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from std_msgs.msg import Bool, String
 from rclpy.qos import (
     DurabilityPolicy,
@@ -153,9 +155,15 @@ class SlamNode(Node):
             PoseWithCovarianceStamped, '/scan_match/pose', 10)
         self._tf = tf2_ros.TransformBroadcaster(self)
 
+        # El callback de scan corre en su propio thread para que el scan_matcher
+        # (NumPy puro — libera el GIL) no bloquee los timers de TF ni los demás
+        # callbacks mientras busca la corrección de pose.
+        self._scan_cb_group = MutuallyExclusiveCallbackGroup()
+
         self.create_subscription(Odometry, '/odom', self._odom_cb, 10)
         self.create_subscription(
-            LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
+            LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data,
+            callback_group=self._scan_cb_group)
         self.create_subscription(
             TransformStamped, '/map_to_odom', self._map_to_odom_cb, 10)
         self.create_subscription(Bool,   '/slam/reset',    self._slam_reset_cb, 10)
@@ -436,8 +444,10 @@ class SlamNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = SlamNode()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
