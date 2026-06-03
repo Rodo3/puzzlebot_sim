@@ -34,7 +34,7 @@ steering_controller_node:
     lookahead_distance:  0.30  # metres — más corto = sigue curvas más cerradas
     max_linear_vel:      0.14  # m/s — más lento = más tiempo para girar
     max_angular_vel:     0.8   # rad/s — más angular para girar rápido
-    goal_tolerance:      0.12  # metres
+    goal_tolerance:      0.20  # metres
     control_frequency:   20.0  # Hz
 
 obstacle_avoidance_node:
