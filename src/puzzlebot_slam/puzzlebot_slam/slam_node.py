@@ -136,7 +136,10 @@ class SlamNode(Node):
             True if self._localization_only
             else bool(self.get_parameter('scan_matching_enabled').value)
         )
-        self._scan_matcher = LocalScanMatcher(enabled=scan_matching_param)
+        self._scan_matcher = LocalScanMatcher(
+            enabled=scan_matching_param,
+            skip_warmup=self._localization_only,
+        )
 
         # Parámetros para scan match → EKF feedback
         self._scan_match_min_score      = float(self.get_parameter('scan_match_min_score').value)

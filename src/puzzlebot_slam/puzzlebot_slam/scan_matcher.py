@@ -50,9 +50,11 @@ _RAY_STRIDE = 3
 
 
 class LocalScanMatcher:
-    def __init__(self, enabled: bool = False):
+    def __init__(self, enabled: bool = False, skip_warmup: bool = False):
         self._enabled    = enabled
-        self._scan_count = 0
+        # En localization_only el mapa ya está cargado desde el inicio, así que
+        # el warmup no aporta nada — el matcher tiene referencias desde el scan 1.
+        self._scan_count = _WARMUP_SCANS if skip_warmup else 0
         self._last_score = 0.0   # score del último match; 0 durante warmup o desactivado
 
     @property

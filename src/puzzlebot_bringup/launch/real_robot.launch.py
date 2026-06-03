@@ -288,6 +288,13 @@ def generate_launch_description():
     #   El EKF fusiona ArUco para odom→base_footprint (posición suave).
     #   aruco_map_odom publica map→odom (referencia absoluta en el mapa).
     #   No hay doble corrección porque actúan en TFs distintos.
+    # use_map:=true → alpha 0.85 (converge en 2-3 mediciones, mapa conocido fijo)
+    # use_map:=false → alpha 0.35 (suavizado más lento, sesión de mapeo activo)
+    aruco_map_odom_alpha = ParameterValue(
+        PythonExpression(["0.85 if '", use_map_en, "' == 'true' else 0.35"]),
+        value_type=float,
+    )
+
     aruco_map_odom = Node(
         package='puzzlebot_localization',
         executable='aruco_map_odom',
@@ -298,7 +305,7 @@ def generate_launch_description():
             'odom_topic': '/odom',
             'aruco_pose_topic': '/aruco/pose',
             'map_to_odom_topic': '/map_to_odom',
-            'correction_alpha': 0.35,
+            'correction_alpha': aruco_map_odom_alpha,
             'map_min_x': 0.0,
             'map_max_x': 3.76,
             'map_min_y': 0.0,
