@@ -94,33 +94,55 @@ def generate_launch_description():
     # ── Argumentos del launch ─────────────────────────────────────────────
     arg_slam        = DeclareLaunchArgument('slam',        default_value='true',
                           description='Enable slam_node (mapeo). Usa slam:=false con mcl:=true.')
+    #####################################################################################################
     arg_mcl         = DeclareLaunchArgument('mcl',         default_value='false',
                           description='Enable MCL (localización con mapa PNG). Usa slam:=false mcl:=true.')
-    arg_kalman      = DeclareLaunchArgument('kalman',      default_value='false',
+    #####################################################################################################
+
+    arg_kalman      = DeclareLaunchArgument('kalman',      default_value='true',
                           description='Kalman EKF: true → odom_raw→kalman→odom+TF. '
                                        'Estrategia A: kalman:=true aruco:=false. '
                                        'Estrategia B: kalman:=true aruco:=true')
+    #####################################################################################################
+    
     arg_avoidance   = DeclareLaunchArgument('avoidance',   default_value='false',
                           description='Enable obstacle_avoidance_node')
+    #####################################################################################################
+    
     arg_aruco       = DeclareLaunchArgument('aruco',       default_value='true',
                           description='Enable aruco_node. Con kalman:=false activa también aruco_map_odom.')
+    #####################################################################################################
+    
     arg_viewer      = DeclareLaunchArgument('viewer',      default_value='false',
                           description='Enable image_viewer_node con corrección de distorsión')
+    #####################################################################################################
+    
     arg_rviz        = DeclareLaunchArgument('rviz',        default_value='true',
                           description='Open RViz2')
-    arg_lidar_topic = DeclareLaunchArgument('lidar_topic', default_value='/Lidar',
+    #####################################################################################################
+    
+    arg_lidar_topic = DeclareLaunchArgument('lidar_topic', default_value='/scan',
                           description='Tópico LiDAR: /Lidar (micro-ROS) o /scan (sllidar directo)')
+    #####################################################################################################
+    
     arg_invert_lidar = DeclareLaunchArgument('invert_lidar', default_value='false',
                           description='Invert LaserScan angles when left/right are mirrored')
+    #####################################################################################################
+    
     arg_lidar_yaw_offset = DeclareLaunchArgument('lidar_yaw_offset', default_value='3.14159265359',
                           description='LaserScan angular offset in radians; pi flips front/back')
+    #####################################################################################################
+    
     arg_navigation = DeclareLaunchArgument('navigation', default_value='false',
                           description='Navegación autónoma A* + steering_controller + obstacle_avoidance. '
                                       'Requiere /map disponible. Enviar /goal_pose por RViz (G → 2D Nav Goal).')
+    #####################################################################################################
+    
     arg_use_map    = DeclareLaunchArgument('use_map', default_value='false',
                           description='Carga mapa PNG estático: activa map_server_node (/map) y '
                                       'aruco_map_odom (map→odom). Combinar con slam:=false mcl:=false '
                                       'kalman:=true aruco:=true para localización EKF sobre mapa conocido.')
+    #####################################################################################################
 
     slam_en      = LaunchConfiguration('slam')
     mcl_en       = LaunchConfiguration('mcl')
@@ -134,8 +156,6 @@ def generate_launch_description():
     lidar_topic  = LaunchConfiguration('lidar_topic')
     invert_lidar = LaunchConfiguration('invert_lidar')
     lidar_yaw_offset = LaunchConfiguration('lidar_yaw_offset')
-    web_bridge_en = LaunchConfiguration('web_bridge')
-    artifact_dir  = LaunchConfiguration('artifact_dir')
 
     # slam_node publica map→odom cuando NO hay otro nodo dueño de ese TF.
     #
@@ -505,8 +525,6 @@ def generate_launch_description():
         arg_aruco,
         arg_viewer,
         arg_rviz,
-        arg_web_bridge,
-        arg_artifact_dir,
         arg_lidar_topic,
         arg_invert_lidar,
         arg_lidar_yaw_offset,
@@ -530,7 +548,6 @@ def generate_launch_description():
         mcl,
         map_server,
         obstacle_avoidance,
-        pd_controller_direct,
         # Navegación autónoma A* completa (navigation:=true)
         navigation_stack,
         # Visualización — archivo RViz según modo

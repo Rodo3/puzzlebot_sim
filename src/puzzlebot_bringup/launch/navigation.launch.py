@@ -168,18 +168,6 @@ def generate_launch_description():
         condition=UnlessCondition(use_pd),
     )
 
-    # ── PD Controller — ALTERNATIVA para navegación punto a punto ─────────
-    # Suscribe: /odom, /goal_pose (directo, no usa /planned_path)
-    # Publica:  /cmd_vel_steering
-    pd_controller = Node(
-        package='puzzlebot_controller',
-        executable='pd_controller_node',
-        name='pd_controller_node',
-        parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
-        remappings=[('/cmd_vel_in', '/cmd_vel_steering')],
-        output='screen',
-        condition=IfCondition(use_pd),
-    )
 
     # ── Bug Navigation (capa reactiva entre controller y obstacle_avoidance) ──
     # Suscribe: /cmd_vel_steering, /scan_stamped, /odom, /goal_pose
@@ -219,7 +207,6 @@ def generate_launch_description():
         arg_cmd_vel_topic,
         path_planner,
         steering_controller,
-        pd_controller,
         bug_navigation,
         obstacle_avoidance,
     ])
