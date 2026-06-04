@@ -33,7 +33,6 @@ const TABS = [
   { id: 'mode',      label: 'Modo' },
   { id: 'waypoints', label: 'Waypoints' },
   { id: 'voice',     label: 'Voz' },
-  { id: 'metrics',   label: 'Métricas' },
   { id: 'elevator',  label: 'Elevador' },
 ];
 
@@ -72,10 +71,12 @@ export default function App() {
   const [mapSource,      setMapSource]      = useState('live');
 
   // ── Metrics state ───────────────────────────────────────────────────────────
-  const [velHistory,    setVelHistory]    = useState([]);   // [{time, linear, angular}]
-  const [lidarHist,     setLidarHist]     = useState([]);   // [{time, min}]
-  const [domStateLog,   setDomStateLog]   = useState([]);   // [{time, state}]
-  const [sessionStats,  setSessionStats]  = useState(makeSessionStats);
+  const [velHistory,       setVelHistory]       = useState([]);
+  const [lidarHist,        setLidarHist]        = useState([]);
+  const [domStateLog,      setDomStateLog]      = useState([]);
+  const [sessionStats,     setSessionStats]     = useState(makeSessionStats);
+  const [metricsOpen,      setMetricsOpen]      = useState(false);
+  const [metricsFullscreen, setMetricsFullscreen] = useState(false);
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const clientRef      = useRef(null);
@@ -368,21 +369,62 @@ export default function App() {
               {activeTab === 'voice' && (
                 <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />
               )}
-              {activeTab === 'metrics' && (
-                <MetricsPanel
-                  velHistory={velHistory}
-                  lidarHist={lidarHist}
-                  domStateLog={domStateLog}
-                  sessionStats={sessionStats}
-                  onReset={handleResetSession}
-                />
-              )}
               {activeTab === 'elevator' && (
                 <ElevatorPanel connected={connected} onCommand={handleCommand} />
               )}
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── Metrics bar (Option A) ── */}
+      <div className={`metrics-bar ${metricsOpen ? 'metrics-bar-open' : ''}`}>
+        <div
+          className="metrics-bar-header"
+          onClick={() => setMetricsOpen(v => !v)}
+          title={metricsOpen ? 'Colapsar métricas' : 'Expandir métricas'}
+        >
+          <span className="metrics-bar-chevron">{metricsOpen ? '▼' : '▶'}</span>
+          <span className="metrics-bar-title">MÉTRICAS</span>
+
+          {/* Mini stats always visible — at a glance even when collapsed */}
+          <div className="metrics-bar-mini">
+            <span className="metrics-mini-stat">
+              <span className="metrics-mini-label">dist</span>
+              <b>{sessionStats.distanceTraveled.toFixed(1)}m</b>
+            </span>
+            <span className="metrics-mini-stat">
+              <span className="metrics-mini-label">vel max</span>
+              <b>{sessionStats.maxLinearVel.toFixed(2)}m/s</b>
+            </span>
+            <span className="metrics-mini-stat" style={{ color: 'var(--warn)' }}>
+              <span className="metrics-mini-label">replans</span>
+              <b>{sessionStats.replanCount}</b>
+            </span>
+            <span className="metrics-mini-stat" style={{ color: 'var(--err)' }}>
+              <span className="metrics-mini-label">stops</span>
+              <b>{sessionStats.obstacleStops}</b>
+            </span>
+          </div>
+
+          {/* Controls — stopPropagation so they don't toggle the bar */}
+          <div className="metrics-bar-actions" onClick={e => e.stopPropagation()}>
+            <button className="btn-sm" onClick={handleResetSession} title="Reiniciar sesión">↺</button>
+            <button className="btn-sm btn-sm-accent" onClick={() => setMetricsFullscreen(true)} title="Ver en pantalla completa (Opción B)">⛶</button>
+          </div>
+        </div>
+
+        {metricsOpen && (
+          <div className="metrics-bar-body">
+            <MetricsPanel
+              velHistory={velHistory}
+              lidarHist={lidarHist}
+              domStateLog={domStateLog}
+              sessionStats={sessionStats}
+              onReset={handleResetSession}
+            />
+          </div>
+        )}
       </div>
 
       {/* ── Footer ── */}
@@ -396,6 +438,36 @@ export default function App() {
         />
         <LogsPanel logs={logs} />
       </footer>
+
+      {/* ── Fullscreen metrics overlay (Option B) ── */}
+      {metricsFullscreen && (
+        <div className="metrics-overlay">
+          <div className="metrics-overlay-header">
+            <span className="metrics-overlay-title">📊 MÉTRICAS — VISTA COMPLETA</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="btn-sm btn-sm-accent"
+                onClick={() => { setMetricsOpen(true); setMetricsFullscreen(false); }}
+                title="Volver a vista de barra"
+              >⊡ Barra</button>
+              <button
+                className="btn-sm btn-sm-green"
+                onClick={() => setMetricsFullscreen(false)}
+                title="Cerrar"
+              >✕ Cerrar</button>
+            </div>
+          </div>
+          <div className="metrics-overlay-body">
+            <MetricsPanel
+              velHistory={velHistory}
+              lidarHist={lidarHist}
+              domStateLog={domStateLog}
+              sessionStats={sessionStats}
+              onReset={handleResetSession}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
