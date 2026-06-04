@@ -10,31 +10,46 @@ import TeleopPanel       from './components/TeleopPanel.jsx';
 import WaypointPanel     from './components/WaypointPanel.jsx';
 import LogsPanel         from './components/LogsPanel.jsx';
 import ElevatorPanel     from './components/ElevatorPanel.jsx';
+import MetricsPanel      from './components/MetricsPanel.jsx';
 
 const WS_URL            = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
-const ROBOT_ENV         = import.meta.env.VITE_ROBOT_ENV ?? 'sim';   // 'sim' | 'real'
+const ROBOT_ENV         = import.meta.env.VITE_ROBOT_ENV ?? 'sim';
 const MAX_TRAJECTORY    = 500;
 const MAX_LOGS          = 50;
 const MAX_VOICE_HISTORY = 20;
+const MAX_METRICS       = 400;   // max points per time-series
+const METRICS_MIN_DT    = 0.15;  // min seconds between stored metric points (throttle)
 
 function nowStr() { return new Date().toLocaleTimeString(); }
 
-// Color class for each DOM FSM state
 function navStateClass(state) {
   if (!state || state === 'NORMAL')         return 'nav-state-normal';
   if (state === 'FOLLOW_NEW_PATH')          return 'nav-state-follow';
   if (state === 'BRAKE_FOR_REPLAN' || state === 'REPLAN') return 'nav-state-replan';
-  return 'nav-state-recovery'; // RECOVERY_REVERSE, RECOVERY_TURN, SAFE_STOP
+  return 'nav-state-recovery';
 }
 
 const TABS = [
   { id: 'mode',      label: 'Modo' },
   { id: 'waypoints', label: 'Waypoints' },
   { id: 'voice',     label: 'Voz' },
+  { id: 'metrics',   label: 'Métricas' },
   { id: 'elevator',  label: 'Elevador' },
 ];
 
+function makeSessionStats() {
+  return {
+    startTime:        Date.now() / 1000,
+    distanceTraveled: 0,
+    obstacleStops:    0,
+    replanCount:      0,
+    maxLinearVel:     0,
+    goalsSent:        0,
+  };
+}
+
 export default function App() {
+  // ── Core robot data ─────────────────────────────────────────────────────────
   const [connected,      setConnected]      = useState(false);
   const [lastUpdate,     setLastUpdate]     = useState(null);
   const [robotState,     setRobotState]     = useState(null);
@@ -56,9 +71,20 @@ export default function App() {
   const [availableMaps,  setAvailableMaps]  = useState([]);
   const [mapSource,      setMapSource]      = useState('live');
 
-  const clientRef   = useRef(null);
-  const navStateRef = useRef('NORMAL'); // track prev for transition logging
+  // ── Metrics state ───────────────────────────────────────────────────────────
+  const [velHistory,    setVelHistory]    = useState([]);   // [{time, linear, angular}]
+  const [lidarHist,     setLidarHist]     = useState([]);   // [{time, min}]
+  const [domStateLog,   setDomStateLog]   = useState([]);   // [{time, state}]
+  const [sessionStats,  setSessionStats]  = useState(makeSessionStats);
 
+  // ── Refs ────────────────────────────────────────────────────────────────────
+  const clientRef      = useRef(null);
+  const navStateRef    = useRef('NORMAL');
+  const prevPoseRef    = useRef(null);
+  const lastVelTimeRef = useRef(0);
+  const lastLidTimeRef = useRef(0);
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
   const addLog = useCallback((msg) => {
     setLogs(prev => [...prev.slice(-(MAX_LOGS - 1)), { time: nowStr(), msg }]);
   }, []);
@@ -73,40 +99,108 @@ export default function App() {
     sendCommand(data);
   }, [sendCommand]);
 
+  // ── WebSocket message handler ────────────────────────────────────────────────
   const handleMessage = useCallback((msg) => {
     setLastUpdate(msg.timestamp ?? Date.now() / 1000);
 
     switch (msg.type) {
-      case 'robot_state':
+
+      case 'robot_state': {
         setRobotState(msg);
         setTrajectory(prev => {
           const next = [...prev, msg.pose];
           return next.length > MAX_TRAJECTORY ? next.slice(-MAX_TRAJECTORY) : next;
         });
+        // Accumulate distance traveled
+        if (prevPoseRef.current && msg.pose) {
+          const dx   = msg.pose.x - prevPoseRef.current.x;
+          const dy   = msg.pose.y - prevPoseRef.current.y;
+          const dist = Math.hypot(dx, dy);
+          // Guard against teleport artifacts and pure noise
+          if (dist > 0.001 && dist < 0.5) {
+            setSessionStats(prev => ({
+              ...prev,
+              distanceTraveled: prev.distanceTraveled + dist,
+            }));
+          }
+        }
+        prevPoseRef.current = msg.pose ?? null;
         break;
-      case 'scan':
+      }
+
+      case 'scan': {
         setScanData(msg);
+        const t = msg.timestamp ?? Date.now() / 1000;
+        if (t - lastLidTimeRef.current >= METRICS_MIN_DT) {
+          const ranges = Array.isArray(msg.ranges)
+            ? msg.ranges.filter(r => isFinite(r) && r > 0.05)
+            : [];
+          if (ranges.length > 0) {
+            const minDist = Math.min(...ranges);
+            setLidarHist(prev => {
+              const next = [...prev, { time: t, min: minDist }];
+              return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
+            });
+            lastLidTimeRef.current = t;
+          }
+        }
         break;
+      }
+
       case 'map':
         setMapData(msg);
         break;
+
       case 'augmented_map':
         setAugMapData(msg);
         break;
+
       case 'nav_state': {
         const s = msg.state ?? 'NORMAL';
         setNavState(s);
         if (s !== navStateRef.current) {
           addLog(`DOM: ${navStateRef.current} → ${s}`);
+          const t = msg.timestamp ?? Date.now() / 1000;
+          setDomStateLog(prev => {
+            const next = [...prev, { time: t, state: s }];
+            return next.length > 500 ? next.slice(-500) : next;
+          });
+          if (s === 'REPLAN' || s === 'BRAKE_FOR_REPLAN') {
+            setSessionStats(prev => ({ ...prev, replanCount: prev.replanCount + 1 }));
+          }
+          if (s === 'SAFE_STOP') {
+            setSessionStats(prev => ({ ...prev, obstacleStops: prev.obstacleStops + 1 }));
+          }
           navStateRef.current = s;
         }
         break;
       }
-      case 'velocity_command':
-        if (msg.source === 'cmd_vel')          setCmdVel(msg);
+
+      case 'velocity_command': {
+        if (msg.source === 'cmd_vel') {
+          setCmdVel(msg);
+          const t = msg.timestamp ?? Date.now() / 1000;
+          if (t - lastVelTimeRef.current >= METRICS_MIN_DT) {
+            setVelHistory(prev => {
+              const next = [...prev, {
+                time:    t,
+                linear:  msg.linear_x  ?? 0,
+                angular: msg.angular_z ?? 0,
+              }];
+              return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
+            });
+            setSessionStats(prev => ({
+              ...prev,
+              maxLinearVel: Math.max(prev.maxLinearVel, Math.abs(msg.linear_x ?? 0)),
+            }));
+            lastVelTimeRef.current = t;
+          }
+        }
         if (msg.source === 'cmd_vel_in')       setCmdVelIn(msg);
         if (msg.source === 'cmd_vel_steering') setCmdVelSteering(msg);
         break;
+      }
+
       case 'voice_command':
         setVoiceData(msg);
         if (msg.command) {
@@ -114,12 +208,15 @@ export default function App() {
           addLog(`Voice: ${msg.command}`);
         }
         break;
+
       case 'camera_frame':
         setCameraData(msg);
         break;
+
       case 'available_maps':
         setAvailableMaps(msg.maps ?? []);
         break;
+
       default:
         break;
     }
@@ -135,9 +232,11 @@ export default function App() {
     return () => client.close();
   }, [handleMessage, addLog]);
 
+  // ── Action callbacks ─────────────────────────────────────────────────────────
   const handleGoalPose = useCallback(({ x, y, theta = 0 }) => {
     sendCommand({ type: 'goal_pose', x, y, theta });
     setGoalMarker({ x, y });
+    setSessionStats(prev => ({ ...prev, goalsSent: prev.goalsSent + 1 }));
     addLog(`Goal → (${x.toFixed(2)}, ${y.toFixed(2)})`);
   }, [sendCommand, addLog]);
 
@@ -154,14 +253,26 @@ export default function App() {
     addLog(`Mode → ${newMode}`);
   }, [addLog]);
 
+  const handleResetSession = useCallback(() => {
+    setSessionStats(makeSessionStats());
+    setVelHistory([]);
+    setLidarHist([]);
+    setDomStateLog([]);
+    prevPoseRef.current   = null;
+    lastVelTimeRef.current = 0;
+    lastLidTimeRef.current = 0;
+    addLog('Metrics session reset');
+  }, [addLog]);
+
+  // ── Header topic dots ────────────────────────────────────────────────────────
   const topicDots = [
-    { key: 'odom',     label: 'odom',  active: !!robotState },
-    { key: 'scan',     label: 'scan',  active: !!scanData },
-    { key: 'map',      label: 'map',   active: !!mapData },
-    { key: 'aug',      label: 'aug',   active: !!augMapData },
-    { key: 'vel',      label: 'vel',   active: !!cmdVel },
-    { key: 'cam',      label: 'cam',   active: !!cameraData },
-    { key: 'voice',    label: 'voice', active: !!voiceData },
+    { key: 'odom',  label: 'odom',  active: !!robotState },
+    { key: 'scan',  label: 'scan',  active: !!scanData },
+    { key: 'map',   label: 'map',   active: !!mapData },
+    { key: 'aug',   label: 'aug',   active: !!augMapData },
+    { key: 'vel',   label: 'vel',   active: !!cmdVel },
+    { key: 'cam',   label: 'cam',   active: !!cameraData },
+    { key: 'voice', label: 'voice', active: !!voiceData },
   ];
 
   return (
@@ -186,15 +297,12 @@ export default function App() {
             </div>
           ))}
         </div>
-        {/* Environment badge — shows SIM or REAL prominently */}
         <span className={`env-badge env-badge-${ROBOT_ENV}`}>
           {ROBOT_ENV.toUpperCase()}
         </span>
-        {/* Mode pill */}
         <span className={`mode-pill mode-pill-${mode}`}>
           {mode === 'mapping' ? 'MAPPING' : 'NAV'}
         </span>
-        {/* DOM FSM state — only meaningful in navigation */}
         {mode === 'navigation' && (
           <span className={`nav-state-pill ${navStateClass(navState)}`}>
             {navState.replace(/_/g, ' ')}
@@ -219,16 +327,13 @@ export default function App() {
 
         {/* Right column */}
         <div className="col-right">
-          {/* Sensors row: LiDAR + Camera */}
           <div className="sensors-row">
             <LidarView scanData={scanData} />
             <CameraPanel cameraData={cameraData} />
           </div>
 
-          {/* Teleop */}
           <TeleopPanel connected={connected} onCommand={sendCommand} />
 
-          {/* Tabs card */}
           <div className="tabs-card">
             <div className="tabs-header">
               {TABS.map(t => (
@@ -262,6 +367,15 @@ export default function App() {
               )}
               {activeTab === 'voice' && (
                 <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />
+              )}
+              {activeTab === 'metrics' && (
+                <MetricsPanel
+                  velHistory={velHistory}
+                  lidarHist={lidarHist}
+                  domStateLog={domStateLog}
+                  sessionStats={sessionStats}
+                  onReset={handleResetSession}
+                />
               )}
               {activeTab === 'elevator' && (
                 <ElevatorPanel connected={connected} onCommand={handleCommand} />

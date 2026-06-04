@@ -691,3 +691,97 @@ hr {
 /* ── Helpers ──────────────────────────────────────────── */
 .muted { color: var(--muted); }
 .small { font-size: 11px; }
+
+/* ── Metrics panel ────────────────────────────────────── */
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metrics-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Counter cards row */
+.metrics-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.metric-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.metric-value {
+  font-size: 17px;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.metric-unit {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: -2px;
+}
+
+.metric-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Chart sections */
+.chart-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chart-title {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+
+.chart-body {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 4px 2px;
+  overflow: hidden;
+}
+
+/* DOM state legend below timeline */
+.dom-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 2px 0;
+}
+
+.dom-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.dom-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
