@@ -44,6 +44,8 @@ function makeSessionStats() {
     replanCount:      0,
     maxLinearVel:     0,
     goalsSent:        0,
+    arucoCount:       0,
+    scanMatchCount:   0,
   };
 }
 
@@ -69,21 +71,28 @@ export default function App() {
   const [activeTab,      setActiveTab]      = useState('mode');
   const [availableMaps,  setAvailableMaps]  = useState([]);
   const [mapSource,      setMapSource]      = useState('live');
+  const [mainView,       setMainView]       = useState('robot'); // 'robot' | 'metrics'
 
   // ── Metrics state ───────────────────────────────────────────────────────────
-  const [velHistory,       setVelHistory]       = useState([]);
-  const [lidarHist,        setLidarHist]        = useState([]);
-  const [domStateLog,      setDomStateLog]      = useState([]);
-  const [sessionStats,     setSessionStats]     = useState(makeSessionStats);
-  const [metricsOpen,      setMetricsOpen]      = useState(false);
-  const [metricsFullscreen, setMetricsFullscreen] = useState(false);
+  const [velHistory,     setVelHistory]     = useState([]);
+  const [lidarHist,      setLidarHist]      = useState([]);
+  const [domStateLog,    setDomStateLog]    = useState([]);
+  const [sessionStats,   setSessionStats]   = useState(makeSessionStats);
+  // Localization metrics
+  const [poseHist,       setPoseHist]       = useState([]);  // [{time,x,y,theta}]  Kalman
+  const [kalmanCovHist,  setKalmanCovHist]  = useState([]);  // [{time,traceP,pTheta}]
+  const [locErrorHist,   setLocErrorHist]   = useState([]);  // [{time,error_xy,error_theta}] Kalman vs SLAM
+  const [arucoEvents,    setArucoEvents]    = useState([]);  // [{time,x,y,theta,cov_xy,innovation}]
+  const [scanMatchHist,  setScanMatchHist]  = useState([]);  // [{time,x,y,cov_xy}]
 
   // ── Refs ────────────────────────────────────────────────────────────────────
-  const clientRef      = useRef(null);
-  const navStateRef    = useRef('NORMAL');
-  const prevPoseRef    = useRef(null);
-  const lastVelTimeRef = useRef(0);
-  const lastLidTimeRef = useRef(0);
+  const clientRef         = useRef(null);
+  const navStateRef       = useRef('NORMAL');
+  const prevPoseRef       = useRef(null);
+  const lastVelTimeRef    = useRef(0);
+  const lastLidTimeRef    = useRef(0);
+  const lastKalTimeRef    = useRef(0);
+  const latestKalmanPose  = useRef(null);  // latest raw Kalman pose for innovation calc
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   const addLog = useCallback((msg) => {
@@ -117,7 +126,6 @@ export default function App() {
           const dx   = msg.pose.x - prevPoseRef.current.x;
           const dy   = msg.pose.y - prevPoseRef.current.y;
           const dist = Math.hypot(dx, dy);
-          // Guard against teleport artifacts and pure noise
           if (dist > 0.001 && dist < 0.5) {
             setSessionStats(prev => ({
               ...prev,
@@ -126,6 +134,39 @@ export default function App() {
           }
         }
         prevPoseRef.current = msg.pose ?? null;
+        // Always update latest raw Kalman pose (for innovation calc)
+        if (msg.kalman_pose) latestKalmanPose.current = msg.kalman_pose;
+        // Localization metrics — throttled
+        const t = msg.timestamp ?? Date.now() / 1000;
+        if (t - lastKalTimeRef.current >= METRICS_MIN_DT) {
+          // Kalman pose history (raw odom estimate)
+          const kp = msg.kalman_pose ?? msg.pose;
+          if (kp) {
+            setPoseHist(prev => {
+              const next = [...prev, { time: t, x: kp.x, y: kp.y, theta: kp.theta }];
+              return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
+            });
+          }
+          // Kalman covariance
+          if (msg.cov_xx != null && msg.cov_yy != null) {
+            const traceP = (msg.cov_xx ?? 0) + (msg.cov_yy ?? 0);
+            setKalmanCovHist(prev => {
+              const next = [...prev, { time: t, traceP, pTheta: msg.cov_tt ?? 0 }];
+              return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
+            });
+          }
+          // Localization error: Kalman vs SLAM (only when both available)
+          if (msg.kalman_pose && msg.slam_pose) {
+            const dx  = msg.slam_pose.x - msg.kalman_pose.x;
+            const dy  = msg.slam_pose.y - msg.kalman_pose.y;
+            const dth = Math.abs(msg.slam_pose.theta - msg.kalman_pose.theta);
+            setLocErrorHist(prev => {
+              const next = [...prev, { time: t, error_xy: Math.hypot(dx, dy), error_theta: dth }];
+              return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
+            });
+          }
+          lastKalTimeRef.current = t;
+        }
         break;
       }
 
@@ -218,6 +259,45 @@ export default function App() {
         setAvailableMaps(msg.maps ?? []);
         break;
 
+      case 'aruco_pose': {
+        const t = msg.timestamp ?? Date.now() / 1000;
+        // Innovation = distance between ArUco measurement and current Kalman estimate
+        let innovation = null;
+        if (latestKalmanPose.current) {
+          const dx = (msg.x ?? 0) - latestKalmanPose.current.x;
+          const dy = (msg.y ?? 0) - latestKalmanPose.current.y;
+          innovation = Math.hypot(dx, dy);
+        }
+        setArucoEvents(prev => {
+          const next = [...prev, {
+            time:       t,
+            x:          msg.x ?? 0,
+            y:          msg.y ?? 0,
+            theta:      msg.theta ?? 0,
+            cov_xy:     (msg.cov_xx ?? 0) + (msg.cov_yy ?? 0),
+            innovation: innovation ?? 0,
+          }];
+          return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
+        });
+        setSessionStats(prev => ({ ...prev, arucoCount: prev.arucoCount + 1 }));
+        break;
+      }
+
+      case 'scan_match_pose': {
+        const t = msg.timestamp ?? Date.now() / 1000;
+        setScanMatchHist(prev => {
+          const next = [...prev, {
+            time:   t,
+            x:      msg.x ?? 0,
+            y:      msg.y ?? 0,
+            cov_xy: ((msg.cov_xx ?? 0) + (msg.cov_yy ?? 0)),
+          }];
+          return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
+        });
+        setSessionStats(prev => ({ ...prev, scanMatchCount: prev.scanMatchCount + 1 }));
+        break;
+      }
+
       default:
         break;
     }
@@ -259,9 +339,15 @@ export default function App() {
     setVelHistory([]);
     setLidarHist([]);
     setDomStateLog([]);
-    prevPoseRef.current   = null;
+    setPoseHist([]);
+    setKalmanCovHist([]);
+    setLocErrorHist([]);
+    setArucoEvents([]);
+    setScanMatchHist([]);
+    prevPoseRef.current    = null;
     lastVelTimeRef.current = 0;
     lastLidTimeRef.current = 0;
+    lastKalTimeRef.current = 0;
     addLog('Metrics session reset');
   }, [addLog]);
 
@@ -272,6 +358,7 @@ export default function App() {
     { key: 'map',   label: 'map',   active: !!mapData },
     { key: 'aug',   label: 'aug',   active: !!augMapData },
     { key: 'vel',   label: 'vel',   active: !!cmdVel },
+    { key: 'aruco', label: 'aruco', active: arucoEvents.length > 0 },
     { key: 'cam',   label: 'cam',   active: !!cameraData },
     { key: 'voice', label: 'voice', active: !!voiceData },
   ];
@@ -281,6 +368,16 @@ export default function App() {
       {/* ── Header ── */}
       <header className="header">
         <span className="header-title">PUZZLEBOT LIVE DASHBOARD</span>
+        <div className="view-tabs">
+          <button
+            className={`view-tab ${mainView === 'robot'   ? 'view-tab-active' : ''}`}
+            onClick={() => setMainView('robot')}
+          >Robot</button>
+          <button
+            className={`view-tab ${mainView === 'metrics' ? 'view-tab-active' : ''}`}
+            onClick={() => setMainView('metrics')}
+          >Métricas</button>
+        </div>
         <span className="header-sep">|</span>
         <span className={`conn-badge ${connected ? 'conn-ok' : 'conn-err'}`}>
           {connected ? 'Connected' : 'Disconnected'}
@@ -311,8 +408,26 @@ export default function App() {
         )}
       </header>
 
-      {/* ── Main area ── */}
-      <div className="main-area">
+      {/* ── Metrics full-screen view ── */}
+      {mainView === 'metrics' && (
+        <div className="metrics-view">
+          <MetricsPanel
+            velHistory={velHistory}
+            lidarHist={lidarHist}
+            domStateLog={domStateLog}
+            poseHist={poseHist}
+            kalmanCovHist={kalmanCovHist}
+            locErrorHist={locErrorHist}
+            arucoEvents={arucoEvents}
+            scanMatchHist={scanMatchHist}
+            sessionStats={sessionStats}
+            onReset={handleResetSession}
+          />
+        </div>
+      )}
+
+      {/* ── Robot view ── */}
+      {mainView === 'robot' && <div className="main-area">
         {/* SLAM map column */}
         <div className="col-slam">
           <SlamMap
@@ -379,59 +494,9 @@ export default function App() {
           </div>
           </div>{/* end col-right-scroll */}
         </div>
-      </div>
+      </div>}{/* end robot view */}
 
-      {/* ── Metrics bar (Option A) ── */}
-      <div className={`metrics-bar ${metricsOpen ? 'metrics-bar-open' : ''}`}>
-        <div
-          className="metrics-bar-header"
-          onClick={() => setMetricsOpen(v => !v)}
-          title={metricsOpen ? 'Colapsar métricas' : 'Expandir métricas'}
-        >
-          <span className="metrics-bar-chevron">{metricsOpen ? '▼' : '▶'}</span>
-          <span className="metrics-bar-title">MÉTRICAS</span>
-
-          {/* Mini stats always visible — at a glance even when collapsed */}
-          <div className="metrics-bar-mini">
-            <span className="metrics-mini-stat">
-              <span className="metrics-mini-label">dist</span>
-              <b>{sessionStats.distanceTraveled.toFixed(1)}m</b>
-            </span>
-            <span className="metrics-mini-stat">
-              <span className="metrics-mini-label">vel max</span>
-              <b>{sessionStats.maxLinearVel.toFixed(2)}m/s</b>
-            </span>
-            <span className="metrics-mini-stat" style={{ color: 'var(--warn)' }}>
-              <span className="metrics-mini-label">replans</span>
-              <b>{sessionStats.replanCount}</b>
-            </span>
-            <span className="metrics-mini-stat" style={{ color: 'var(--err)' }}>
-              <span className="metrics-mini-label">stops</span>
-              <b>{sessionStats.obstacleStops}</b>
-            </span>
-          </div>
-
-          {/* Controls — stopPropagation so they don't toggle the bar */}
-          <div className="metrics-bar-actions" onClick={e => e.stopPropagation()}>
-            <button className="btn-sm" onClick={handleResetSession} title="Reiniciar sesión">↺</button>
-            <button className="btn-sm btn-sm-accent" onClick={() => setMetricsFullscreen(true)} title="Ver en pantalla completa (Opción B)">⛶</button>
-          </div>
-        </div>
-
-        <div className={`metrics-bar-collapse ${metricsOpen ? 'metrics-bar-collapse-open' : ''}`}>
-          <div className="metrics-bar-body">
-            <MetricsPanel
-              velHistory={velHistory}
-              lidarHist={lidarHist}
-              domStateLog={domStateLog}
-              sessionStats={sessionStats}
-              onReset={handleResetSession}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* ── Footer ── */}
+      {/* ── Footer (always visible) ── */}
       <footer className="footer">
         <VelocityPanel
           cmdVel={cmdVel}
@@ -443,35 +508,6 @@ export default function App() {
         <LogsPanel logs={logs} />
       </footer>
 
-      {/* ── Fullscreen metrics overlay (Option B) ── */}
-      {metricsFullscreen && (
-        <div className="metrics-overlay">
-          <div className="metrics-overlay-header">
-            <span className="metrics-overlay-title">📊 MÉTRICAS — VISTA COMPLETA</span>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                className="btn-sm btn-sm-accent"
-                onClick={() => { setMetricsOpen(true); setMetricsFullscreen(false); }}
-                title="Volver a vista de barra"
-              >⊡ Barra</button>
-              <button
-                className="btn-sm btn-sm-green"
-                onClick={() => setMetricsFullscreen(false)}
-                title="Cerrar"
-              >✕ Cerrar</button>
-            </div>
-          </div>
-          <div className="metrics-overlay-body">
-            <MetricsPanel
-              velHistory={velHistory}
-              lidarHist={lidarHist}
-              domStateLog={domStateLog}
-              sessionStats={sessionStats}
-              onReset={handleResetSession}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

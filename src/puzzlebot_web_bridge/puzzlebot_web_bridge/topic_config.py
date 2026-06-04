@@ -10,6 +10,8 @@ DEFAULT_TOPICS = {
     'cmd_vel_steering':       '/cmd_vel_steering',   # steering controller output (pre-DOM)
     'dom_state':              '/dom/state',           # dynamic_obstacle_manager FSM state
     'augmented_map':          '/augmented_map',       # map + injected dynamic obstacles
+    'aruco_pose':             '/aruco/pose',          # PoseWithCovarianceStamped — ArUco corrections
+    'scan_match_pose':        '/scan_match/pose',     # PoseWithCovarianceStamped — scan match result
     'camera':                 '/camera/image/compressed',
     'voice_command':          '/voice/command',
     'voice_confidence':       '/voice/confidence',
@@ -34,6 +36,8 @@ RATE_LIMITS_HZ = {
     'map':                       1.0,
     'augmented_map':             1.0,
     'dom_state':                 5.0,
+    'aruco_pose':                5.0,
+    'scan_match_pose':           5.0,
     'camera':                   10.0,
     'voice_command':             0.0,
     'voice_confidence':          0.0,

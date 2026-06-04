@@ -32,7 +32,7 @@ import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, LaserScan
@@ -43,6 +43,7 @@ from .serializers import (
     camera_to_json,
     map_to_json,
     odom_to_json,
+    pose_with_cov_to_json,
     scan_to_json,
     twist_to_json,
     voice_to_json,
@@ -88,6 +89,8 @@ class BridgeNode(Node):
         self.declare_parameter('cmd_vel_steering_topic', DEFAULT_TOPICS['cmd_vel_steering'])
         self.declare_parameter('dom_state_topic',        DEFAULT_TOPICS['dom_state'])
         self.declare_parameter('augmented_map_topic',    DEFAULT_TOPICS['augmented_map'])
+        self.declare_parameter('aruco_pose_topic',       DEFAULT_TOPICS['aruco_pose'])
+        self.declare_parameter('scan_match_pose_topic',  DEFAULT_TOPICS['scan_match_pose'])
 
         # Rate limiters — one per rate-limited topic key.
         self._rl = {
@@ -223,6 +226,16 @@ class BridgeNode(Node):
             self._aug_map_cb, 1)
 
         self.create_subscription(
+            PoseWithCovarianceStamped,
+            self.get_parameter('aruco_pose_topic').get_parameter_value().string_value,
+            self._aruco_pose_cb, 10)
+
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            self.get_parameter('scan_match_pose_topic').get_parameter_value().string_value,
+            self._scan_match_cb, 10)
+
+        self.create_subscription(
             String,
             self.get_parameter('voice_command_topic').get_parameter_value().string_value,
             self._voice_command_cb, 10)
@@ -315,9 +328,10 @@ class BridgeNode(Node):
     def _odom_cb(self, msg: Odometry):
         if self._rl['odom'].should_send():
             payload = odom_to_json(msg)
-            # Override pose with map-frame pose from slam_node when available
+            # kalman_pose stays as raw Kalman estimate; pose gets SLAM override for display
             if self._map_pose is not None:
-                payload['pose'] = self._map_pose
+                payload['pose']      = self._map_pose
+                payload['slam_pose'] = self._map_pose
             self._ws.broadcast_sync(payload)
 
     def _scan_cb(self, msg: LaserScan):
@@ -350,6 +364,14 @@ class BridgeNode(Node):
             payload = map_to_json(msg)
             payload['type'] = 'augmented_map'
             self._ws.broadcast_sync(payload)
+
+    def _aruco_pose_cb(self, msg: PoseWithCovarianceStamped):
+        if self._rl['aruco_pose'].should_send():
+            self._ws.broadcast_sync(pose_with_cov_to_json(msg, 'aruco_pose'))
+
+    def _scan_match_cb(self, msg: PoseWithCovarianceStamped):
+        if self._rl['scan_match_pose'].should_send():
+            self._ws.broadcast_sync(pose_with_cov_to_json(msg, 'scan_match_pose'))
 
     # ------------------------------------------------------------------ #
     #  Voice callbacks — accumulate fields, send on command arrival

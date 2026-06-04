@@ -36,3 +36,6 @@ web_dashboard/.env
 *.bag
 *.db3
 *.mcap
+
+# Node
+node_modules/

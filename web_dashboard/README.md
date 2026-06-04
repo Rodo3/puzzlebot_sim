@@ -6,7 +6,7 @@ sends control commands (teleop, goal poses, waypoints, SLAM reset).
 
 ## Requirements
 
-- Node.js 18+ and npm (no ROS installation needed)
+- **Node.js 18+** and npm (Vite 5 requires Node 18 — install via `nvm install 18`)
 - `puzzlebot_web_bridge` running and reachable on the network
 
 ## Quick start
@@ -35,9 +35,7 @@ Open `http://localhost:5173` in your browser.
 |---|---|
 | `.env.sim`  | Gazebo simulation — bridge on localhost |
 | `.env.real` | Physical robot — edit `BRIDGE_IP` before use |
-| `.env.example` | Template with all available variables |
-
-Variables:
+| `.env.example` | Template with all variables |
 
 | Variable | Default | Description |
 |---|---|---|
@@ -46,51 +44,91 @@ Variables:
 
 ---
 
+## Layout
+
+```
+┌─ Header ─────────────────────────────────────────────────┐
+│ Title | Connected | topic dots | [SIM/REAL] [MODE] [DOM] │
+├─ Main area ──────────────────────┬───────────────────────┤
+│ SLAM Map (resizable)             │ LiDAR | Camera (fixed)│
+│                                  ├───────────────────────┤
+│                                  │ Teleop       ↑        │
+│                                  │ Tabs:        │ scroll  │
+│                                  │  Modo        │        │
+│                                  │  Waypoints   ↓        │
+│                                  │  Voz                  │
+│                                  │  Elevador             │
+├──────────────────────────────────┴───────────────────────┤
+│ ▶ MÉTRICAS  dist · vel · replans · stops  [↺] [⛶]       │
+├──────────────────────────────────────────────────────────┤
+│ Footer: Velocity pipeline | System Logs                  │
+└──────────────────────────────────────────────────────────┘
+```
+
+**LiDAR and Camera are pinned** — they stay visible regardless of scroll.
+Only Teleop + Tabs scroll within the right column.
+
+---
+
 ## Dashboard features
 
 ### Header
 - **Connected / Disconnected** badge
-- **Topic dots** — green when data is arriving: `odom`, `scan`, `map`, `aug` (augmented map), `vel`, `cam`, `voice`
+- **Topic dots** — green when data is arriving: `odom`, `scan`, `map`, `aug`, `vel`, `cam`, `voice`
 - **[SIM] / [REAL]** environment badge
 - **MAPPING / NAV** mode pill
-- **DOM FSM state** pill (navigation mode only): `NORMAL` / `FOLLOWING` / `REPLANNING` / `RECOVERY` / `SAFE STOP`
+- **DOM FSM state** pill (navigation mode only) — color-coded:
+  - Grey: `NORMAL`
+  - Cyan: `FOLLOWING`
+  - Yellow: `REPLANNING` / `BRAKING`
+  - Red: `RECOVERY` / `SAFE STOP`
 
 ### SLAM Map (left panel)
 - OccupancyGrid rendered on a 2D canvas
-- Robot position (blue circle + yellow arrow for heading)
+- Robot position (blue circle + yellow heading arrow)
 - Trajectory trace (cyan)
 - Goal marker (green circle + X)
-- **AUG / BASE toggle** — switches between the live SLAM map and the augmented
-  map (`/augmented_map`) that includes injected dynamic obstacles. The toggle
-  appears automatically once `/augmented_map` starts arriving.
+- **AUG / BASE toggle** — appears when `/augmented_map` is available; switches
+  between the base SLAM map and the obstacle-injected map used by the path planner
 - Zoom (scroll wheel, zoom-to-cursor), pan (drag), reset view (⌂)
-- **Click-to-goal** in navigation mode: click anywhere on the map to send a
-  `goal_pose` command
+- **Click-to-goal** in navigation mode
 
 ### Right column
-- **LiDAR** polar view (`/scan`, 5 Hz)
-- **Camera** JPEG stream (`/camera/image/compressed`, 10 Hz)
-- **Teleop D-pad** — arrow buttons + stop. Sends `cmd_vel` at 10 Hz while held.
-  Global `pointerup` ensures stop on release even outside the button.
-- **Tabs:**
-  - **Modo** — switch Mapping / Navigation, reset SLAM, load saved maps
-  - **Waypoints** — 11 predefined waypoints (from `waypoints.yaml`), active in
-    navigation mode only
+- **LiDAR** polar canvas — always visible (pinned above scroll area)
+- **Camera** JPEG stream — always visible (pinned above scroll area)
+- **Teleop D-pad** — sends `cmd_vel` at 10 Hz while held; global `pointerup` = auto-stop
+- **Tabs** (scroll independently):
+  - **Modo** — Mapping / Navigation toggle, SLAM reset, saved map loader
+  - **Waypoints** — 11 predefined waypoints, active in navigation mode only
   - **Voz** — voice command history, confidence scores, model ranking
   - **Elevador** — elevator stub (backend pending)
 
+### Metrics bar (collapsible)
+Sits between the main area and the footer. Always shows mini stats even when collapsed:
+
+```
+▶ MÉTRICAS   dist 2.3m   vel max 0.14m/s   replans 1   stops 0   [↺] [⛶]
+```
+
+Click to expand (up to 280px with scroll) and see:
+- **Session counter cards**: duration, distance, max speed, replan count, obstacle stops, goals sent
+- **Velocity chart**: linear + angular from `/cmd_vel` over time (SVG, no external libs)
+- **LiDAR min distance chart**: with red danger zone below 0.30 m
+- **DOM FSM state timeline**: color-coded horizontal bar per state transition
+- **↓ CSV** button: downloads all time series + session summary
+- **⎙ PDF** button: opens formatted print report → Save as PDF via browser
+
+**⛶ button** opens fullscreen overlay (Option B): covers the entire viewport
+for maximum chart readability. "⊡ Barra" returns to the collapsible bar.
+
 ### Footer
-- **Velocity panel** — shows the full velocity pipeline:
-  - `Steering` → steering_controller output (`/cmd_vel_steering`, shown in nav mode)
-  - `Pre-avoidance` → after dynamic_obstacle_manager (`/cmd_vel_in`)
-  - `Final /cmd_vel` → after obstacle_avoidance (what the robot actually executes)
-  - DOM FSM state badge (color-coded)
-  - `OBSTACLE STOP` / `CMD MODIFIED` badge when avoidance intervenes
-- **Logs** — frontend event log (connections, mode changes, DOM transitions, goal sends)
+- **Velocity panel**: full pipeline — Steering → Pre-avoidance (`/cmd_vel_in`) → Final (`/cmd_vel`)
+  + DOM state badge + obstacle stop / cmd modified detection
+- **System logs**: frontend event log (connections, mode changes, DOM transitions, goals)
 
 ---
 
-## Commands sent to the bridge (WebSocket → ROS)
+## Commands sent to the bridge
 
 ```json
 { "type": "cmd_vel",              "linear_x": 0.2, "angular_z": 0.5 }
@@ -105,51 +143,23 @@ Variables:
 
 ---
 
-## Messages received from the bridge (ROS → WebSocket)
-
-| `type` | Source topic | Rate |
-|---|---|---|
-| `robot_state` | `/odom` + `/slam/robot_pose_in_map` | 10 Hz |
-| `scan` | `/scan` | 5 Hz |
-| `map` | `/map` | 1 Hz |
-| `augmented_map` | `/augmented_map` | 1 Hz |
-| `nav_state` | `/dom/state` | 5 Hz |
-| `velocity_command` (source: `cmd_vel`) | `/cmd_vel` | 10 Hz |
-| `velocity_command` (source: `cmd_vel_in`) | `/cmd_vel_in` | 10 Hz |
-| `velocity_command` (source: `cmd_vel_steering`) | `/cmd_vel_steering` | 10 Hz |
-| `voice_command` | `/voice/*` | event-driven |
-| `camera_frame` | `/camera/image/compressed` | 10 Hz |
-| `available_maps` | bridge response to `list_maps` | on demand |
-
----
-
 ## Switching to physical robot
 
-The only things that change for the real robot:
-
-1. **Copy `.env.real`** → `.env` and set `BRIDGE_IP` to the robot PC's IP.
-2. **Launch the bridge with** `cmd_vel_out_topic:=/cmd_vel` (default, already correct
-   for the real robot — the `gz_sim.launch.py` overrides this for Gazebo).
-3. **Use** `real_slam_nav.launch.py` instead of `gz_slam_nav.launch.py`.
-
-The dashboard code itself requires no changes.
+1. `cp .env.real .env` and set `BRIDGE_IP` to the robot PC's IP
+2. Use `real_slam_nav.launch.py` instead of `gz_slam_nav.launch.py`
+3. Dashboard code requires **no changes**
 
 ---
 
 ## Viewing from a different machine
 
-Find the bridge PC's IP:
 ```bash
+# On bridge PC — find IP
 ip addr show | grep "inet " | grep -v 127
-```
-
-Open port 8000:
-```bash
 sudo ufw allow 8000
-```
 
-Set `VITE_WS_URL=ws://<BRIDGE_IP>:8000/ws` in `.env`, then:
-```bash
+# On dashboard PC — set URL, then run
+# Edit .env: VITE_WS_URL=ws://<BRIDGE_IP>:8000/ws
 npm run dev -- --host 0.0.0.0
 ```
 
@@ -159,28 +169,27 @@ npm run dev -- --host 0.0.0.0
 
 ```
 web_dashboard/
-  .env.sim              — simulation preset (cp to .env)
-  .env.real             — real robot preset (cp to .env, edit BRIDGE_IP)
-  .env.example          — template with all variables
+  .env.sim / .env.real / .env.example
   src/
-    App.jsx             — global state, WebSocket routing, header, layout
-    styles.css          — dark theme, all component styles
+    App.jsx                   — global state, WebSocket, metrics collection, layout
+    styles.css                — dark theme, all component styles
     services/
-      websocketClient.js  — WS connection with exponential auto-reconnect
+      websocketClient.js      — WS with exponential auto-reconnect
     components/
-      SlamMap.jsx         — 2D canvas: map, robot, trajectory, click-to-goal, aug toggle
-      LidarView.jsx       — polar LiDAR canvas
-      CameraPanel.jsx     — JPEG camera stream
-      TeleopPanel.jsx     — D-pad + velocity sliders
-      ModePanel.jsx       — mapping/nav toggle, saved map loader
-      WaypointPanel.jsx   — 11 named waypoints
-      VelocityPanel.jsx   — velocity pipeline + DOM state + obstacle badges
-      VoiceCommandPanel.jsx — voice command history
-      ElevatorPanel.jsx   — elevator stub
-      LogsPanel.jsx       — frontend event log
+      SlamMap.jsx             — 2D map canvas, AUG/BASE toggle, click-to-goal
+      LidarView.jsx           — polar LiDAR canvas (pinned)
+      CameraPanel.jsx         — JPEG camera stream (pinned)
+      TeleopPanel.jsx         — D-pad + velocity sliders
+      ModePanel.jsx           — mapping/nav toggle, saved map loader
+      WaypointPanel.jsx       — 11 named waypoints
+      VelocityPanel.jsx       — velocity pipeline + DOM state badges
+      VoiceCommandPanel.jsx   — voice command history
+      ElevatorPanel.jsx       — elevator stub
+      LogsPanel.jsx           — frontend event log
+      MetricsPanel.jsx        — session counters, SVG charts, CSV/PDF export
     utils/
-      geometry.js         — world→canvas coordinate helpers
-      mapUtils.js         — OccupancyGrid rendering
+      geometry.js             — canvas drawing helpers
+      mapUtils.js             — OccupancyGrid rendering
 ```
 
 ---
@@ -189,8 +198,7 @@ web_dashboard/
 
 ```bash
 npm run build     # output → web_dashboard/dist/
-cd dist
-python3 -m http.server 8080
+cd dist && python3 -m http.server 8080
 ```
 
-`VITE_WS_URL` and `VITE_ROBOT_ENV` are baked in at build time — set them in `.env` before building.
+`VITE_WS_URL` and `VITE_ROBOT_ENV` are baked in at build time.
