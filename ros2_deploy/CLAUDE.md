@@ -90,17 +90,25 @@ Lista vacía `[]` cuando no se detecta ningún logo.
 
 ---
 
-## Métricas del modelo (test set, v4 — 2026-06-03)
+## Métricas del modelo (v9 — 2026-06-04)
 
-| Clase | mAP50 | mAP50-95 | Precision | Recall |
-|-------|-------|----------|-----------|--------|
-| Pepsi (circle) | 0.995 | 0.971 | — | — |
-| Amazon (e) | 0.995 | 0.976 | — | — |
-| Walmart (star) | 0.984 | 0.921 | — | — |
-| **Global** | **0.991** | **0.956** | **0.993** | **0.987** |
+Evaluado en **dominio REAL** (frames del Puzzlebot held-out + % de frames con detección
+en el video completo @ conf 0.70). Es el benchmark que refleja el desempeño en el robot.
 
-Entrenado con 4450 imágenes sintéticas + 128 fondos reales COCO128.
-GPU: RTX 4060 Laptop, torch-2.11.0+cu128, YOLO11n (2.6M parámetros).
+| Métrica | v4 (solo sintético) | **v9 (real+hue)** |
+|---|---|---|
+| mAP50 test real | 0.982 | **0.991** |
+| % frames con detección (video) | 33% | **60%** |
+| Falsos positivos | — | ninguno (verificado) |
+
+**mAP50 por clase (test real):** Pepsi=0.995 · Amazon=0.983 · Walmart=0.995
+
+Entrenado con sintético (4450 + COCO128) + **frames reales** de videos (Puzzlebot + celular)
+sobre-muestreados, con **augmentación de hue fuerte (hsv_h=0.40)** para el tinte magenta de
+la cámara 240p. YOLO11n (2.6M params). GPU: RTX 4060 Laptop, torch-2.11.0+cu128.
+
+**Conf de despliegue recomendado: 0.60** (verificado sin falsos positivos; capta logos
+lejanos con margen). El default del nodo ya es 0.60.
 
 ---
 

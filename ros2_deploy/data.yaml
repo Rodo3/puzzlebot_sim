@@ -1,0 +1,9 @@
+names:
+  0: Pepsi
+  1: Amazon
+  2: Walmart
+nc: 3
+path: C:/Users/rpzda/Documents/Data_Final/logo_detection_training/data/yolo_dataset
+test: images/test
+train: images/train
+val: images/val

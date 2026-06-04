@@ -85,7 +85,7 @@ class LogoDetectorNode(Node):
 def parse_args():
     parser = argparse.ArgumentParser(description="Nodo ROS 2 de detección de logos YOLO11.")
     parser.add_argument("--weights",      default=WEIGHTS_DEFAULT)
-    parser.add_argument("--conf",         type=float, default=0.90)
+    parser.add_argument("--conf",         type=float, default=0.60)
     parser.add_argument("--imgsz",        type=int,   default=320,
                         help="Tamaño de inferencia (320 para cámara 240p del Puzzlebot)")
     parser.add_argument("--camera-topic", default=CAMERA_TOPIC_DEFAULT)
