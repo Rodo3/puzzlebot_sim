@@ -724,6 +724,8 @@ hr {
 /* El hijo directo necesita overflow:hidden para que el clip funcione */
 .metrics-bar-collapse > .metrics-bar-body {
   overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .metrics-bar-header {
