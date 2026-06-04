@@ -328,11 +328,14 @@ export default function App() {
 
         {/* Right column */}
         <div className="col-right">
+          {/* Pinned — always visible regardless of scroll */}
           <div className="sensors-row">
             <LidarView scanData={scanData} />
             <CameraPanel cameraData={cameraData} />
           </div>
 
+          {/* Scrollable: Teleop + Tabs */}
+          <div className="col-right-scroll">
           <TeleopPanel connected={connected} onCommand={sendCommand} />
 
           <div className="tabs-card">
@@ -374,6 +377,7 @@ export default function App() {
               )}
             </div>
           </div>
+          </div>{/* end col-right-scroll */}
         </div>
       </div>
 

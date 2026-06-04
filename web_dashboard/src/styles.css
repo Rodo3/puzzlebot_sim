@@ -159,15 +159,24 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* Right: fixed 360px, scrollable */
+/* Right: fixed 360px — sensors stay pinned, rest scrolls */
 .col-right {
   width: 360px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  overflow: hidden;
+}
+
+.col-right-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 /* ── Footer (90px, 2 cols) ────────────────────────────── */
