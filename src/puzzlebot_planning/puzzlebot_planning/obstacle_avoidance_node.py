@@ -52,6 +52,15 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter('reverse_speed',      0.07)  # [m/s] velocidad de retroceso
         self.declare_parameter('reverse_duration_sec', 2.0) # [s] duración del retroceso
 
+        # ── Emergency stop: rotación permitida ──────────────────────────────────
+        # En EMERGENCY STOP se frena SIEMPRE el avance (linear.x=0), pero si
+        # emergency_allow_rotation=True se deja pasar el giro del comando entrante
+        # (acotado a emergency_max_angular). Así el robot puede pivotear en su lugar
+        # para orientarse hacia un hueco libre en vez de quedarse congelado contra
+        # la pared. Poner en False para el comportamiento clásico (congelar todo).
+        self.declare_parameter('emergency_allow_rotation', True)
+        self.declare_parameter('emergency_max_angular',     1.0)  # [rad/s] clamp del giro
+
         self.stop_d          = self.get_parameter('stop_distance').value
         self.slow_d          = self.get_parameter('slow_distance').value
         self.front_a         = math.radians(self.get_parameter('front_angle_deg').value)
@@ -61,6 +70,8 @@ class ObstacleAvoidanceNode(Node):
         self.stuck_timeout   = self.get_parameter('stuck_timeout_sec').value
         self.reverse_speed   = self.get_parameter('reverse_speed').value
         self.reverse_dur     = self.get_parameter('reverse_duration_sec').value
+        self.emerg_rotate    = self.get_parameter('emergency_allow_rotation').value
+        self.emerg_max_ang   = self.get_parameter('emergency_max_angular').value
 
         self.min_front       = float('inf')
         self.trace_p_xy      = 0.0
@@ -160,11 +171,17 @@ class ObstacleAvoidanceNode(Node):
                     self.pub_cmd_.publish(out)
                     return
             else:
-                # Aún no cumple el timeout → parada normal
+                # Aún no cumple el timeout → frena el avance pero PERMITE girar
+                # en su lugar para orientarse hacia un hueco libre (no congelar todo).
                 self._reversing_since = None
+                out.linear.x = 0.0
+                if self.emerg_rotate:
+                    out.angular.z = max(-self.emerg_max_ang,
+                                        min(msg.angular.z, self.emerg_max_ang))
                 self.pub_cmd_.publish(out)
                 self.get_logger().warn(
                     f'EMERGENCY STOP — obstacle at {self.min_front:.2f} m '
+                    f'→ giro={out.angular.z:.2f} rad/s '
                     f'(bloqueado {blocked_secs:.1f}s/{self.stuck_timeout}s)',
                     throttle_duration_sec=1.0)
                 return

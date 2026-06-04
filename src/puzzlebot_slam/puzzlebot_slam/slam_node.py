@@ -119,16 +119,22 @@ class SlamNode(Node):
         self._localization_only = bool(self.get_parameter('localization_only').value)
         loc_map_path = self.get_parameter('localization_map_path').value
 
-        # En modo localization_only, forzar scan_matching_enabled=true y
-        # cargar el mapa PNG para que el matcher tenga referencias desde el inicio.
-        if self._localization_only:
-            if not loc_map_path:
+        # Cargar mapa PNG inicial si se especificó.
+        # localization_only=True  → solo localiza, no modifica el mapa.
+        # localization_only=False → carga PNG como punto de partida y sigue mapeando
+        #   (integra nuevos scans encima: detecta obstáculos dinámicos en tiempo real).
+        if loc_map_path:
+            if not os.path.isfile(loc_map_path):
                 self.get_logger().error(
-                    'localization_only=true pero localization_map_path está vacío')
+                    f'localization_map_path no existe: {loc_map_path}')
             else:
                 self._grid_map.load_from_png(loc_map_path)
+                mode_str = 'LOCALIZATION-ONLY' if self._localization_only else 'MAPPING+INIT'
                 self.get_logger().info(
-                    f'[localization_only] Mapa cargado desde: {loc_map_path}')
+                    f'[{mode_str}] Mapa inicial cargado desde: {loc_map_path}')
+        elif self._localization_only:
+            self.get_logger().error(
+                'localization_only=true pero localization_map_path está vacío')
 
         scan_matching_param = (
             True if self._localization_only

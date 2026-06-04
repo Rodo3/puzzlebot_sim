@@ -217,11 +217,22 @@ class PathPlannerNode(Node):
         )
 
         # ── Pub / Sub ─────────────────────────────────────────────────────────
-        self.sub_map_  = self.create_subscription(OccupancyGrid, '/map', self.map_cb, map_qos)
+        # Suscribirse a /augmented_map (mapa base + obstáculos dinámicos) si existe,
+        # y a /map como fallback cuando no hay dynamic_obstacle_manager activo.
+        self.sub_map_  = self.create_subscription(
+            OccupancyGrid, '/augmented_map', self.map_cb, map_qos)
+        self.sub_map_base_ = self.create_subscription(
+            OccupancyGrid, '/map', self.map_base_cb, map_qos)
         self.sub_pose_ = self.create_subscription(
             PoseWithCovarianceStamped, '/initialpose', self.pose_cb, 10)
         self.sub_goal_ = self.create_subscription(PoseStamped, '/goal_pose', self.goal_cb, 10)
+        # /replan_trigger: enviado por dynamic_obstacle_manager para forzar replan inmediato
+        # con el goal persistente hacia el mismo destino final.
+        self.sub_replan_ = self.create_subscription(
+            PoseStamped, '/replan_trigger', self.replan_trigger_cb, 10)
         self.pub_path_ = self.create_publisher(Path, '/planned_path', 1)
+        # Flag: si ya recibimos /augmented_map, ignorar /map base para evitar duplicados
+        self._using_augmented_map = False
 
         self.get_logger().info(
             f'path_planner_node ready — '
@@ -235,10 +246,22 @@ class PathPlannerNode(Node):
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
     def map_cb(self, msg: OccupancyGrid):
+        """Recibe /augmented_map (mapa base + obstáculos dinámicos)."""
+        self._using_augmented_map = True
         self.map_ = msg
         if self.replan_on_new_map and self.goal_msg_ is not None:
             self._update_robot_pose_from_tf()
+            self.get_logger().info(
+                '[PP] Mapa aumentado recibido — replanificando hacia goal persistente')
             self._plan(self.goal_msg_)
+
+    def map_base_cb(self, msg: OccupancyGrid):
+        """Recibe /map base — solo usar si no hay /augmented_map disponible."""
+        if not self._using_augmented_map:
+            self.map_ = msg
+            if self.replan_on_new_map and self.goal_msg_ is not None:
+                self._update_robot_pose_from_tf()
+                self._plan(self.goal_msg_)
 
     def pose_cb(self, msg: PoseWithCovarianceStamped):
         self.robot_x_ = msg.pose.pose.position.x
@@ -250,6 +273,21 @@ class PathPlannerNode(Node):
             self.get_logger().warn('No map received yet — ignoring goal')
             return
         self._update_robot_pose_from_tf()
+        self.get_logger().info(
+            f'[PP] Goal persistente recibido: '
+            f'({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f})')
+        self._plan(msg)
+
+    def replan_trigger_cb(self, msg: PoseStamped):
+        """Fuerza replan inmediato hacia el goal persistente (enviado por dynamic_obstacle_manager)."""
+        if self.map_ is None:
+            self.get_logger().warn('[PP] replan_trigger: sin mapa — ignorando')
+            return
+        self._update_robot_pose_from_tf()
+        self.goal_msg_ = msg
+        self.get_logger().warn(
+            f'[PP] replan_trigger recibido — replanificando hacia goal persistente '
+            f'({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f})')
         self._plan(msg)
 
     # ── TF pose lookup ────────────────────────────────────────────────────────
@@ -381,8 +419,13 @@ class PathPlannerNode(Node):
 
         if cell_path is None:
             self.get_logger().warn(
-                f'A* found no path from {start} to {goal_cell}. '
-                'Check that goal is reachable and not inside an obstacle.')
+                f'[PP] no valid path found — A* from {start} to {goal_cell} failed. '
+                'dynamic_obstacle_manager will enter recovery.')
+            # Publicar path vacío para notificar al DOM que no hay ruta
+            empty = Path()
+            empty.header.stamp    = self.get_clock().now().to_msg()
+            empty.header.frame_id = self.map_frame
+            self.pub_path_.publish(empty)
             return
 
         # ── Path safety check ─────────────────────────────────────────────────

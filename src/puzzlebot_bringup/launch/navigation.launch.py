@@ -64,7 +64,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -84,10 +84,22 @@ def generate_launch_description():
     arg_cmd_vel_topic = DeclareLaunchArgument(
         'cmd_vel_topic', default_value='/model/puzzlebot/cmd_vel',
         description='Topic final de velocidad. Gazebo: /model/puzzlebot/cmd_vel  |  Real: /cmd_vel')
+    arg_scan_topic = DeclareLaunchArgument(
+        'scan_topic', default_value='/scan_stamped',
+        description='Topic del LiDAR. Gazebo: /scan  |  Real: /scan_stamped')
+    # obstacle_manager: qué nodo gestiona los obstáculos dinámicos.
+    #   dynamic  → dynamic_obstacle_manager (FSM + goal persistente + capa dinámica) [RECOMENDADO]
+    #   legacy   → bug_navigation_node (modo viejo, inyección directa en /map)
+    #   none     → sin gestor de obstáculos dinámicos (solo obstacle_avoidance de emergencia)
+    arg_obstacle_manager = DeclareLaunchArgument(
+        'obstacle_manager', default_value='dynamic',
+        description='Gestor de obstáculos: dynamic | legacy | none')
 
-    use_sim_time   = LaunchConfiguration('use_sim_time')
-    use_pd         = LaunchConfiguration('use_pd')
-    cmd_vel_topic  = LaunchConfiguration('cmd_vel_topic')
+    use_sim_time      = LaunchConfiguration('use_sim_time')
+    use_pd            = LaunchConfiguration('use_pd')
+    cmd_vel_topic     = LaunchConfiguration('cmd_vel_topic')
+    scan_topic        = LaunchConfiguration('scan_topic')
+    obstacle_manager  = LaunchConfiguration('obstacle_manager')
 
     # ── A* Path Planner ───────────────────────────────────────────────────
     # Suscribe: /map, /goal_pose, /initialpose (fallback pose)
@@ -181,20 +193,37 @@ def generate_launch_description():
         condition=IfCondition(use_pd),
     )
 
-    # ── Bug Navigation (capa reactiva entre controller y obstacle_avoidance) ──
-    # Suscribe: /cmd_vel_steering, /scan_stamped, /odom, /goal_pose
-    # Publica:  /cmd_vel_in
-    # Lógica:   pasa comandos sin modificar en GO_TO_WAYPOINT.
-    #           Al detectar obstáculo frontal activa wall-following (Bug0/Bug2).
-    #           Cuando encuentra leave point seguro reanuda el pure-pursuit.
+    # ── Dynamic Obstacle Manager [RECOMENDADO] ────────────────────────────────
+    # FSM: NORMAL→BRAKE_FOR_REPLAN→REPLAN→FOLLOW_NEW_PATH→RECOVERY→SAFE_STOP
+    # Publica /augmented_map para que A* evite obstáculos dinámicos.
+    # Goal persistente: nunca cancela el objetivo de RViz.
+    # Activo cuando obstacle_manager:=dynamic
+    dynamic_obstacle_manager = Node(
+        package='puzzlebot_planning',
+        executable='dynamic_obstacle_manager',
+        name='dynamic_obstacle_manager',
+        parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
+        remappings=[('/scan_stamped', scan_topic)],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(["'", obstacle_manager, "' == 'dynamic'"])
+        ),
+    )
+
+    # ── Bug Navigation (modo legacy) ──────────────────────────────────────────
+    # Modo anterior: inyección directa en /map + ruta de evasión manual.
+    # Activo cuando obstacle_manager:=legacy
+    # Mantener para comparación y rollback.
     bug_navigation = Node(
         package='puzzlebot_planning',
         executable='bug_navigation_node',
         name='bug_navigation_node',
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
-        # scan_restamper publica en /scan_stamped — conectar explícitamente
-        remappings=[('/scan_stamped', '/scan_stamped')],
+        remappings=[('/scan_stamped', scan_topic)],
         output='screen',
+        condition=IfCondition(
+            PythonExpression(["'", obstacle_manager, "' == 'legacy'"])
+        ),
     )
 
     # ── Obstacle Avoidance (safety layer final entre bug_nav y cmd_vel) ───
@@ -208,7 +237,7 @@ def generate_launch_description():
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
         remappings=[
             ('/cmd_vel', cmd_vel_topic),
-            ('/scan',    '/scan_stamped'),   # obstacle_avoidance suscribe /scan internamente
+            ('/scan',    scan_topic),
         ],
         output='screen',
     )
@@ -217,9 +246,12 @@ def generate_launch_description():
         arg_sim_time,
         arg_use_pd,
         arg_cmd_vel_topic,
+        arg_scan_topic,
+        arg_obstacle_manager,
         path_planner,
         steering_controller,
         pd_controller,
+        dynamic_obstacle_manager,
         bug_navigation,
         obstacle_avoidance,
     ])

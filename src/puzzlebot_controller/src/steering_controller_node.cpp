@@ -5,12 +5,6 @@
 #include <cmath>
 #include <vector>
 
-static double norm_angle(double a) {
-  while (a >  M_PI) a -= 2.0 * M_PI;
-  while (a < -M_PI) a += 2.0 * M_PI;
-  return a;
-}
-
 /**
  * Pure-pursuit steering controller.
  * Subscribes to /odom (filtered pose) and /planned_path.
