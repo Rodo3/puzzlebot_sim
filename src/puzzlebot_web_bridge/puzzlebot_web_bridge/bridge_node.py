@@ -84,9 +84,12 @@ class BridgeNode(Node):
         self.declare_parameter('maps_dir', '')
         # cmd_vel_out_topic: topic to publish teleop commands.
         # Default /cmd_vel for real robot; use /model/puzzlebot/cmd_vel for Gazebo.
-        self.declare_parameter('cmd_vel_out_topic', DEFAULT_TOPICS['cmd_vel_out'])
+        self.declare_parameter('cmd_vel_out_topic',     DEFAULT_TOPICS['cmd_vel_out'])
+        self.declare_parameter('cmd_vel_steering_topic', DEFAULT_TOPICS['cmd_vel_steering'])
+        self.declare_parameter('dom_state_topic',        DEFAULT_TOPICS['dom_state'])
+        self.declare_parameter('augmented_map_topic',    DEFAULT_TOPICS['augmented_map'])
 
-        # Rate limiters.
+        # Rate limiters — one per rate-limited topic key.
         self._rl = {
             key: RateLimiter(hz)
             for key, hz in RATE_LIMITS_HZ.items()
@@ -205,6 +208,21 @@ class BridgeNode(Node):
             lambda msg: self._twist_cb(msg, 'cmd_vel_in'), 10)
 
         self.create_subscription(
+            Twist,
+            self.get_parameter('cmd_vel_steering_topic').get_parameter_value().string_value,
+            lambda msg: self._twist_cb(msg, 'cmd_vel_steering'), 10)
+
+        self.create_subscription(
+            String,
+            self.get_parameter('dom_state_topic').get_parameter_value().string_value,
+            self._dom_state_cb, 10)
+
+        self.create_subscription(
+            OccupancyGrid,
+            self.get_parameter('augmented_map_topic').get_parameter_value().string_value,
+            self._aug_map_cb, 1)
+
+        self.create_subscription(
             String,
             self.get_parameter('voice_command_topic').get_parameter_value().string_value,
             self._voice_command_cb, 10)
@@ -315,9 +333,23 @@ class BridgeNode(Node):
             self._ws.broadcast_sync(camera_to_json(msg))
 
     def _twist_cb(self, msg: Twist, source: str):
-        key = 'cmd_vel' if source == 'cmd_vel' else 'cmd_vel_in'
+        key = source if source in self._rl else 'cmd_vel_in'
         if self._rl[key].should_send():
             self._ws.broadcast_sync(twist_to_json(msg, source))
+
+    def _dom_state_cb(self, msg: String):
+        if self._rl['dom_state'].should_send():
+            self._ws.broadcast_sync({
+                'type':      'nav_state',
+                'state':     msg.data,
+                'timestamp': self.get_clock().now().nanoseconds / 1e9,
+            })
+
+    def _aug_map_cb(self, msg: OccupancyGrid):
+        if self._rl['augmented_map'].should_send():
+            payload = map_to_json(msg)
+            payload['type'] = 'augmented_map'
+            self._ws.broadcast_sync(payload)
 
     # ------------------------------------------------------------------ #
     #  Voice callbacks — accumulate fields, send on command arrival

@@ -12,11 +12,20 @@ import LogsPanel         from './components/LogsPanel.jsx';
 import ElevatorPanel     from './components/ElevatorPanel.jsx';
 
 const WS_URL            = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
+const ROBOT_ENV         = import.meta.env.VITE_ROBOT_ENV ?? 'sim';   // 'sim' | 'real'
 const MAX_TRAJECTORY    = 500;
 const MAX_LOGS          = 50;
 const MAX_VOICE_HISTORY = 20;
 
 function nowStr() { return new Date().toLocaleTimeString(); }
+
+// Color class for each DOM FSM state
+function navStateClass(state) {
+  if (!state || state === 'NORMAL')         return 'nav-state-normal';
+  if (state === 'FOLLOW_NEW_PATH')          return 'nav-state-follow';
+  if (state === 'BRAKE_FOR_REPLAN' || state === 'REPLAN') return 'nav-state-replan';
+  return 'nav-state-recovery'; // RECOVERY_REVERSE, RECOVERY_TURN, SAFE_STOP
+}
 
 const TABS = [
   { id: 'mode',      label: 'Modo' },
@@ -26,25 +35,29 @@ const TABS = [
 ];
 
 export default function App() {
-  const [connected,     setConnected]     = useState(false);
-  const [lastUpdate,    setLastUpdate]    = useState(null);
-  const [robotState,    setRobotState]    = useState(null);
-  const [scanData,      setScanData]      = useState(null);
-  const [mapData,       setMapData]       = useState(null);
-  const [cmdVel,        setCmdVel]        = useState(null);
-  const [cmdVelIn,      setCmdVelIn]      = useState(null);
-  const [voiceData,     setVoiceData]     = useState(null);
-  const [cameraData,    setCameraData]    = useState(null);
-  const [trajectory,    setTrajectory]    = useState([]);
-  const [voiceHistory,  setVoiceHistory]  = useState([]);
-  const [logs,          setLogs]          = useState([]);
-  const [mode,          setMode]          = useState('mapping');
-  const [goalMarker,    setGoalMarker]    = useState(null);
-  const [activeTab,     setActiveTab]     = useState('mode');
-  const [availableMaps, setAvailableMaps] = useState([]);
-  const [mapSource,     setMapSource]     = useState('live');
+  const [connected,      setConnected]      = useState(false);
+  const [lastUpdate,     setLastUpdate]     = useState(null);
+  const [robotState,     setRobotState]     = useState(null);
+  const [scanData,       setScanData]       = useState(null);
+  const [mapData,        setMapData]        = useState(null);
+  const [augMapData,     setAugMapData]     = useState(null);
+  const [cmdVel,         setCmdVel]         = useState(null);
+  const [cmdVelIn,       setCmdVelIn]       = useState(null);
+  const [cmdVelSteering, setCmdVelSteering] = useState(null);
+  const [navState,       setNavState]       = useState('NORMAL');
+  const [voiceData,      setVoiceData]      = useState(null);
+  const [cameraData,     setCameraData]     = useState(null);
+  const [trajectory,     setTrajectory]     = useState([]);
+  const [voiceHistory,   setVoiceHistory]   = useState([]);
+  const [logs,           setLogs]           = useState([]);
+  const [mode,           setMode]           = useState('mapping');
+  const [goalMarker,     setGoalMarker]     = useState(null);
+  const [activeTab,      setActiveTab]      = useState('mode');
+  const [availableMaps,  setAvailableMaps]  = useState([]);
+  const [mapSource,      setMapSource]      = useState('live');
 
-  const clientRef = useRef(null);
+  const clientRef   = useRef(null);
+  const navStateRef = useRef('NORMAL'); // track prev for transition logging
 
   const addLog = useCallback((msg) => {
     setLogs(prev => [...prev.slice(-(MAX_LOGS - 1)), { time: nowStr(), msg }]);
@@ -54,7 +67,6 @@ export default function App() {
     clientRef.current?.send(data);
   }, []);
 
-  // Wraps sendCommand to also update mapSource locally
   const handleCommand = useCallback((data) => {
     if (data.type === 'load_map')    setMapSource('static');
     if (data.type === 'use_slam_map') setMapSource('live');
@@ -78,9 +90,22 @@ export default function App() {
       case 'map':
         setMapData(msg);
         break;
+      case 'augmented_map':
+        setAugMapData(msg);
+        break;
+      case 'nav_state': {
+        const s = msg.state ?? 'NORMAL';
+        setNavState(s);
+        if (s !== navStateRef.current) {
+          addLog(`DOM: ${navStateRef.current} → ${s}`);
+          navStateRef.current = s;
+        }
+        break;
+      }
       case 'velocity_command':
-        if (msg.source === 'cmd_vel')    setCmdVel(msg);
-        if (msg.source === 'cmd_vel_in') setCmdVelIn(msg);
+        if (msg.source === 'cmd_vel')          setCmdVel(msg);
+        if (msg.source === 'cmd_vel_in')       setCmdVelIn(msg);
+        if (msg.source === 'cmd_vel_steering') setCmdVelSteering(msg);
         break;
       case 'voice_command':
         setVoiceData(msg);
@@ -120,6 +145,7 @@ export default function App() {
     sendCommand({ type: 'slam_reset' });
     setGoalMarker(null);
     setTrajectory([]);
+    setAugMapData(null);
     addLog('SLAM map reset');
   }, [sendCommand, addLog]);
 
@@ -129,12 +155,13 @@ export default function App() {
   }, [addLog]);
 
   const topicDots = [
-    { key: 'odom',  label: 'odom',  active: !!robotState },
-    { key: 'scan',  label: 'scan',  active: !!scanData },
-    { key: 'map',   label: 'map',   active: !!mapData },
-    { key: 'vel',   label: 'vel',   active: !!cmdVel },
-    { key: 'cam',   label: 'cam',   active: !!cameraData },
-    { key: 'voice', label: 'voice', active: !!voiceData },
+    { key: 'odom',     label: 'odom',  active: !!robotState },
+    { key: 'scan',     label: 'scan',  active: !!scanData },
+    { key: 'map',      label: 'map',   active: !!mapData },
+    { key: 'aug',      label: 'aug',   active: !!augMapData },
+    { key: 'vel',      label: 'vel',   active: !!cmdVel },
+    { key: 'cam',      label: 'cam',   active: !!cameraData },
+    { key: 'voice',    label: 'voice', active: !!voiceData },
   ];
 
   return (
@@ -159,9 +186,20 @@ export default function App() {
             </div>
           ))}
         </div>
-        <span className={`mode-pill mode-pill-${mode}`}>
-          {mode === 'mapping' ? 'MAPPING' : 'NAVIGATION'}
+        {/* Environment badge — shows SIM or REAL prominently */}
+        <span className={`env-badge env-badge-${ROBOT_ENV}`}>
+          {ROBOT_ENV.toUpperCase()}
         </span>
+        {/* Mode pill */}
+        <span className={`mode-pill mode-pill-${mode}`}>
+          {mode === 'mapping' ? 'MAPPING' : 'NAV'}
+        </span>
+        {/* DOM FSM state — only meaningful in navigation */}
+        {mode === 'navigation' && (
+          <span className={`nav-state-pill ${navStateClass(navState)}`}>
+            {navState.replace(/_/g, ' ')}
+          </span>
+        )}
       </header>
 
       {/* ── Main area ── */}
@@ -170,6 +208,7 @@ export default function App() {
         <div className="col-slam">
           <SlamMap
             mapData={mapData}
+            augMapData={augMapData}
             robotPose={robotState?.pose}
             trajectory={trajectory}
             mode={mode}
@@ -234,7 +273,13 @@ export default function App() {
 
       {/* ── Footer ── */}
       <footer className="footer">
-        <VelocityPanel cmdVel={cmdVel} cmdVelIn={cmdVelIn} />
+        <VelocityPanel
+          cmdVel={cmdVel}
+          cmdVelIn={cmdVelIn}
+          cmdVelSteering={cmdVelSteering}
+          navState={navState}
+          mode={mode}
+        />
         <LogsPanel logs={logs} />
       </footer>
     </div>

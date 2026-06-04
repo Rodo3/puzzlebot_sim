@@ -1,22 +1,27 @@
 # web_dashboard
 
-React + Vite frontend for real-time Puzzlebot visualization.
-Connects to `puzzlebot_web_bridge` over WebSocket and displays
-pose, SLAM map, LiDAR, velocity, voice commands, and system logs.
-
-**Visualization only — the frontend never sends commands to the robot.**
+React + Vite frontend for real-time Puzzlebot **visualization and control**.
+Connects to `puzzlebot_web_bridge` over WebSocket — receives robot data AND
+sends control commands (teleop, goal poses, waypoints, SLAM reset).
 
 ## Requirements
 
 - Node.js 18+ and npm (no ROS installation needed)
 - `puzzlebot_web_bridge` running and reachable on the network
 
-## Quick start (same machine as the bridge)
+## Quick start
 
 ```bash
 cd web_dashboard
-cp .env.example .env        # VITE_WS_URL=ws://localhost:8000/ws
+
+# Simulation (Gazebo, bridge on same machine)
+cp .env.sim .env
 npm install
+npm run dev
+
+# Physical robot (bridge on robot PC)
+cp .env.real .env
+# Edit .env: replace BRIDGE_IP with the robot PC's IP
 npm run dev
 ```
 
@@ -24,108 +29,168 @@ Open `http://localhost:5173` in your browser.
 
 ---
 
-## Viewing the dashboard from a different PC
+## Environment configuration
 
-This is the recommended setup for lab demos: one PC runs Gazebo +
-ROS 2 + the bridge, another PC (or laptop) shows the dashboard.
+| File | Use case |
+|---|---|
+| `.env.sim`  | Gazebo simulation — bridge on localhost |
+| `.env.real` | Physical robot — edit `BRIDGE_IP` before use |
+| `.env.example` | Template with all available variables |
 
-### Step 1 — Find the IP of the PC running the bridge
+Variables:
 
-On the bridge PC (Linux/WSL2):
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_WS_URL` | `ws://localhost:8000/ws` | WebSocket URL of the bridge |
+| `VITE_ROBOT_ENV` | `sim` | `sim` or `real` — shown as badge in header |
 
-```bash
-ip addr show | grep "inet " | grep -v 127
-# Example output: inet 192.168.1.45/24 ...
-```
+---
 
-On the bridge PC (Windows with WSL2), run inside WSL2:
+## Dashboard features
 
-```bash
-hostname -I
-# Example: 172.28.144.1
-```
+### Header
+- **Connected / Disconnected** badge
+- **Topic dots** — green when data is arriving: `odom`, `scan`, `map`, `aug` (augmented map), `vel`, `cam`, `voice`
+- **[SIM] / [REAL]** environment badge
+- **MAPPING / NAV** mode pill
+- **DOM FSM state** pill (navigation mode only): `NORMAL` / `FOLLOWING` / `REPLANNING` / `RECOVERY` / `SAFE STOP`
 
-Make sure port 8000 is open on that machine:
+### SLAM Map (left panel)
+- OccupancyGrid rendered on a 2D canvas
+- Robot position (blue circle + yellow arrow for heading)
+- Trajectory trace (cyan)
+- Goal marker (green circle + X)
+- **AUG / BASE toggle** — switches between the live SLAM map and the augmented
+  map (`/augmented_map`) that includes injected dynamic obstacles. The toggle
+  appears automatically once `/augmented_map` starts arriving.
+- Zoom (scroll wheel, zoom-to-cursor), pan (drag), reset view (⌂)
+- **Click-to-goal** in navigation mode: click anywhere on the map to send a
+  `goal_pose` command
 
-```bash
-sudo ufw allow 8000
-```
+### Right column
+- **LiDAR** polar view (`/scan`, 5 Hz)
+- **Camera** JPEG stream (`/camera/image/compressed`, 10 Hz)
+- **Teleop D-pad** — arrow buttons + stop. Sends `cmd_vel` at 10 Hz while held.
+  Global `pointerup` ensures stop on release even outside the button.
+- **Tabs:**
+  - **Modo** — switch Mapping / Navigation, reset SLAM, load saved maps
+  - **Waypoints** — 11 predefined waypoints (from `waypoints.yaml`), active in
+    navigation mode only
+  - **Voz** — voice command history, confidence scores, model ranking
+  - **Elevador** — elevator stub (backend pending)
 
-Verify the bridge is reachable from the dashboard PC:
+### Footer
+- **Velocity panel** — shows the full velocity pipeline:
+  - `Steering` → steering_controller output (`/cmd_vel_steering`, shown in nav mode)
+  - `Pre-avoidance` → after dynamic_obstacle_manager (`/cmd_vel_in`)
+  - `Final /cmd_vel` → after obstacle_avoidance (what the robot actually executes)
+  - DOM FSM state badge (color-coded)
+  - `OBSTACLE STOP` / `CMD MODIFIED` badge when avoidance intervenes
+- **Logs** — frontend event log (connections, mode changes, DOM transitions, goal sends)
 
-```bash
-curl http://192.168.1.45:8000/health
-# Expected: {"status":"ok","clients":0}
-```
+---
 
-### Step 2 — Configure the dashboard PC
+## Commands sent to the bridge (WebSocket → ROS)
 
-```bash
-cd web_dashboard
-cp .env.example .env
-```
-
-Edit `.env` and replace `localhost` with the bridge PC's IP:
-
-```
-VITE_WS_URL=ws://192.168.1.45:8000/ws
-```
-
-### Step 3 — Run the frontend
-
-```bash
-npm install        # only needed once
-npm run dev -- --host 0.0.0.0
-```
-
-Open `http://localhost:5173` in the browser on the dashboard PC.
-
-To open from a third device on the same network, use the dashboard
-PC's IP instead:
-
-```
-http://<IP_DASHBOARD_PC>:5173
+```json
+{ "type": "cmd_vel",              "linear_x": 0.2, "angular_z": 0.5 }
+{ "type": "goal_pose",            "x": 1.5, "y": 2.3, "theta": 0.0 }
+{ "type": "navigate_to_waypoint", "name": "centro" }
+{ "type": "slam_reset" }
+{ "type": "list_maps" }
+{ "type": "load_map",             "filename": "slam_map_20260529.png" }
+{ "type": "use_slam_map" }
+{ "type": "elevator",             "action": "up" }
 ```
 
 ---
 
-## What you should see when connected
+## Messages received from the bridge (ROS → WebSocket)
 
-- Header badge turns **Connected**
-- Status panel dots turn green as each topic starts publishing
-- SLAM map appears within a few seconds (rate-limited to 1 Hz)
-- Robot marker moves on the map as `/odom` arrives
-- LiDAR points update at 5 Hz
-- Velocity panel shows `/cmd_vel` values in real time
+| `type` | Source topic | Rate |
+|---|---|---|
+| `robot_state` | `/odom` + `/slam/robot_pose_in_map` | 10 Hz |
+| `scan` | `/scan` | 5 Hz |
+| `map` | `/map` | 1 Hz |
+| `augmented_map` | `/augmented_map` | 1 Hz |
+| `nav_state` | `/dom/state` | 5 Hz |
+| `velocity_command` (source: `cmd_vel`) | `/cmd_vel` | 10 Hz |
+| `velocity_command` (source: `cmd_vel_in`) | `/cmd_vel_in` | 10 Hz |
+| `velocity_command` (source: `cmd_vel_steering`) | `/cmd_vel_steering` | 10 Hz |
+| `voice_command` | `/voice/*` | event-driven |
+| `camera_frame` | `/camera/image/compressed` | 10 Hz |
+| `available_maps` | bridge response to `list_maps` | on demand |
 
-## Production build (optional)
+---
 
-Build a static bundle and serve it without Vite:
+## Switching to physical robot
+
+The only things that change for the real robot:
+
+1. **Copy `.env.real`** → `.env` and set `BRIDGE_IP` to the robot PC's IP.
+2. **Launch the bridge with** `cmd_vel_out_topic:=/cmd_vel` (default, already correct
+   for the real robot — the `gz_sim.launch.py` overrides this for Gazebo).
+3. **Use** `real_slam_nav.launch.py` instead of `gz_slam_nav.launch.py`.
+
+The dashboard code itself requires no changes.
+
+---
+
+## Viewing from a different machine
+
+Find the bridge PC's IP:
+```bash
+ip addr show | grep "inet " | grep -v 127
+```
+
+Open port 8000:
+```bash
+sudo ufw allow 8000
+```
+
+Set `VITE_WS_URL=ws://<BRIDGE_IP>:8000/ws` in `.env`, then:
+```bash
+npm run dev -- --host 0.0.0.0
+```
+
+---
+
+## Project structure
+
+```
+web_dashboard/
+  .env.sim              — simulation preset (cp to .env)
+  .env.real             — real robot preset (cp to .env, edit BRIDGE_IP)
+  .env.example          — template with all variables
+  src/
+    App.jsx             — global state, WebSocket routing, header, layout
+    styles.css          — dark theme, all component styles
+    services/
+      websocketClient.js  — WS connection with exponential auto-reconnect
+    components/
+      SlamMap.jsx         — 2D canvas: map, robot, trajectory, click-to-goal, aug toggle
+      LidarView.jsx       — polar LiDAR canvas
+      CameraPanel.jsx     — JPEG camera stream
+      TeleopPanel.jsx     — D-pad + velocity sliders
+      ModePanel.jsx       — mapping/nav toggle, saved map loader
+      WaypointPanel.jsx   — 11 named waypoints
+      VelocityPanel.jsx   — velocity pipeline + DOM state + obstacle badges
+      VoiceCommandPanel.jsx — voice command history
+      ElevatorPanel.jsx   — elevator stub
+      LogsPanel.jsx       — frontend event log
+    utils/
+      geometry.js         — world→canvas coordinate helpers
+      mapUtils.js         — OccupancyGrid rendering
+```
+
+---
+
+## Production build
 
 ```bash
-npm run build               # output goes to web_dashboard/dist/
+npm run build     # output → web_dashboard/dist/
 cd dist
 python3 -m http.server 8080
 ```
 
-Remember to set `VITE_WS_URL` to the correct bridge IP before building,
-since the URL is baked into the bundle at build time.
-
-## Current structure
-
-```
-src/
-  App.jsx                   — global state, WebSocket routing
-  services/
-    websocketClient.js      — connection with exponential auto-reconnect
-  components/
-    StatusPanel.jsx         — connection and topic indicators
-    SlamMap.jsx             — Canvas 2D: OccupancyGrid + robot + trajectory
-    LidarView.jsx           — Canvas 2D: polar LiDAR point cloud
-    VelocityPanel.jsx       — cmd_vel vs cmd_vel_in, obstacle-stop detection
-    VoiceCommandPanel.jsx   — last command, confidence, history
-    LogsPanel.jsx           — frontend event log
-  utils/
-    geometry.js             — world-to-canvas coordinate conversion
-    mapUtils.js             — OccupancyGrid rendering helpers
-```
+`VITE_WS_URL` and `VITE_ROBOT_ENV` are baked in at build time — set them in `.env` before building.
