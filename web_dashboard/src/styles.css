@@ -708,13 +708,22 @@ hr {
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  max-height: 34px;
-  transition: max-height 0.22s ease;
 }
 
-.metrics-bar.metrics-bar-open {
-  max-height: 340px;
+/* Grid trick: anima 0fr→1fr en ambas direcciones por igual */
+.metrics-bar-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.metrics-bar-collapse.metrics-bar-collapse-open {
+  grid-template-rows: 1fr;
+}
+
+/* El hijo directo necesita overflow:hidden para que el clip funcione */
+.metrics-bar-collapse > .metrics-bar-body {
+  overflow: hidden;
 }
 
 .metrics-bar-header {

@@ -418,7 +418,7 @@ export default function App() {
           </div>
         </div>
 
-        {metricsOpen && (
+        <div className={`metrics-bar-collapse ${metricsOpen ? 'metrics-bar-collapse-open' : ''}`}>
           <div className="metrics-bar-body">
             <MetricsPanel
               velHistory={velHistory}
@@ -428,7 +428,7 @@ export default function App() {
               onReset={handleResetSession}
             />
           </div>
-        )}
+        </div>
       </div>
 
       {/* ── Footer ── */}
