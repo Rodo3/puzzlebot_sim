@@ -1,156 +1,15 @@
 {
-  "kmeans": {
-    "safety_critical_count": 0,
-    "safety_critical_rate": 0.0,
-    "safety_critical_cases": [],
-    "opposite_direction_count": 1,
-    "opposite_direction_rate": 0.001736,
-    "opposite_direction_cases": [
-      {
-        "true": "derecha",
-        "pred": "izquierda"
-      }
-    ],
-    "stop_recall": {
-      "alto": 1.0
-    }
-  },
-  "gnb": {
-    "safety_critical_count": 5,
-    "safety_critical_rate": 0.008681,
-    "safety_critical_cases": [
-      {
-        "true": "alto",
-        "pred": "avanzar"
-      },
-      {
-        "true": "alto",
-        "pred": "retroceder"
-      },
-      {
-        "true": "alto",
-        "pred": "avanzar"
-      },
-      {
-        "true": "alto",
-        "pred": "avanzar"
-      },
-      {
-        "true": "alto",
-        "pred": "avanzar"
-      }
-    ],
-    "opposite_direction_count": 19,
-    "opposite_direction_rate": 0.032986,
-    "opposite_direction_cases": [
-      {
-        "true": "avanzar",
-        "pred": "retroceder"
-      },
-      {
-        "true": "derecha",
-        "pred": "izquierda"
-      },
-      {
-        "true": "derecha",
-        "pred": "izquierda"
-      },
-      {
-        "true": "derecha",
-        "pred": "izquierda"
-      },
-      {
-        "true": "derecha",
-        "pred": "izquierda"
-      },
-      {
-        "true": "derecha",
-        "pred": "izquierda"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      },
-      {
-        "true": "izquierda",
-        "pred": "derecha"
-      }
-    ],
-    "stop_recall": {
-      "alto": 0.947917
-    }
-  },
   "hmm": {
-    "safety_critical_count": 5,
-    "safety_critical_rate": 0.008681,
+    "safety_critical_count": 1,
+    "safety_critical_rate": 0.001042,
     "safety_critical_cases": [
       {
         "true": "alto",
-        "pred": "izquierda"
-      },
-      {
-        "true": "alto",
-        "pred": "retroceder"
-      },
-      {
-        "true": "alto",
-        "pred": "retroceder"
-      },
-      {
-        "true": "alto",
-        "pred": "retroceder"
-      },
-      {
-        "true": "alto",
-        "pred": "retroceder"
+        "pred": "avanzar"
       }
     ],
-    "opposite_direction_count": 11,
-    "opposite_direction_rate": 0.019097,
+    "opposite_direction_count": 9,
+    "opposite_direction_rate": 0.009375,
     "opposite_direction_cases": [
       {
         "true": "avanzar",
@@ -161,44 +20,36 @@
         "pred": "retroceder"
       },
       {
-        "true": "avanzar",
-        "pred": "retroceder"
+        "true": "derecha",
+        "pred": "izquierda"
       },
       {
-        "true": "avanzar",
-        "pred": "retroceder"
+        "true": "derecha",
+        "pred": "izquierda"
       },
       {
-        "true": "avanzar",
-        "pred": "retroceder"
+        "true": "derecha",
+        "pred": "izquierda"
       },
       {
-        "true": "avanzar",
-        "pred": "retroceder"
+        "true": "izquierda",
+        "pred": "derecha"
       },
       {
-        "true": "avanzar",
-        "pred": "retroceder"
+        "true": "retroceder",
+        "pred": "avanzar"
       },
       {
-        "true": "avanzar",
-        "pred": "retroceder"
+        "true": "retroceder",
+        "pred": "avanzar"
       },
       {
-        "true": "avanzar",
-        "pred": "retroceder"
-      },
-      {
-        "true": "avanzar",
-        "pred": "retroceder"
-      },
-      {
-        "true": "avanzar",
-        "pred": "retroceder"
+        "true": "retroceder",
+        "pred": "avanzar"
       }
     ],
     "stop_recall": {
-      "alto": 0.947917
+      "alto": 0.96875
     }
   }
 }
