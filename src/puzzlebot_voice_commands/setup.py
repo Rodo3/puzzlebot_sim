@@ -48,6 +48,8 @@ setup(
                 'puzzlebot_voice_commands.scripts.augment_dataset:main',
             'voice_commands_node = '
                 'puzzlebot_voice_commands.voice_commands_node:main',
+            'generate_hmm_parameter_report = '
+                'puzzlebot_voice_commands.scripts.generate_hmm_parameter_report:main',
         ],
     },
 )
