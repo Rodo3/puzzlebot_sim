@@ -19,12 +19,13 @@ Contiene: simulación Gazebo, SLAM, localización, planificación, percepción, 
 | Paquete | Tipo | Rol |
 |---|---|---|
 | `puzzlebot_bringup` | Python | Launch files para simulación y robot físico |
-| `puzzlebot_control` | Python | State machine de misión |
+| `puzzlebot_control` | Python | State machine de misión logística (QR → logos → entrega) |
 | `puzzlebot_controller` | C++ | Pure-pursuit steering |
 | `puzzlebot_description` | CMake | URDF, SDF, meshes, RViz |
 | `puzzlebot_localization` | C++ | Odometría + Kalman filter + scan_restamper |
+| `puzzlebot_logo_detector` | Python | Detección de logos de clientes (Pepsi/Amazon/Walmart) con YOLO11n ONNX |
 | `puzzlebot_msgs` | CMake/rosidl | Mensajes custom |
-| `puzzlebot_perception` | Python | Cámara, ArUco, YOLO |
+| `puzzlebot_perception` | Python | Cámara, ArUco, YOLO, QR codes |
 | `puzzlebot_planning` | Python | A* planner + obstacle avoidance + waypoint navigator |
 | `puzzlebot_slam` | Python | SLAM log-odds + MCL + map_server |
 | `puzzlebot_voice_commands` | Python | Reconocimiento de voz offline (MFCC + HMM) |
@@ -33,7 +34,8 @@ Contiene: simulación Gazebo, SLAM, localización, planificación, percepción, 
 
 ### Dashboard web (`web_dashboard/`)
 Frontend React + Vite. **Visualización + control del robot.**  
-Paneles: SLAM Map (click-to-goal), LiDAR, Cámara, Teleop (D-pad), Waypoints, Modo, Velocidad, Voz, Logs.  
+Paneles: SLAM Map (click-to-goal), LiDAR, Cámara, Teleop (D-pad con toggle Robot/Elevador), Misión (strip siempre visible), Waypoints, Modo, Voz, Logs.  
+Tabs: **Modo | Waypoints | Voz** (3 tabs). Panel de Misión siempre visible fuera de tabs.  
 Ver [web_dashboard/CLAUDE.md](web_dashboard/CLAUDE.md) para detalles del frontend.
 
 ### Mock (`mock/`)
@@ -89,7 +91,14 @@ web_dashboard (botones/clic en mapa)
 { "type": "goal_pose",            "x": 1.5, "y": 2.3, "theta": 0.0 }
 { "type": "navigate_to_waypoint", "name": "centro" }
 { "type": "slam_reset" }
+{ "type": "mission_start",        "mission": "1" }
+{ "type": "mission_start",        "mission": "2" }
+{ "type": "mission_stop" }
+{ "type": "elevator",             "action": "up" }
 ```
+
+> **Misión 2**: el nodo de misión queda en estado `WAITING_FOR_GOAL` esperando
+> un `goal_pose` del dashboard (click en mapa) para navegar al punto de inicio.
 
 ---
 
@@ -109,7 +118,13 @@ web_dashboard (botones/clic en mapa)
 | Tópico | Tipo | Fuente |
 |---|---|---|
 | `/cmd_vel_in` | geometry_msgs/Twist | planificación (antes de evasión) |
-| `/navigate_to_waypoint` | std_msgs/String | dashboard (WaypointPanel) |
+| `/navigate_to_waypoint` | std_msgs/String | dashboard (WaypointPanel) / state_machine_node |
+| `/mission_start` | std_msgs/String | dashboard → state_machine_node |
+| `/mission_state` | std_msgs/String | state_machine_node → dashboard |
+| `/qr/detections` | std_msgs/String | qr_node (JSON: `[{data, corners, area_px, center}]`) |
+| `/logo_detection/result` | std_msgs/String | logo_detector_node (JSON: `[{class_name, confidence, bbox}]`) |
+| `/forklift/command` | std_msgs/String | state_machine_node → montacargas (stub) |
+| `/mission/markers` | visualization_msgs/MarkerArray | state_machine_node → RViz (punto+etiqueta donde se vio cada QR/logo) |
 | `/voice/command` | std_msgs/String | voice_commands_node |
 | `/voice/confidence` | std_msgs/Float32 | voice_commands_node |
 | `/voice/status` | std_msgs/String | voice_commands_node |
@@ -181,8 +196,10 @@ ros2 launch puzzlebot_bringup slam.launch.py
 ## Reglas para Claude Code
 1. No ejecutar `git push` ni `git commit` automáticamente.
 2. No borrar archivos sin confirmación.
-3. El bridge SÍ puede publicar a `/cmd_vel`, `/goal_pose`, `/navigate_to_waypoint`, `/slam/reset` — son comandos explícitos del usuario desde el dashboard.
+3. El bridge SÍ puede publicar a `/cmd_vel`, `/goal_pose`, `/navigate_to_waypoint`, `/slam/reset`, `/mission_start`, `/forklift/command` — son comandos explícitos del usuario desde el dashboard.
 4. El bridge NUNCA publica a `/initialpose`.
 5. Al agregar dependencias Python al bridge, actualizar `package.xml` y `setup.py`.
 6. Al agregar dependencias npm al frontend, usar solo lo estrictamente necesario.
 7. `cmd_vel_out_topic` del bridge debe ser `/model/puzzlebot/cmd_vel` en Gazebo y `/cmd_vel` en robot físico.
+8. La lógica de misión vive en `state_machine_node.py` (`puzzlebot_control`). No duplicarla en el bridge ni en el frontend.
+9. `state_machine_node.py` reemplaza funcionalmente al esqueleto anterior — no lanzar ambos en simultáneo.

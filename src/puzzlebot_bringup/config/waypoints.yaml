@@ -86,3 +86,14 @@ waypoints:
     y: 0.50
     yaw: 0.0
     description: "Posición de inicio del robot"
+
+  # ── Zona de docks (Misión logística) ───────────────────────────────────────
+  # Punto único desde el que se ven los 3 logos de los tráileres (Walmart /
+  # Pepsi / Amazon). state_machine_node navega aquí en NAVIGATING_TO_DOCKS y
+  # desde aquí compara /logo_detection/result con el target leído del QR.
+  # TODO: medir las coordenadas reales en la pista y reemplazar estos valores.
+  dock_scan:
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    description: "Zona de docks — visible los 3 logos de tráiler (COORDS TODO)"

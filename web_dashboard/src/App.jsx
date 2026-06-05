@@ -9,7 +9,7 @@ import ModePanel         from './components/ModePanel.jsx';
 import TeleopPanel       from './components/TeleopPanel.jsx';
 import WaypointPanel     from './components/WaypointPanel.jsx';
 import LogsPanel         from './components/LogsPanel.jsx';
-import ElevatorPanel     from './components/ElevatorPanel.jsx';
+import MissionPanel      from './components/MissionPanel.jsx';
 import MetricsPanel      from './components/MetricsPanel.jsx';
 
 const WS_URL            = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
@@ -33,7 +33,6 @@ const TABS = [
   { id: 'mode',      label: 'Modo' },
   { id: 'waypoints', label: 'Waypoints' },
   { id: 'voice',     label: 'Voz' },
-  { id: 'elevator',  label: 'Elevador' },
 ];
 
 function makeSessionStats() {
@@ -62,7 +61,10 @@ export default function App() {
   const [cmdVelSteering, setCmdVelSteering] = useState(null);
   const [navState,       setNavState]       = useState('NORMAL');
   const [voiceData,      setVoiceData]      = useState(null);
+  const [missionState,   setMissionState]   = useState('IDLE');
   const [cameraData,     setCameraData]     = useState(null);
+  const [qrDetections,   setQrDetections]   = useState([]);
+  const [logoDetections, setLogoDetections] = useState([]);
   const [trajectory,     setTrajectory]     = useState([]);
   const [voiceHistory,   setVoiceHistory]   = useState([]);
   const [logs,           setLogs]           = useState([]);
@@ -251,8 +253,25 @@ export default function App() {
         }
         break;
 
+      case 'mission_state': {
+        const s = msg.state ?? 'IDLE';
+        setMissionState(prev => {
+          if (prev !== s) addLog(`Misión: ${prev} → ${s}`);
+          return s;
+        });
+        break;
+      }
+
       case 'camera_frame':
         setCameraData(msg);
+        break;
+
+      case 'qr_detections':
+        setQrDetections(msg.detections ?? []);
+        break;
+
+      case 'logo_detection':
+        setLogoDetections(msg.detections ?? []);
         break;
 
       case 'available_maps':
@@ -443,14 +462,21 @@ export default function App() {
 
         {/* Right column */}
         <div className="col-right">
-          {/* Pinned — always visible regardless of scroll */}
-          <div className="sensors-row">
-            <LidarView scanData={scanData} />
-            <CameraPanel cameraData={cameraData} />
-          </div>
+          {/* Pinned top: Misión + Cámara — foco visual del reto (siempre visibles) */}
+          <MissionPanel
+            missionState={missionState}
+            connected={connected}
+            onCommand={sendCommand}
+          />
+          <CameraPanel
+            cameraData={cameraData}
+            qrDetections={qrDetections}
+            logoDetections={logoDetections}
+          />
 
-          {/* Scrollable: Teleop + Tabs */}
+          {/* Scrollable: Lidar + Teleop + Tabs */}
           <div className="col-right-scroll">
+          <LidarView scanData={scanData} />
           <TeleopPanel connected={connected} onCommand={sendCommand} />
 
           <div className="tabs-card">
@@ -486,9 +512,6 @@ export default function App() {
               )}
               {activeTab === 'voice' && (
                 <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />
-              )}
-              {activeTab === 'elevator' && (
-                <ElevatorPanel connected={connected} onCommand={handleCommand} />
               )}
             </div>
           </div>

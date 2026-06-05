@@ -59,6 +59,9 @@ curl http://localhost:8000/health
 | `/dom/state` | std_msgs/String | `nav_state` | 5 Hz |
 | `/augmented_map` | nav_msgs/OccupancyGrid | `augmented_map` | 1 Hz |
 | `/camera/image/compressed` | sensor_msgs/CompressedImage | `camera_frame` | 10 Hz |
+| `/mission_state` | std_msgs/String | `mission_state` | event |
+| `/qr/detections` | std_msgs/String | `qr_detections` | event |
+| `/logo_detection/result` | std_msgs/String | `logo_detection` | event |
 | `/voice/command` | std_msgs/String | accumulated into `voice_command` | event |
 | `/voice/confidence` | std_msgs/Float32 | accumulated into `voice_command` | event |
 | `/voice/status` | std_msgs/String | accumulated into `voice_command` | event |
@@ -99,7 +102,13 @@ Path planner uses this instead of `/map` when `obstacle_manager:=dynamic`.
 { "type": "load_map",             "filename": "slam_map_20260529.png" }
 { "type": "use_slam_map" }
 { "type": "elevator",             "action": "up" }
+{ "type": "mission_start",        "mission": "1" }
+{ "type": "mission_start",        "mission": "2" }
+{ "type": "mission_stop" }
 ```
+
+`mission_start` publica en `/mission_start` (std_msgs/String).
+`mission_stop` publica `"stop"` en `/mission_start`.
 
 ---
 

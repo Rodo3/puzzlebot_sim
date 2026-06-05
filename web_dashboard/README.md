@@ -2,7 +2,9 @@
 
 React + Vite frontend for real-time Puzzlebot **visualization and control**.
 Connects to `puzzlebot_web_bridge` over WebSocket — receives robot data AND
-sends control commands (teleop, goal poses, waypoints, SLAM reset).
+sends control commands (teleop, goal poses, waypoints, SLAM reset, **misión
+logística**). Incluye control de la misión de almacén (QR → logos → entrega) con
+overlays de detección sobre la cámara.
 
 ## Requirements
 
@@ -50,14 +52,15 @@ Open `http://localhost:5173` in your browser.
 ┌─ Header ─────────────────────────────────────────────────┐
 │ Title | Connected | topic dots | [SIM/REAL] [MODE] [DOM] │
 ├─ Main area ──────────────────────┬───────────────────────┤
-│ SLAM Map (resizable)             │ LiDAR | Camera (fixed)│
+│ SLAM Map (resizable)             │ Mission strip (fixed) │
+│                                  │ Camera (fixed,        │
+│                                  │   overlay QR + logos) │
 │                                  ├───────────────────────┤
-│                                  │ Teleop       ↑        │
-│                                  │ Tabs:        │ scroll  │
-│                                  │  Modo        │        │
-│                                  │  Waypoints   ↓        │
-│                                  │  Voz                  │
-│                                  │  Elevador             │
+│                                  │ LiDAR (mini)  ↑       │
+│                                  │ Teleop        │ scroll │
+│                                  │  [🤖 Robot][↕ Elev]   │
+│                                  │ Tabs:         ↓       │
+│                                  │  Modo / Waypoints / Voz│
 ├──────────────────────────────────┴───────────────────────┤
 │ ▶ MÉTRICAS  dist · vel · replans · stops  [↺] [⛶]       │
 ├──────────────────────────────────────────────────────────┤
@@ -65,8 +68,8 @@ Open `http://localhost:5173` in your browser.
 └──────────────────────────────────────────────────────────┘
 ```
 
-**LiDAR and Camera are pinned** — they stay visible regardless of scroll.
-Only Teleop + Tabs scroll within the right column.
+**Mission strip y Camera quedan fijos arriba** de la columna derecha (foco visual
+del reto). LiDAR + Teleop + Tabs scrollean debajo.
 
 ---
 
@@ -94,14 +97,19 @@ Only Teleop + Tabs scroll within the right column.
 - **Click-to-goal** in navigation mode
 
 ### Right column
-- **LiDAR** polar canvas — always visible (pinned above scroll area)
-- **Camera** JPEG stream — always visible (pinned above scroll area)
-- **Teleop D-pad** — sends `cmd_vel` at 10 Hz while held; global `pointerup` = auto-stop
-- **Tabs** (scroll independently):
+- **Mission strip** (pinned, siempre visible) — botones **Misión 1 / Misión 2 / Detener**
+  + badge del estado de la máquina de misión (`IDLE → SCANNING_QR → … → DONE`).
+  Misión 2 entra en `WAITING_FOR_GOAL`: el siguiente click en el mapa es el punto de inicio.
+- **Camera** (pinned) — stream JPEG con **overlay de detecciones** dibujado en canvas:
+  cajas de QR (cyan) + logos (color por clase) sobre el stream crudo. Toggle `[▣ Anotada / ▢ Raw]`.
+- **LiDAR** polar canvas (mini, en el área scrolleable)
+- **Teleop** con toggle `[🤖 Robot] / [↕ Elevador]`:
+  - **Robot**: D-pad → `cmd_vel` a 10 Hz mientras se mantiene; `pointerup` global = auto-stop.
+  - **Elevador**: ↑ subir · ■ parar · ↓ bajar → `{type:"elevator"}` (montacargas stub).
+- **Tabs** (3, scroll independiente):
   - **Modo** — Mapping / Navigation toggle, SLAM reset, saved map loader
-  - **Waypoints** — 11 predefined waypoints, active in navigation mode only
-  - **Voz** — voice command history, confidence scores, model ranking
-  - **Elevador** — elevator stub (backend pending)
+  - **Waypoints** — waypoints predefinidos, activo solo en navegación
+  - **Voz** — historial de comandos de voz, confianza, ranking del modelo
 
 ### Metrics bar (collapsible)
 Sits between the main area and the footer. Always shows mini stats even when collapsed:
@@ -139,7 +147,18 @@ for maximum chart readability. "⊡ Barra" returns to the collapsible bar.
 { "type": "load_map",             "filename": "slam_map_20260529.png" }
 { "type": "use_slam_map" }
 { "type": "elevator",             "action": "up" }
+{ "type": "mission_start",        "mission": "1" }
+{ "type": "mission_start",        "mission": "2" }
+{ "type": "mission_stop" }
 ```
+
+### Mensajes recibidos del bridge (relevantes a la misión)
+
+| `type` | Origen | Uso en el dashboard |
+|---|---|---|
+| `mission_state` | `/mission_state` | Badge del MissionPanel |
+| `qr_detections` | `/qr/detections` | Overlay de QR en la cámara |
+| `logo_detection` | `/logo_detection/result` | Overlay de logos en la cámara |
 
 ---
 
@@ -177,14 +196,15 @@ web_dashboard/
       websocketClient.js      — WS with exponential auto-reconnect
     components/
       SlamMap.jsx             — 2D map canvas, AUG/BASE toggle, click-to-goal
-      LidarView.jsx           — polar LiDAR canvas (pinned)
-      CameraPanel.jsx         — JPEG camera stream (pinned)
-      TeleopPanel.jsx         — D-pad + velocity sliders
+      LidarView.jsx           — polar LiDAR canvas (mini, scroll)
+      CameraPanel.jsx         — JPEG stream + overlay canvas (QR/logos) + toggle Raw/Anotada
+      MissionPanel.jsx        — strip M1/M2/Detener + badge de estado de misión
+      TeleopPanel.jsx         — D-pad + sliders + toggle Robot/Elevador
       ModePanel.jsx           — mapping/nav toggle, saved map loader
-      WaypointPanel.jsx       — 11 named waypoints
+      WaypointPanel.jsx       — named waypoints
       VelocityPanel.jsx       — velocity pipeline + DOM state badges
       VoiceCommandPanel.jsx   — voice command history
-      ElevatorPanel.jsx       — elevator stub
+      ElevatorPanel.jsx       — obsoleto (lógica movida a TeleopPanel; archivo conservado)
       LogsPanel.jsx           — frontend event log
       MetricsPanel.jsx        — session counters, SVG charts, CSV/PDF export
     utils/

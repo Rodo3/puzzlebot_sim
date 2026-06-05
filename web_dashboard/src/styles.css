@@ -345,26 +345,46 @@ hr {
 .slam-canvas-map  { cursor: grab; }
 .slam-canvas-grab { cursor: grabbing; }
 
-/* ── Sensors row ──────────────────────────────────────── */
-.sensors-row {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.sensors-row > * { flex: 1; min-width: 0; }
-
 /* ── LiDAR ────────────────────────────────────────────── */
 .lidar-panel { display: flex; flex-direction: column; }
 
 .lidar-canvas {
   width: 100%;
+  max-width: 220px;       /* mini en la columna derecha (Opción C) */
+  margin: 0 auto;
   aspect-ratio: 1;
   display: block;
 }
 
-/* ── Camera ───────────────────────────────────────────── */
-.camera-panel { display: flex; flex-direction: column; }
+/* ── Camera (hero visual — QR + logos) ────────────────── */
+.camera-panel { display: flex; flex-direction: column; flex-shrink: 0; }
+
+.camera-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.camera-toggle {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 10px;
+  padding: 2px 9px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.camera-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.camera-stage { position: relative; line-height: 0; }
 
 .camera-img {
   width: 100%;
@@ -372,6 +392,15 @@ hr {
   display: block;
   background: #000;
   border-radius: 4px;
+}
+
+.camera-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .camera-placeholder {
@@ -435,6 +464,103 @@ hr {
   width: 100%;
   accent-color: var(--accent);
 }
+
+/* ── Teleop mode toggle (Robot / Elevador) ────────────── */
+.teleop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.teleop-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.teleop-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.teleop-toggle button.toggle-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.elevator-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ── Mission strip ────────────────────────────────────── */
+.mission-panel { padding: 8px 12px; flex-shrink: 0; }
+
+.mission-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mission-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.mission-btns { display: flex; gap: 6px; }
+
+.btn-mission {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-mission:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-mission-1 { border-color: var(--green); color: var(--green); }
+.btn-mission-1:hover:not(:disabled) { background: var(--green-dim); }
+
+.btn-mission-2 { border-color: var(--blue); color: var(--blue); }
+.btn-mission-2:hover:not(:disabled) { background: var(--blue-dim); }
+
+.btn-mission-stop { border-color: var(--err); color: var(--err); }
+.btn-mission-stop:hover:not(:disabled) { background: var(--err-dim); }
+
+.mission-badge {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.mission-badge-idle   { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+.mission-badge-active { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(34,211,238,0.4); }
+.mission-badge-wait   { background: var(--blue-dim);  color: var(--blue);  border: 1px solid rgba(96,165,250,0.4); }
+.mission-badge-done   { background: var(--green-dim); color: var(--green); border: 1px solid rgba(74,222,128,0.4); }
+.mission-badge-error  { background: var(--err-dim);   color: var(--err);   border: 1px solid rgba(248,113,113,0.4); }
 
 /* ── Tabs card ────────────────────────────────────────── */
 .tabs-card {

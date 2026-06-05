@@ -140,6 +140,8 @@ class BridgeNode(Node):
         self._pub_nav_wp     = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
         self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
         self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
+        # Mission control: dashboard → state_machine_node ("1" / "2" / "stop")
+        self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_start'], 10)
 
         self.get_logger().info(f'Control publishers ready — cmd_vel_out: {cmd_vel_out}')
 
@@ -265,6 +267,14 @@ class BridgeNode(Node):
             self.get_parameter('camera_topic').get_parameter_value().string_value,
             self._camera_cb, _sensor_qos)
 
+        # Mission state machine → dashboard (event-driven, no rate limit).
+        self.create_subscription(
+            String, DEFAULT_TOPICS['mission_state'], self._mission_state_cb, 10)
+        self.create_subscription(
+            String, DEFAULT_TOPICS['qr_detections'], self._qr_detections_cb, 10)
+        self.create_subscription(
+            String, DEFAULT_TOPICS['logo_detection'], self._logo_detection_cb, 10)
+
         self.get_logger().info(f'puzzlebot_web_bridge ready — WebSocket at ws://{host}:{port}/ws')
 
     # ------------------------------------------------------------------ #
@@ -372,6 +382,38 @@ class BridgeNode(Node):
     def _scan_match_cb(self, msg: PoseWithCovarianceStamped):
         if self._rl['scan_match_pose'].should_send():
             self._ws.broadcast_sync(pose_with_cov_to_json(msg, 'scan_match_pose'))
+
+    def _mission_state_cb(self, msg: String):
+        # Pure relay — the bridge does NOT interpret mission state.
+        self._ws.broadcast_sync({
+            'type':      'mission_state',
+            'state':     msg.data,
+            'timestamp': self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _qr_detections_cb(self, msg: String):
+        # msg.data is a JSON array of {data, corners, area_px, center}; forward parsed.
+        try:
+            detections = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            detections = []
+        self._ws.broadcast_sync({
+            'type':       'qr_detections',
+            'detections': detections,
+            'timestamp':  self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _logo_detection_cb(self, msg: String):
+        # msg.data is a JSON array of {class_name, confidence, bbox}; forward parsed.
+        try:
+            detections = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            detections = []
+        self._ws.broadcast_sync({
+            'type':       'logo_detection',
+            'detections': detections,
+            'timestamp':  self.get_clock().now().nanoseconds / 1e9,
+        })
 
     # ------------------------------------------------------------------ #
     #  Voice callbacks — accumulate fields, send on command arrival
@@ -557,6 +599,18 @@ class BridgeNode(Node):
             elif msg_type == 'elevator':
                 action = str(data.get('action', '')).strip()
                 self.get_logger().info(f'elevator command: {action} (backend pending)')
+
+            elif msg_type == 'mission_start':
+                mission = str(data.get('mission', '')).strip()
+                if mission in ('1', '2'):
+                    self._pub_mission.publish(String(data=mission))
+                    self.get_logger().info(f'mission_start → {mission}')
+                else:
+                    self.get_logger().warn(f'mission_start: invalid mission {mission!r}')
+
+            elif msg_type == 'mission_stop':
+                self._pub_mission.publish(String(data='stop'))
+                self.get_logger().info('mission_stop → stop')
 
             else:
                 self.get_logger().debug(f'Unknown command type: {msg_type}')

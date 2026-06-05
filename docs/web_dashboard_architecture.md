@@ -17,8 +17,15 @@ web_dashboard  (web_dashboard/)
     http://0.0.0.0:5173  (dev)
 ```
 
-**El flujo es unidireccional**: ROS → bridge → frontend.  
-El frontend NUNCA envía comandos al robot.
+**El flujo es bidireccional**:
+- **ROS → bridge → frontend**: datos del robot (odom, scan, map, cámara, `mission_state`,
+  `qr_detections`, `logo_detection`, voz).
+- **frontend → bridge → ROS**: comandos del usuario (`cmd_vel`, `goal_pose`,
+  `navigate_to_waypoint`, `slam_reset`, `mission_start`/`mission_stop`, `elevator`).
+
+> **Seguridad:** el bridge NUNCA publica `/initialpose` y no hace planeación ni
+> navegación — solo retransmite comandos explícitos del usuario. La lógica de la
+> misión vive en `state_machine_node`, no en el bridge ni en el frontend.
 
 ---
 
@@ -116,6 +123,43 @@ Filtra NaN/inf del LiDAR. Convierte quaternion a yaw.
 ```
 Se envía al llegar `/voice/command`. Los otros campos se acumulan desde sus tópicos y se incluyen con el último valor conocido.
 
+### mission_state (desde /mission_state)
+```json
+{ "type": "mission_state", "state": "SCANNING_QR", "timestamp": 1710000005.5 }
+```
+Estado actual de la máquina de misión. Alimenta el badge del `MissionPanel`.
+Valores: `IDLE / WAITING_FOR_GOAL / GOING_TO_START / SCANNING_QR / FORKLIFT_UP /
+NAVIGATING_TO_DOCKS / SCANNING_LOGOS / FORKLIFT_DOWN / DONE / ERROR`.
+
+### qr_detections (desde /qr/detections) — overlay de cámara
+```json
+{ "type": "qr_detections", "timestamp": 1710000006.0,
+  "detections": [{ "data": "wolmar",
+                   "corners": [[x0,y0],[x1,y1],[x2,y2],[x3,y3]],
+                   "area_px": 5120.0,
+                   "center": { "x": 318.0, "y": 240.0, "nx": -0.006, "ny": 0.0 } }] }
+```
+
+### logo_detection (desde /logo_detection/result) — overlay de cámara
+```json
+{ "type": "logo_detection", "timestamp": 1710000006.2,
+  "detections": [{ "class_name": "Walmart", "confidence": 0.91,
+                   "bbox": { "x1": 120.0, "y1": 80.0, "x2": 210.0, "y2": 170.0 } }] }
+```
+`corners` (QR) y `bbox` (logo) están en píxeles del frame original → el `CameraPanel`
+los dibuja directamente sobre el stream crudo.
+
+### Comandos enviados (frontend → bridge → ROS)
+```json
+{ "type": "cmd_vel",       "linear_x": 0.2, "angular_z": 0.5 }
+{ "type": "goal_pose",     "x": 1.5, "y": 2.3, "theta": 0.0 }
+{ "type": "navigate_to_waypoint", "name": "centro" }
+{ "type": "slam_reset" }
+{ "type": "mission_start", "mission": "1" }   // o "2"
+{ "type": "mission_stop" }
+{ "type": "elevator",      "action": "up" }   // up | down | stop
+```
+
 ---
 
 ## Rate limits
@@ -128,6 +172,9 @@ Se envía al llegar `/voice/command`. Los otros campos se acumulan desde sus tó
 | /scan      | 5      | Canvas update a ~5fps es suficiente |
 | /map       | 1      | El mapa es pesado; cambia lentamente |
 | /voice/*   | ∞      | Por evento, baja frecuencia natural |
+| /mission_state | ∞  | Por evento + heartbeat 2 Hz |
+| /qr/detections | ∞  | Por evento (overlay cámara) |
+| /logo_detection/result | ∞ | Por evento (overlay cámara) |
 
 ---
 

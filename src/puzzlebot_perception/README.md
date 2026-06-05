@@ -6,6 +6,7 @@ Put here:
 - Camera capture/bridge nodes.
 - ArUco marker detection.
 - YOLO/TensorRT object detection.
+- QR code detection.
 - Camera calibration pipeline.
 - Perception messages derived from images.
 
@@ -127,11 +128,55 @@ Step 4 — Verify
   → Straight lines in the scene should appear straight in the window
 ```
 
+---
+
+### `qr_node`
+
+Detecta códigos QR en el stream de cámara usando `cv2.QRCodeDetector`. Publicaciones event-driven (solo cuando hay QR presente).
+
+```bash
+ros2 run puzzlebot_perception qr_node
+ros2 run puzzlebot_perception qr_node --ros-args -p publish_debug_image:=true
+```
+
+| Parámetro | Default | Descripción |
+|---|---|---|
+| `image_topic` | `/camera/image/compressed` | Fuente de imagen |
+| `publish_debug_image` | `true` | Publicar imagen con bounding boxes en `/qr/debug_image` |
+| `max_processing_hz` | `10.0` | Máximo de frames procesados por segundo |
+| `min_qr_area_px` | `400.0` | Área mínima del QR en píxeles para aceptarlo (descarta detecciones espurias) |
+| `upscale_retry` | `true` | Si no decodifica al tamaño nativo, reintenta una vez sobre el frame 2x (ayuda al QR de 4.5 cm a distancia) |
+| `gate_by_mission` | `false` | Si `true`, solo procesa frames cuando `/mission_state ∈ active_states` (no busca QR fuera de `SCANNING_QR`). Default `false` = procesa siempre (standalone) |
+| `mission_state_topic` | `/mission_state` | Topic del estado de misión (solo si `gate_by_mission`) |
+| `active_states` | `["SCANNING_QR"]` | Estados en los que SÍ procesa |
+
+> **Gating:** en el robot lánzalo con `-p gate_by_mission:=true` para que el `QRCodeDetector` solo
+> corra durante la fase de búsqueda de QR. Requiere que `state_machine_node` publique `/mission_state`.
+> Para pruebas aisladas, déjalo en `false`.
+
+**Publica:**
+- `/qr/detections` (`std_msgs/String`) — JSON array. Lista vacía `[]` cuando no hay QR:
+  ```json
+  [{"data": "wolmar",
+    "corners": [[x0,y0],[x1,y1],[x2,y2],[x3,y3]],
+    "area_px": 5120.0,
+    "center": {"x": 318.0, "y": 240.0, "nx": -0.006, "ny": 0.0}}]
+  ```
+  `area_px` = área aparente (mayor = QR más cerca/grande). `center.nx/ny` = posición del
+  centro normalizada a `[-1, 1]` respecto al centro del frame (útil para encuadrar el robot
+  frente al QR). El QR físico tiene dos tamaños: **4.5 × 4.5 cm** y **9 × 9 cm**.
+- `/qr/debug_image` (`sensor_msgs/Image`) — frame anotado con bounding boxes.
+
+**Strings esperados en el QR:** `wolmar`, `popsi`, `emezon` (nombres internos de los clientes que `state_machine_node` mapea a los logos `Walmart`, `Pepsi`, `Amazon`).
+
+---
+
 ## Topic Map
 
 ```
 /camera/image/compressed ──→ image_viewer_node  → OpenCV window (optional rectification)
                          ├──→ aruco_node         → /aruco/poses → kalman_filter_node
+                         ├──→ qr_node            → /qr/detections → state_machine_node
                          └──→ calib_apply_node   → /cam_img_rect, /cam_info
                                yolo_node          → /detections
 ```

@@ -59,6 +59,32 @@ CLI entry points (all registered in `setup.py`):
 
 Allowed libraries: NumPy, SciPy, Matplotlib (optional). No scikit-learn, PyTorch, or TensorFlow.
 
+### `puzzlebot_control`
+**Lógica de alto nivel de la misión logística de almacén.** El `state_machine_node`
+coordina: escanear QR → recoger pallet (montacargas stub) → navegar a docks →
+identificar el tráiler por su logo → depositar. No hace control de bajo nivel ni
+planeación — delega navegación publicando nombres de waypoint en `/navigate_to_waypoint`
+y detecta llegada comparando `/odom` con las coordenadas de `waypoints.yaml`.
+Publica `/mission_state`, `/forklift/command` (stub) y `/mission/markers` (RViz).
+Ver [../src/puzzlebot_control/README.md](../src/puzzlebot_control/README.md).
+
+### `puzzlebot_perception` (QR)
+Además de la cámara/ArUco/calibración, contiene `qr_node`: detección de QR con
+`cv2.QRCodeDetector` (visión clásica, sin modelo) → `/qr/detections`. Sensor puro;
+el state machine decide. Gateable por `/mission_state` (`SCANNING_QR`).
+
+### `puzzlebot_logo_detector`
+Detección de logos de tráiler (Pepsi/Amazon/Walmart) con **YOLO11n ONNX** →
+`/logo_detection/result`. Gateable por `/mission_state` (`SCANNING_LOGOS`) para no
+correr YOLO fuera de la fase del dock. Ver
+[../src/puzzlebot_logo_detector/README.md](../src/puzzlebot_logo_detector/README.md).
+
+### `puzzlebot_web_bridge`
+Puente bidireccional ROS 2 ↔ WebSocket para el dashboard. Retransmite datos del
+robot (incl. `/mission_state`, `/qr/detections`, `/logo_detection/result`) y publica
+comandos del usuario (`/cmd_vel`, `/goal_pose`, `/navigate_to_waypoint`, `/mission_start`).
+**Nunca** publica `/initialpose` ni hace planeación.
+
 ## Dependency Graph
 
 ```

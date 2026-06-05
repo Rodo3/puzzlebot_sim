@@ -70,7 +70,9 @@
 | `steering_controller_node` | puzzlebot_controller (C++) | **20 Hz** (timer 50 ms) | wall_timer | `/cmd_vel_steering` | `/odom`, `/planned_path` |
 | `bug_navigation_node` | puzzlebot_planning (Python) | **event-driven** | mensaje entrante | `/cmd_vel_in`, blobs en `/map` | `/cmd_vel_steering`, `/scan_stamped`, `/odom` |
 | `obstacle_avoidance_node` | puzzlebot_planning (Python) | **event-driven** | mensaje entrante | `/cmd_vel` | `/scan_stamped` (SensorDataQoS), `/cmd_vel_in`, `/odom` |
-| `state_machine_node` | puzzlebot_control (Python) | estado: **1 Hz** | wall_timer + evento | `/mission_state`, `/goal_pose_out` | `/goal_pose`, `/planned_path`, `/detections` |
+| `state_machine_node` | puzzlebot_control (Python) | FSM: **5 Hz** / estado: **2 Hz** | wall_timer + evento | `/mission_state`, `/navigate_to_waypoint`, `/forklift/command` (stub), `/mission/markers`, `cmd_vel_topic` (e-stop) | `/mission_start`, `/qr/detections`, `/logo_detection/result`, `/odom`, `/goal_pose` |
+| `qr_node` | puzzlebot_perception (Python) | **≤ 10 Hz** (throttled) | mensaje entrante | `/qr/detections`, `/qr/debug_image` | `/camera/image/compressed` (SensorDataQoS), `/mission_state` (si gateado) |
+| `logo_detector_node` | puzzlebot_logo_detector (Python) | **≤ 5 Hz** (timer) | wall_timer | `/logo_detection/result`, `/logo_detection/image` | `/camera/image/compressed` (SensorDataQoS), `/mission_state` (si gateado) |
 | `robot_state_publisher` | ros2 built-in | event-driven | mensaje entrante | TF `base_footprint→*` | `/joint_states` |
 
 ---
@@ -129,3 +131,9 @@
 | Localización MCL (`slam:=false mcl:=true`) | mcl, map_server_node, aruco_node, odometry_node | mcl |
 | Localización EKF+mapa (`use_map:=true kalman:=true aruco:=true`) | slam_loc, map_server_node, aruco_node, kalman_filter_node, aruco_map_odom | aruco_map_odom |
 | Navegación autónoma (`navigation:=true`) | + path_planner_node, steering_controller_node, bug_navigation_node, obstacle_avoidance_node | según modo base |
+| Misión logística de almacén | + state_machine_node, qr_node, logo_detector_node, waypoint_navigator_node (sobre el modo de navegación) | según modo base |
+
+> **Misión logística:** `state_machine_node` coordina QR → logos → entrega. `qr_node` y
+> `logo_detector_node` se gatean por `/mission_state` (`gate_by_mission:=true`) para correr
+> solo en su fase (`SCANNING_QR` / `SCANNING_LOGOS`). El montacargas (`/forklift/command`)
+> es un stub. Detalle: [src/puzzlebot_control/README.md](src/puzzlebot_control/README.md).

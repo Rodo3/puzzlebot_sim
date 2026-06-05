@@ -12,13 +12,16 @@ Node.js 18+ requerido (Vite 5 no soporta Node 12).
 │ PUZZLEBOT LIVE DASHBOARD | Connected | topic dots | [SIM] [MAPPING] [DOM STATE] │
 ├─ Main area ────────────────────────┬─────────────────────────────────┤
 │ SLAM Map (flex:1)                  │ col-right (360px fijo)           │
-│  - OccupancyGrid canvas            │  ┌── sensors-row (PINNED) ─────┐ │
-│  - Robot azul + flecha amarilla    │  │ LidarView | CameraPanel     │ │
-│  - Trayectoria cyan                │  └─────────────────────────────┘ │
-│  - Goal marker verde               │  ┌── col-right-scroll ─────────┐ │
-│  - AUG/BASE toggle                 │  │ TeleopPanel                 │ │
-│  - Zoom/pan/click-to-goal          │  │ Tabs: Modo/Waypoints/Voz/   │ │
-│                                    │  │       Elevador              │ │
+│  - OccupancyGrid canvas            │  ┌── PINNED (siempre visible) ─┐ │
+│  - Robot azul + flecha amarilla    │  │ MissionPanel (strip)        │ │
+│  - Trayectoria cyan                │  │ CameraPanel (grande,        │ │
+│  - Goal marker verde               │  │   overlay QR + logos)       │ │
+│  - AUG/BASE toggle                 │  └─────────────────────────────┘ │
+│  - Zoom/pan/click-to-goal          │  ┌── col-right-scroll ─────────┐ │
+│                                    │  │ LidarView (mini)            │ │
+│                                    │  │ TeleopPanel                 │ │
+│                                    │  │  toggle: [🤖 Robot][↕ Elev] │ │
+│                                    │  │ Tabs: Modo / Waypoints / Voz│ │
 │                                    │  └─────────────────────────────┘ │
 ├────────────────────────────────────┴─────────────────────────────────┤
 │ ▶ MÉTRICAS  dist Xm  vel Xm/s  replans N  stops N  [↺] [⛶]         │
@@ -29,7 +32,12 @@ Node.js 18+ requerido (Vite 5 no soporta Node 12).
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**IMPORTANTE**: `LidarView` y `CameraPanel` están fuera del scroll de la columna derecha — siempre visibles. Solo `TeleopPanel` y las tabs hacen scroll.
+**IMPORTANTE**:
+- `MissionPanel` y `CameraPanel` están fijos arriba de la columna derecha — siempre visibles (foco visual del reto).
+- `CameraPanel` dibuja overlays de detección (cajas de QR + logos) sobre el stream crudo, con toggle `[▣ Anotada / ▢ Raw]`.
+- `LidarView` se movió al área scrolleable (mini).
+- `ElevatorPanel.jsx` ya no se usa como tab — su lógica se integró en `TeleopPanel` (toggle).
+- Tab-bar: **3 tabs** — `Modo | Waypoints | Voz`. El tab `Elevador` fue eliminado.
 
 ## Componentes
 
@@ -37,16 +45,43 @@ Node.js 18+ requerido (Vite 5 no soporta Node 12).
 |---|---|---|
 | `App.jsx` | — | Raíz. Estado global, WebSocket, métricas, layout. |
 | `SlamMap.jsx` | `map`/`augmented_map` + `robot_state` | Canvas 2D OccupancyGrid. AUG/BASE toggle. Click-to-goal en nav mode. Zoom/pan. |
-| `LidarView.jsx` | `scan` | Canvas 2D polar LiDAR. **Pinned** — no scrollea. |
-| `CameraPanel.jsx` | `camera_frame` | Stream JPEG base64. **Pinned** — no scrollea. |
-| `TeleopPanel.jsx` | — | D-pad + sliders 10Hz. Global pointerup → stop. |
+| `LidarView.jsx` | `scan` | Canvas 2D polar LiDAR. En el área scrolleable (mini, max 220px). |
+| `CameraPanel.jsx` | `camera_frame` + `qr_detections` + `logo_detection` | Stream JPEG base64 con overlay canvas (cajas QR + logos). Toggle `[▣ Anotada / ▢ Raw]`. **Pinned** — no scrollea. |
+| `TeleopPanel.jsx` | — | D-pad + sliders 10Hz. Toggle `[🤖 Robot] / [↕ Elevador]` en cabecera. Robot mode → `/cmd_vel`. Elevator mode → `/forklift/command`. |
+| `MissionPanel.jsx` | `missionState` | Strip siempre visible. Botones M1/M2/Stop. Badge de estado de misión. Misión 2 espera click en mapa (estado `WAITING_FOR_GOAL`). |
 | `ModePanel.jsx` | estado app | Mapping/Nav toggle, reset SLAM, carga mapas guardados. |
-| `WaypointPanel.jsx` | — | 11 waypoints de `waypoints.yaml`. Solo activo en nav mode. |
+| `WaypointPanel.jsx` | — | Waypoints de `waypoints.yaml`. Solo activo en nav mode. |
 | `VoiceCommandPanel.jsx` | `voice_command` | Último comando, confianza, ranking, historial. |
 | `VelocityPanel.jsx` | `velocity_command` + `navState` | Pipeline: Steering → Pre-avoidance → Final. Badge DOM state. |
-| `ElevatorPanel.jsx` | — | Stub elevador (backend pendiente). |
+| `ElevatorPanel.jsx` | — | **Obsoleto como tab**. Lógica movida a `TeleopPanel`. Archivo conservado pero no renderizado. |
 | `LogsPanel.jsx` | eventos internos | Log de eventos frontend. |
 | `MetricsPanel.jsx` | props desde App.jsx | Contadores + 3 gráficas SVG + export CSV + PDF report. |
+
+## MissionPanel — comportamiento detallado
+
+Strip siempre visible (fuera de tabs, entre TeleopPanel y tab-bar):
+
+```
+Estado normal:  [ ▶ Misión 1 ]  [ ▶ Misión 2 ]  badge: IDLE
+Con misión:     badge: SCANNING_QR              [ ■ Detener ]
+M2 esperando:   badge: 📍 Haz click en el mapa...  [ ■ Detener ]
+```
+
+- **Misión 1**: envía `{"type": "mission_start", "mission": "1"}`. No requiere nada más.
+- **Misión 2**: envía `{"type": "mission_start", "mission": "2"}`. El badge cambia a
+  `WAITING_FOR_GOAL`. El siguiente click en el mapa (SlamMap) activa `goal_pose` normal
+  — el `state_machine_node` lo captura como punto de inicio. El panel lo indica visualmente.
+- **Detener**: envía `{"type": "mission_stop"}`. Siempre disponible cuando hay misión activa.
+
+## TeleopPanel — toggle Robot / Elevador
+
+Pill toggle en la cabecera del panel:
+```
+[ 🤖 Robot ]  [ ↕ Elevador ]
+```
+
+- **Modo Robot** (default): d-pad y sliders funcionan igual que antes → `cmd_vel`.
+- **Modo Elevador**: ↑ → `{type:"elevator", action:"up"}`, ↓ → `{type:"elevator", action:"down"}`, ■ → `{type:"elevator", action:"stop"}`. Flechas ←/→ deshabilitadas. Sliders ocultos.
 
 ## Servicios y utilidades
 
@@ -73,7 +108,12 @@ cmdVelIn             { source:'cmd_vel_in',        linear_x, angular_z }
 cmdVelSteering       { source:'cmd_vel_steering',  linear_x, angular_z }
 navState             string — FSM del dynamic_obstacle_manager
 cameraData           { data: base64 JPEG }
+qrDetections         Array<{data, corners, area_px, center}>  — overlay cámara
+logoDetections       Array<{class_name, confidence, bbox}>    — overlay cámara
 voiceData            { command, confidence, status, ranked_predictions }
+missionState         string — estado de la misión: IDLE/WAITING_FOR_GOAL/GOING_TO_START/
+                              SCANNING_QR/FORKLIFT_UP/NAVIGATING_TO_DOCKS/
+                              SCANNING_LOGOS/FORKLIFT_DOWN/DONE/ERROR
 
 // UI
 trajectory           Array<{x,y}> máx 500
@@ -81,7 +121,7 @@ voiceHistory         Array<string> máx 20
 logs                 Array<{time, msg}> máx 50
 mode                 'mapping' | 'navigation'
 goalMarker           {x,y} | null
-activeTab            'mode'|'waypoints'|'voice'|'elevator'
+activeTab            'mode' | 'waypoints' | 'voice'   ← sin 'elevator'
 availableMaps        string[]
 mapSource            'live' | 'static'
 metricsOpen          bool — bar expandida/colapsada
@@ -151,7 +191,10 @@ Color coding en header pill y MetricsPanel:
 | `velocity_command` | `/cmd_vel`, `/cmd_vel_in`, `/cmd_vel_steering` | Twist con campo `source` |
 | `voice_command` | `/voice/*` | Resultado de inferencia |
 | `camera_frame` | `/camera/image/compressed` | JPEG base64 |
+| `qr_detections` | `/qr/detections` | `[{data, corners, area_px, center}]` — overlay cámara |
+| `logo_detection` | `/logo_detection/result` | `[{class_name, confidence, bbox}]` — overlay cámara |
 | `available_maps` | respuesta a `list_maps` | string[] de archivos |
+| `mission_state` | `/mission_state` | Estado de la máquina de misión (string) |
 
 ## Mensajes WebSocket enviados (dashboard → bridge)
 
@@ -164,6 +207,9 @@ Color coding en header pill y MetricsPanel:
 { "type": "load_map",             "filename": "slam_map.png" }
 { "type": "use_slam_map" }
 { "type": "elevator",             "action": "up" }
+{ "type": "mission_start",        "mission": "1" }
+{ "type": "mission_start",        "mission": "2" }
+{ "type": "mission_stop" }
 ```
 
 ## Variables de entorno
@@ -191,3 +237,5 @@ npm run dev           # requiere Node 18+
 - Nunca enviar `initialpose` desde el frontend.
 - Gráficas SVG sin librerías externas (React + Vite únicos deps).
 - Al cambiar waypoints en `waypoints.yaml`, actualizar también `WaypointPanel.jsx`.
+- `MissionPanel` y `TeleopPanel` son los únicos que envían comandos de misión/elevador.
+- `ElevatorPanel.jsx` no se renderiza — no eliminarlo del repo, solo está desconectado.

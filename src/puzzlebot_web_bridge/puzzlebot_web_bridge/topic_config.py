@@ -18,11 +18,15 @@ DEFAULT_TOPICS = {
     'voice_status':           '/voice/status',
     'voice_ranked_predictions': '/voice/ranked_predictions',
     'voice_inference_time':   '/voice/inference_time_ms',
+    'mission_state':          '/mission_state',       # state_machine_node FSM state (event)
+    'qr_detections':          '/qr/detections',       # qr_node JSON detections (event)
+    'logo_detection':         '/logo_detection/result',  # logo_detector JSON detections (event)
     # Outbound (WebSocket → ROS) — control topics
     'cmd_vel_out':            '/cmd_vel',          # teleop; override in Gazebo to /model/puzzlebot/cmd_vel
     'goal_pose':              '/goal_pose',
     'navigate_to_waypoint':   '/navigate_to_waypoint',
     'slam_reset':             '/slam/reset',
+    'mission_start':          '/mission_start',       # dashboard → state_machine_node ("1"/"2"/"stop")
 }
 
 # Maximum publish rate to WebSocket clients (Hz).
@@ -44,6 +48,9 @@ RATE_LIMITS_HZ = {
     'voice_status':              0.0,
     'voice_ranked_predictions':  0.0,
     'voice_inference_time':      0.0,
+    'mission_state':             0.0,
+    'qr_detections':             0.0,
+    'logo_detection':            0.0,
 }
 
 WEBSOCKET_HOST_DEFAULT = '0.0.0.0'

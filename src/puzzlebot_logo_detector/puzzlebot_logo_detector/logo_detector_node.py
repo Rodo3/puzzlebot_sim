@@ -3,6 +3,7 @@ Nodo ROS 2 para detección de logos de trailers con YOLO11n (ONNX Runtime).
 
 Suscribe:
   /camera/image/compressed  (sensor_msgs/CompressedImage)
+  /mission_state            (std_msgs/String)  — solo si gate_by_mission=True
 
 Publica:
   /logo_detection/result  (std_msgs/String)  — JSON con clase, confianza y bbox
@@ -10,12 +11,17 @@ Publica:
 
 Parámetros:
   weights_path   (str)   ruta a best.onnx
-  confidence     (float) umbral de confianza (default 0.50)
-  imgsz          (int)   tamaño de inferencia cuadrado (default 320)
+  confidence     (float) umbral de confianza (default 0.70)
+  imgsz          (int)   tamaño de inferencia cuadrado (default 640)
   camera_topic   (str)   topic de entrada
-  show_window    (bool)  mostrar ventana OpenCV
+  show_window    (bool)  mostrar ventana OpenCV (FALSE en robot headless)
   inference_hz   (float) máximo de inferencias por segundo (default 5.0)
   display_scale  (float) factor de escala de la ventana (default 3.0)
+  gate_by_mission (bool) si True, solo infiere cuando /mission_state ∈ active_states
+                         (ahorra cómputo: no corre YOLO fuera de SCANNING_LOGOS).
+                         Default False (corre siempre, uso standalone).
+  mission_state_topic (str)  topic del estado de misión (default /mission_state)
+  active_states  (str[]) estados en los que SÍ infiere (default ["SCANNING_LOGOS"])
 """
 
 import json
@@ -105,6 +111,13 @@ class LogoDetectorNode(Node):
         self.declare_parameter("show_window", True)
         self.declare_parameter("inference_hz", 5.0)
         self.declare_parameter("display_scale", 3.0)
+        # Gating por estado de misión: si gate_by_mission=True, solo corre la
+        # inferencia cuando /mission_state ∈ active_states (ahorra CPU/GPU; no
+        # corre YOLO durante navegación/idle). Default False → corre siempre
+        # (uso standalone). El launch de la misión debe activarlo.
+        self.declare_parameter("gate_by_mission", False)
+        self.declare_parameter("mission_state_topic", "/mission_state")
+        self.declare_parameter("active_states", ["SCANNING_LOGOS"])
 
         weights = self.get_parameter("weights_path").value
         self.conf = self.get_parameter("confidence").value
@@ -113,6 +126,10 @@ class LogoDetectorNode(Node):
         self.show_window = self.get_parameter("show_window").value
         inference_hz = self.get_parameter("inference_hz").value
         self.display_scale = self.get_parameter("display_scale").value
+        self.gate_by_mission = self.get_parameter("gate_by_mission").value
+        mission_state_topic = self.get_parameter("mission_state_topic").value
+        self.active_states = list(self.get_parameter("active_states").value)
+        self._mission_state = None
 
         try:
             import onnxruntime as ort
@@ -143,6 +160,12 @@ class LogoDetectorNode(Node):
         self.pub_result = self.create_publisher(String, "/logo_detection/result", 10)
         self.pub_image = self.create_publisher(Image, "/logo_detection/image", 10)
 
+        if self.gate_by_mission:
+            self.create_subscription(String, mission_state_topic, self._mission_state_cb, 10)
+            self.get_logger().info(
+                f"Gating activo — inferencia solo en estados {self.active_states} "
+                f"(escuchando {mission_state_topic})")
+
         self.create_timer(1.0 / inference_hz, self._detect)
 
         if self.show_window:
@@ -156,7 +179,19 @@ class LogoDetectorNode(Node):
     def _image_callback(self, msg: CompressedImage):
         self.pending = msg
 
+    def _mission_state_cb(self, msg: String):
+        self._mission_state = msg.data.strip()
+
+    def _gate_open(self) -> bool:
+        """True si se permite correr la inferencia ahora."""
+        if not self.gate_by_mission:
+            return True
+        return self._mission_state in self.active_states
+
     def _detect(self):
+        if not self._gate_open():
+            self.pending = None   # descarta el frame pendiente, no acumula
+            return
         if self.pending is None:
             return
         msg = self.pending

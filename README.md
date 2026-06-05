@@ -7,6 +7,10 @@ ROS 2 Humble workspace for a differential-drive Puzzlebot with:
 - **ArUco** marker detection with **EKF** pose fusion
 - **PD controller** + obstacle avoidance
 - Path planning (A\*)
+- **Warehouse logistics mission** — QR → trailer-logo identification → delivery
+  (state machine + QR + YOLO11n logo detection)
+- **Web dashboard** — real-time visualization + bidirectional control (incl. mission)
+- **Offline voice commands** (MFCC + HMM)
 
 ---
 
@@ -19,13 +23,17 @@ puzzlebot_sim/
 │   ├── puzzlebot_bringup/        # Launch files + YAML configs (entry point)
 │   ├── puzzlebot_localization/   # C++: odometry_node, kalman_filter_node (EKF)
 │   ├── puzzlebot_slam/           # Python: slam_node (log-odds grid), mcl (particles)
-│   ├── puzzlebot_perception/     # Python: aruco_node, image_viewer_node, calib pipeline
+│   ├── puzzlebot_perception/     # Python: aruco_node, qr_node, image_viewer_node, calib
+│   ├── puzzlebot_logo_detector/  # Python: logo_detector_node (YOLO11n ONNX — Pepsi/Amazon/Walmart)
 │   ├── puzzlebot_controller/     # C++: pd_controller_node (steering)
-│   ├── puzzlebot_planning/       # Python: path_planner_node, obstacle_avoidance_node
-│   ├── puzzlebot_control/        # Python: state_machine_node
+│   ├── puzzlebot_planning/       # Python: path_planner_node, obstacle_avoidance, waypoint_navigator
+│   ├── puzzlebot_control/        # Python: state_machine_node (misión logística de almacén)
+│   ├── puzzlebot_voice_commands/ # Python: reconocimiento de voz offline (MFCC + HMM)
+│   ├── puzzlebot_web_bridge/     # Python: bridge ROS 2 ↔ WebSocket (bidireccional)
 │   ├── puzzlebot_msgs/           # Custom ROS 2 message definitions
 │   └── shared_utils/             # Shared Python helpers
-├── docs/                         # Technical guides (SLAM, setup, workflow)
+├── web_dashboard/                # Frontend React + Vite (visualización + control)
+├── docs/                         # Technical guides (SLAM, setup, workflow, dashboard)
 └── scripts/                      # Build and run helper scripts
 ```
 
@@ -282,6 +290,64 @@ cd src/puzzlebot_slam/puzzlebot_slam
 ```
 
 See [docs/slam_mapping.md](docs/slam_mapping.md) for the algorithm details.
+
+---
+
+## Warehouse Logistics Mission
+
+Mission de entrega en almacén coordinada por `state_machine_node` (`puzzlebot_control`):
+**escanear QR → recoger pallet (montacargas, stub) → navegar a docks → identificar
+el tráiler por su logo → depositar**.
+
+### Flujo de estados
+
+```
+IDLE
+ ├─ Misión 1 ─────────────────→ SCANNING_QR
+ └─ Misión 2 → WAITING_FOR_GOAL → GOING_TO_START → SCANNING_QR
+                (click en mapa)   (llegada por /odom)
+SCANNING_QR  → (QR estable, p.ej. "wolmar") → FORKLIFT_UP → NAVIGATING_TO_DOCKS
+NAVIGATING_TO_DOCKS → (llega a dock_scan) → SCANNING_LOGOS
+SCANNING_LOGOS → (logo == target, p.ej. "Walmart") → FORKLIFT_DOWN → DONE → IDLE
+```
+
+El QR contiene el nombre interno del cliente (`wolmar`/`popsi`/`emezon`), que el
+state machine mapea al logo del tráiler (`Walmart`/`Pepsi`/`Amazon`).
+
+### Nodos involucrados
+
+| Nodo | Paquete | Rol en la misión |
+|------|---------|------------------|
+| `state_machine_node` | `puzzlebot_control` | Coordina la misión; publica `/mission_state`, `/navigate_to_waypoint`, `/forklift/command`, `/mission/markers` |
+| `qr_node` | `puzzlebot_perception` | Lee el QR (`cv2.QRCodeDetector`) → `/qr/detections` |
+| `logo_detector_node` | `puzzlebot_logo_detector` | YOLO11n ONNX → `/logo_detection/result` |
+| `waypoint_navigator_node` | `puzzlebot_planning` | Convierte nombre de waypoint → `/goal_pose` |
+| `puzzlebot_web_bridge` | `puzzlebot_web_bridge` | Dashboard ↔ misión (botones M1/M2/Detener, overlays) |
+
+### Lanzar la misión (manual / testing)
+
+```bash
+# 1) Nodo de misión (en Gazebo, apuntar la parada de seguridad al DiffDrive)
+ros2 run puzzlebot_control state_machine_node --ros-args \
+  -p mission_config_file:=src/puzzlebot_control/config/mission_config.yaml \
+  -p waypoints_file:=src/puzzlebot_bringup/config/waypoints.yaml \
+  -p cmd_vel_topic:=/model/puzzlebot/cmd_vel
+
+# 2) Percepción (gateada por estado → solo corre en su fase)
+ros2 run puzzlebot_perception qr_node            --ros-args -p gate_by_mission:=true
+ros2 run puzzlebot_logo_detector logo_detector_node --ros-args -p gate_by_mission:=true -p show_window:=false
+
+# 3) Iniciar / detener desde terminal (o usar los botones del dashboard)
+ros2 topic pub --once /mission_start std_msgs/String '{data: "1"}'   # o "2" / "stop"
+ros2 topic echo /mission_state
+```
+
+> **Markers en RViz:** *Add → By topic → `/mission/markers`* para ver un punto de
+> color donde se confirmó cada QR/logo.
+
+Detalle completo de estados, parámetros y `mission_config.yaml`:
+[src/puzzlebot_control/README.md](src/puzzlebot_control/README.md).
+El montacargas (lifter) está en **stub** — ver esa misma referencia.
 
 ---
 
