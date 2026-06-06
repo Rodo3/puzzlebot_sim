@@ -72,11 +72,7 @@ export default function VoiceCommandPanel({ voiceData, history }) {
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          channelCount: 1,
-        },
+        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: false, noiseSuppression: false },
       });
     } catch (e) {
       setRecError(`Mic: ${e.message}`);
@@ -84,7 +80,7 @@ export default function VoiceCommandPanel({ voiceData, history }) {
       return;
     }
 
-    const ctx = new AudioContext();
+    const ctx = new AudioContext({ sampleRate: 16000 });
     const source = ctx.createMediaStreamSource(stream);
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (e) => {

@@ -66,7 +66,18 @@ class VoiceInferenceEngine:
         )
         hmm_model = HiddenMarkovModelClassifier.load(hmm_path)
 
-        return cls(hmm_model, hmm_cfg)
+        engine = cls(hmm_model, hmm_cfg)
+        # Warmup: fuerza la importación de librosa y compila las rutas JIT
+        # para que la primera inferencia real no sufra el costo de import.
+        engine._warmup()
+        return engine
+
+    def _warmup(self) -> None:
+        dummy = np.zeros(16000, dtype=np.float32)
+        try:
+            self.infer(dummy, 16000)
+        except Exception:
+            pass
 
     def infer(self, signal: np.ndarray, sample_rate: int = 16000) -> InferenceResult:
         """Ejecuta inferencia sobre una señal PCM float32.

@@ -315,6 +315,15 @@ class BridgeNode(Node):
             self._voice_timer.cancel()
             self._voice_timer = None
 
+        # ── Comandos de elevador (sin cmd_vel) ───────────────────────────────
+        elevator_map = {'subir': 'up', 'bajar': 'down', 'tomar': 'up', 'soltar': 'down'}
+        if cmd in elevator_map:
+            action = elevator_map[cmd]
+            self._pub_mission.publish(String(data=f'elevator:{action}'))
+            self.get_logger().info(f'voice → elevator: {action}  (comando: {cmd})')
+            return
+
+        # ── Comandos de navegación ────────────────────────────────────────────
         twist = Twist()
         if cmd == 'avanzar':
             twist.linear.x = self._voice_lin
@@ -325,7 +334,7 @@ class BridgeNode(Node):
         elif cmd == 'derecha':
             twist.angular.z = -self._voice_ang
         elif cmd == 'alto':
-            pass  # zero twist = stop, publish once and return
+            pass  # zero twist = stop
         elif cmd == 'inicio':
             self._pub_nav_wp.publish(String(data='inicio'))
             self.get_logger().info('voice → navigate_to_waypoint: inicio')
