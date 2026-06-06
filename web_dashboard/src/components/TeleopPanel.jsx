@@ -42,6 +42,11 @@ export default function TeleopPanel({ connected, onCommand }) {
     onCommand({ type: 'mission_stop' });
   }, [onCommand]);
 
+  const hardEmergencyStop = useCallback(() => {
+    clearInterval_();
+    onCommand({ type: 'emergency_stop' });
+  }, [clearInterval_, onCommand]);
+
   const release = useCallback(() => {
     if (dirRef.current !== null) { clearInterval_(); sendStop(); }
   }, [clearInterval_, sendStop]);
@@ -149,6 +154,11 @@ export default function TeleopPanel({ connected, onCommand }) {
         <div className="elevator-hint">↑ subir · ■ parar · ↓ bajar — montacargas (stub)</div>
       ) : (
         <div className="speed-controls">
+          <button
+            className="dpad-btn dpad-emergency"
+            disabled={!connected}
+            onClick={hardEmergencyStop}
+          >Emergencia</button>
           <label className="speed-label">
             <span>Linear: <strong>{linearSpeed.toFixed(2)}</strong> m/s</span>
             <input type="range" min="0.05" max="0.5" step="0.05"

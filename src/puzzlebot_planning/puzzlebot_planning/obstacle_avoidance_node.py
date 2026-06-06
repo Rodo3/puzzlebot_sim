@@ -7,6 +7,7 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Bool
 
 
 class ObstacleAvoidanceNode(Node):
@@ -87,6 +88,7 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter('teleop_timeout_sec', 0.5)
         self._teleop_timeout = self.get_parameter('teleop_timeout_sec').value
         self._last_teleop_t  = None
+        self._emergency_stop_active = False
 
         self.sub_scan_   = self.create_subscription(
             LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
@@ -96,8 +98,11 @@ class ObstacleAvoidanceNode(Node):
             Odometry, '/odom', self.odom_cb, 10)
         self.sub_teleop_ = self.create_subscription(
             Twist, '/cmd_vel_teleop', self._teleop_cb, 10)
+        self.sub_emergency_ = self.create_subscription(
+            Bool, '/emergency_stop', self._emergency_cb, 10)
 
         self.pub_cmd_  = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.create_timer(0.05, self._emergency_loop)
 
         self.get_logger().info(
             f'obstacle_avoidance_node started '
@@ -109,9 +114,25 @@ class ObstacleAvoidanceNode(Node):
     def _teleop_cb(self, msg: Twist):
         import time as _time
         self._last_teleop_t = _time.monotonic()
+        if self._emergency_stop_active:
+            self.pub_cmd_.publish(Twist())
+            return
         # Publicar el comando de teleop inmediatamente para garantizar que llega
         # DESPUÉS del último output de navegación y no sea overrideado por éste.
         self.pub_cmd_.publish(msg)
+
+    def _emergency_cb(self, msg: Bool):
+        if msg.data and not self._emergency_stop_active:
+            self.get_logger().error('EMERGENCY STOP activo')
+        elif not msg.data and self._emergency_stop_active:
+            self.get_logger().warn('EMERGENCY STOP liberado')
+        self._emergency_stop_active = bool(msg.data)
+        if self._emergency_stop_active:
+            self.pub_cmd_.publish(Twist())
+
+    def _emergency_loop(self):
+        if self._emergency_stop_active:
+            self.pub_cmd_.publish(Twist())
 
     def _teleop_active(self):
         if self._last_teleop_t is None:
@@ -132,6 +153,10 @@ class ObstacleAvoidanceNode(Node):
         self.min_front = float(np.min(ranges[mask])) if mask.any() else float('inf')
 
     def cmd_cb(self, msg: Twist):
+        if self._emergency_stop_active:
+            self.pub_cmd_.publish(Twist())
+            return
+
         # Teleop has priority: suppress navigation commands while user is driving
         if self._teleop_active():
             return

@@ -155,6 +155,7 @@ class BridgeNode(Node):
         self._pub_nav_wp     = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
         self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
         self._pub_nav_cancel = self.create_publisher(Bool, '/navigation/cancel', 10)
+        self._pub_emergency_stop = self.create_publisher(Bool, '/emergency_stop', 10)
         self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
         # Mission control: dashboard → state_machine_node ("1" / "2" / "stop")
         self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_start'], 10)
@@ -366,11 +367,13 @@ class BridgeNode(Node):
         self._pub_cmd_vel_out.publish(stop)
         self._pub_cmd_vel_teleop.publish(stop)
 
-    def _stop_all(self, reason: str):
+    def _stop_all(self, reason: str, emergency: bool = False):
         import threading
         if self._voice_timer is not None:
             self._voice_timer.cancel()
             self._voice_timer = None
+        if emergency:
+            self._pub_emergency_stop.publish(Bool(data=True))
         self._pub_nav_cancel.publish(Bool(data=True))
         self._pub_nav_wp.publish(String(data='stop'))
         self._pub_mission.publish(String(data='stop'))
@@ -666,6 +669,9 @@ class BridgeNode(Node):
 
             elif msg_type == 'mission_stop':
                 self._stop_all('mission_stop')
+
+            elif msg_type == 'emergency_stop':
+                self._stop_all('emergency_stop', emergency=True)
 
             else:
                 self.get_logger().debug(f'Unknown command type: {msg_type}')
