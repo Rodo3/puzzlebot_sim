@@ -302,6 +302,38 @@ function StateTimeline({ events }) {
   );
 }
 
+// ── Semicircle gauge card ─────────────────────────────────────────────────────
+function GaugeCard({ label, value, displayValue, max = 1, color = 'var(--accent)', sub = '' }) {
+  const pct   = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
+  const r     = 28, cx = 42, cy = 36;
+  const angle = Math.PI * (1 - pct);
+  const fx    = cx + r * Math.cos(angle);
+  const fy    = cy - r * Math.sin(angle);
+  const large = pct > 0.5 ? 1 : 0;
+  const shown = displayValue ?? `${(pct * 100).toFixed(0)}%`;
+
+  return (
+    <div className="gauge-card">
+      <div className="gauge-label">{label}</div>
+      <svg width="84" height="46" viewBox="0 0 84 46">
+        {/* track */}
+        <path d={`M ${cx-r} ${cy} A ${r} ${r} 0 1 1 ${cx+r} ${cy}`}
+          fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="6" strokeLinecap="round" />
+        {/* fill */}
+        {pct > 0.01 && (
+          <path d={`M ${cx-r} ${cy} A ${r} ${r} 0 ${large} 1 ${fx} ${fy}`}
+            fill="none" stroke={color} strokeWidth="6" strokeLinecap="round" />
+        )}
+        {/* tick labels */}
+        <text x={cx-r} y={cy+13} fontSize="7" fill="rgba(255,255,255,0.22)" textAnchor="middle">0</text>
+        <text x={cx+r} y={cy+13} fontSize="7" fill="rgba(255,255,255,0.22)" textAnchor="middle">{max}</text>
+      </svg>
+      <div className="gauge-value" style={{ color }}>{shown}</div>
+      {sub && <div className="gauge-sub">{sub}</div>}
+    </div>
+  );
+}
+
 // ── Metric card ───────────────────────────────────────────────────────────────
 function MetricCard({ label, value, unit, color = 'var(--accent)' }) {
   return (
@@ -527,17 +559,50 @@ export default function MetricsPanel({
         </button>
       </div>
 
+      {/* ── Health gauges ── */}
+      <div className="metrics-gauges">
+        <GaugeCard
+          label="Distancia"
+          value={sessionStats.distanceTraveled}
+          max={10}
+          displayValue={`${sessionStats.distanceTraveled.toFixed(1)}m`}
+          color="var(--accent)"
+          sub="/ 10 m"
+        />
+        <GaugeCard
+          label="ArUco Freq"
+          value={parseFloat(arucoFreqHz)}
+          max={2}
+          displayValue={`${arucoFreqHz} Hz`}
+          color="#a78bfa"
+          sub="/ 2 Hz"
+        />
+        <GaugeCard
+          label="Err K↔SLAM"
+          value={avgLocError != null ? Math.max(0, 1 - avgLocError / 0.2) : 0}
+          max={1}
+          displayValue={avgLocError != null ? `${(avgLocError * 100).toFixed(1)} cm` : '—'}
+          color="var(--green)"
+          sub={avgLocError != null ? (avgLocError < 0.05 ? '✓ bueno' : '⚠ alto') : 'sin datos'}
+        />
+        <GaugeCard
+          label="Kalman P"
+          value={avgTraceP != null ? Math.max(0, 1 - avgTraceP / 0.5) : 0}
+          max={1}
+          displayValue={avgTraceP != null ? avgTraceP.toFixed(4) : '—'}
+          color="var(--warn)"
+          sub="trace(P_xy)"
+        />
+      </div>
+
       {/* ── Counter cards ── */}
       <div className="metrics-cards">
         <MetricCard label="Duración"      value={`${mins}m ${secs}s`}                              color="var(--muted)"  />
-        <MetricCard label="Distancia"     value={sessionStats.distanceTraveled.toFixed(2)} unit="m" color="var(--accent)" />
         <MetricCard label="ArUco upd."    value={sessionStats.arucoCount}                           color="#a78bfa"       />
-        <MetricCard label="ArUco freq"    value={`${arucoFreqHz}`}                        unit="Hz" color="#7c3aed"       />
         <MetricCard label="Scan match"    value={sessionStats.scanMatchCount}                        color="var(--blue)"   />
-        <MetricCard label="Avg trace(P)"  value={avgTraceP  != null ? avgTraceP.toFixed(4)  : '—'} unit="m²" color="var(--green)"  />
-        <MetricCard label="Avg err K↔S"   value={avgLocError != null ? avgLocError.toFixed(4) : '—'} unit="m" color="var(--warn)"   />
         <MetricCard label="Avg innov."    value={avgInnovation != null ? avgInnovation.toFixed(4) : '—'} unit="m" color="var(--err)" />
         <MetricCard label="Replans"       value={sessionStats.replanCount}                          color="var(--warn)"   />
+        <MetricCard label="Stops"         value={sessionStats.obstacleStops}                        color="var(--err)"    />
       </div>
 
       {/* ══ KALMAN FILTER ══════════════════════════════════════════════════════ */}

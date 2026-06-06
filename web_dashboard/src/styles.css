@@ -41,7 +41,7 @@
   /* ─ Typography ─ */
   --font-ui:   'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Courier New', monospace;
-  --font:      var(--font-mono);
+  --font:      var(--font-ui);
 
   --radius: 6px;
 }
@@ -50,7 +50,7 @@ html, body, #root {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 13px;
 }
 
@@ -337,9 +337,14 @@ html, body, #root {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 1.2px;
+  letter-spacing: 1px;
   color: var(--cyan);
-  margin-bottom: 8px;
+  /* bleed to panel edges and add tinted background strip */
+  margin: -10px -12px 10px;
+  padding: 7px 12px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: rgba(34,211,238,0.07);
+  border-bottom: 1px solid rgba(34,211,238,0.14);
   flex-shrink: 0;
 }
 
@@ -359,6 +364,8 @@ hr {
 .section-mission .panel h3,
 .section-mission .mission-title {
   color: var(--purple) !important;
+  background: rgba(168,85,247,0.09);
+  border-bottom-color: rgba(168,85,247,0.18);
 }
 
 /* Mode / Waypoints — cyan (default, explicit for clarity) */
@@ -383,6 +390,8 @@ hr {
 }
 .section-teleop .panel h3 {
   color: var(--orange) !important;
+  background: rgba(249,115,22,0.09);
+  border-bottom-color: rgba(249,115,22,0.18);
 }
 .section-teleop .dpad-btn:hover:not(:disabled) {
   background: var(--orange-dim);
@@ -400,6 +409,8 @@ hr {
 }
 .section-voice .panel h3 {
   color: var(--violet) !important;
+  background: rgba(192,132,252,0.09);
+  border-bottom-color: rgba(192,132,252,0.18);
 }
 .section-voice .btn-listen {
   border-color: var(--violet);
@@ -1042,14 +1053,17 @@ hr {
 
 .metrics-section-title {
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.2px;
   color: var(--cyan);
-  padding: 4px 0 0;
-  border-top: 1px solid var(--border);
-  margin-top: 2px;
+  padding: 5px 10px;
+  background: rgba(34,211,238,0.06);
+  border: 1px solid rgba(34,211,238,0.13);
+  border-left: 3px solid var(--cyan);
+  border-radius: var(--radius);
+  margin-top: 4px;
 }
 
 .metrics-note {
@@ -1074,31 +1088,78 @@ hr {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 10px;
+  padding: 10px 10px 8px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 1px;
+  text-align: center;
 }
 
 .metric-value {
-  font-size: 17px;
-  font-weight: bold;
-  line-height: 1.2;
-  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-family: var(--font-ui);
+  letter-spacing: -0.5px;
 }
 
 .metric-unit {
   font-size: 10px;
   color: var(--muted);
-  margin-top: -2px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  margin-top: -1px;
 }
 
 .metric-label {
   font-family: var(--font-ui);
   font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+/* ── Gauge cards (semicircle) ────────────────────────── */
+.metrics-gauges {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.gauge-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 8px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.gauge-label {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 2px;
+}
+
+.gauge-value {
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: -6px;
+}
+
+.gauge-sub {
+  font-family: var(--font-ui);
+  font-size: 9px;
   color: var(--muted);
   margin-top: 2px;
 }
