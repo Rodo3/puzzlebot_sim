@@ -109,6 +109,9 @@ class ObstacleAvoidanceNode(Node):
     def _teleop_cb(self, msg: Twist):
         import time as _time
         self._last_teleop_t = _time.monotonic()
+        # Publicar el comando de teleop inmediatamente para garantizar que llega
+        # DESPUÉS del último output de navegación y no sea overrideado por éste.
+        self.pub_cmd_.publish(msg)
 
     def _teleop_active(self):
         if self._last_teleop_t is None:

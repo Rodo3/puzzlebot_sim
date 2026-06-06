@@ -158,7 +158,7 @@ export default function VoiceCommandPanel({ voiceData, history }) {
           <div className="voice-main">
             <div className="voice-decision-row">
               <span className="voice-command">{voiceData.command ?? '—'}</span>
-              <span className="badge badge-info">KMeans decide</span>
+              <span className="badge badge-info">HMM</span>
             </div>
             <div className="voice-meta">
               <span className="muted">margen: <b>{voiceData.confidence != null ? voiceData.confidence.toFixed(4) : '—'}</b></span>
@@ -168,15 +168,9 @@ export default function VoiceCommandPanel({ voiceData, history }) {
             </div>
           </div>
 
-          {/* Per-model predictions */}
-          {(kmeansRows || hmmRows) && (
+          {/* HMM top-3 */}
+          {hmmRows && (
             <div className="models-grid">
-              <ModelPredictions
-                label="KMeans"
-                rows={kmeansRows}
-                winner={voiceData.command}
-                scoreLabel="dist ↓"
-              />
               <ModelPredictions
                 label="HMM"
                 rows={hmmRows}

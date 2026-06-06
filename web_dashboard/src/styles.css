@@ -597,6 +597,8 @@ hr {
 
 .dpad-stop { border-color: var(--err); color: var(--err); }
 .dpad-stop:hover:not(:disabled) { background: var(--err-dim); border-color: var(--err); }
+.dpad-emergency { background: rgba(248,113,113,0.08); font-weight: bold; }
+.dpad-emergency:active:not(:disabled) { background: rgba(248,113,113,0.30); }
 
 .speed-controls { display: flex; flex-direction: column; gap: 6px; }
 

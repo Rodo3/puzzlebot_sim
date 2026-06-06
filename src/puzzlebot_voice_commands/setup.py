@@ -1,3 +1,4 @@
+import glob
 from setuptools import find_packages, setup
 
 package_name = 'puzzlebot_voice_commands'
@@ -10,6 +11,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/artifacts_final',
+            glob.glob('artifacts_final/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

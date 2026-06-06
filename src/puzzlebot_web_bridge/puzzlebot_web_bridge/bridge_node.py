@@ -107,9 +107,23 @@ class BridgeNode(Node):
             'ranked_predictions': None,
         }
 
-        # Voice inference engine (optional — loaded if artifact_dir is set).
+        # Voice inference engine (optional — loaded if artifact_dir is set or auto-detected).
         self._inference_engine = None
         artifact_dir = self.get_parameter('artifact_dir').get_parameter_value().string_value
+        if not artifact_dir:
+            # Auto-detect: buscar en el share directory del paquete de voz (instalado por colcon)
+            try:
+                from ament_index_python.packages import get_package_share_directory
+                import os as _os
+                _auto = _os.path.join(
+                    get_package_share_directory('puzzlebot_voice_commands'),
+                    'artifacts_final',
+                )
+                if _os.path.isdir(_auto):
+                    artifact_dir = _auto
+                    self.get_logger().info(f'artifact_dir auto-detectado: {artifact_dir}')
+            except Exception:
+                pass
         if artifact_dir:
             self._load_voice_engine(artifact_dir)
 

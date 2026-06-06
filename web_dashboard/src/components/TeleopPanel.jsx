@@ -37,6 +37,11 @@ export default function TeleopPanel({ connected, onCommand }) {
     onCommand({ type: 'cmd_vel', linear_x: 0, angular_z: 0 });
   }, [onCommand]);
 
+  const emergencyStop = useCallback(() => {
+    onCommand({ type: 'cmd_vel', linear_x: 0, angular_z: 0 });
+    onCommand({ type: 'mission_stop' });
+  }, [onCommand]);
+
   const release = useCallback(() => {
     if (dirRef.current !== null) { clearInterval_(); sendStop(); }
   }, [clearInterval_, sendStop]);
@@ -114,10 +119,11 @@ export default function TeleopPanel({ connected, onCommand }) {
             <button {...robotBtn('left')}>←</button>
           )}
           <button
-            className="dpad-btn dpad-stop"
+            className={`dpad-btn dpad-stop${!isElevator ? ' dpad-emergency' : ''}`}
             disabled={!connected}
+            title={isElevator ? 'Parar elevador' : 'Parada de emergencia — cancela misión y movimiento'}
             onClick={isElevator ? () => sendElevator('stop') : undefined}
-            onPointerDown={isElevator ? undefined : (e) => { e.preventDefault(); clearInterval_(); sendStop(); }}
+            onPointerDown={isElevator ? undefined : (e) => { e.preventDefault(); clearInterval_(); emergencyStop(); }}
           >■</button>
           {isElevator ? (
             <button className="dpad-btn" disabled>→</button>
