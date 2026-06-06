@@ -41,7 +41,7 @@ from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, QoSProfile, ReliabilityPolicy,
                         qos_profile_sensor_data)
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import ColorRGBA, String
+from std_msgs.msg import Bool, ColorRGBA, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 
@@ -238,6 +238,10 @@ class DynamicObstacleManager(Node):
         self.create_subscription(OccupancyGrid, map_topic,  self._map_cb,   latched)
         self.create_subscription(Path,         path_topic,  self._path_cb,  10)
         self.create_subscription(Twist,        cmd_in,      self._cmd_cb,   10)
+        self.create_subscription(Bool, '/navigation/cancel',
+                                 self._cancel_cb, 10)
+        self.create_subscription(Bool, '/navigation/goal_reached',
+                                 self._cancel_cb, 10)
         # /test_obstacle_pose: permite inyectar obstáculos simulados sin LiDAR real.
         # Publicado por dynamic_obstacle_spawner_node en modo desktop (sin Gazebo).
         # Formato: PoseStamped en frame 'map' con posición del obstáculo.
@@ -283,6 +287,23 @@ class DynamicObstacleManager(Node):
             self._transition(REPLAN)
         elif self._state in (NORMAL, FOLLOW_NEW_PATH):
             self._trigger_replan('nuevo goal recibido')
+
+    def _clear_goal(self):
+        self._goal = None
+        self._goal_x = None
+        self._goal_y = None
+        self._current_path = None
+        self._path_valid = False
+        self._new_path_received = False
+
+    def _cancel_cb(self, msg: Bool):
+        if not msg.data:
+            return
+        self._clear_goal()
+        self._state = NORMAL
+        self._state_entry = time.monotonic()
+        self._pub_cmd.publish(Twist())
+        self._log('Navegación cancelada — goal persistente limpiado')
 
     def _map_cb(self, msg: OccupancyGrid):
         prev = self._base_map
@@ -516,7 +537,7 @@ class DynamicObstacleManager(Node):
             dist_goal = math.hypot(self._goal_x - self._rx, self._goal_y - self._ry)
             if dist_goal < 0.15:
                 self._log(f'Goal alcanzado (dist={dist_goal:.3f}m) → NORMAL')
-                self._current_path = None
+                self._clear_goal()
                 self._transition(NORMAL)
                 return
 

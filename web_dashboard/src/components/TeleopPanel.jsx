@@ -66,6 +66,7 @@ export default function TeleopPanel({ connected, onCommand }) {
     if (!connected) return;
     clearInterval_(); // clear any previous interval
     dirRef.current = dir;
+    onCommand({ type: 'cancel_navigation' });
     onCommand({ type: 'cmd_vel', ...velForDir(dir) }); // immediate send
     intervalRef.current = setInterval(() => {
       if (dirRef.current) onCommand({ type: 'cmd_vel', ...velForDir(dirRef.current) });

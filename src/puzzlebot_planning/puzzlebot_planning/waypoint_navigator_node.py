@@ -25,7 +25,7 @@ import yaml
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 
 class WaypointNavigatorNode(Node):
@@ -56,6 +56,10 @@ class WaypointNavigatorNode(Node):
 
         self._cmd_sub = self.create_subscription(
             String, '/navigate_to_waypoint', self._on_command, 10)
+        self._cancel_sub = self.create_subscription(
+            Bool, '/navigation/cancel', self._on_cancel, 10)
+        self._goal_reached_sub = self.create_subscription(
+            Bool, '/navigation/goal_reached', self._on_goal_reached, 10)
 
         self.get_logger().info(
             f'WaypointNavigator listo — {len(self._waypoints)} waypoints cargados: '
@@ -123,6 +127,21 @@ class WaypointNavigatorNode(Node):
 
         self._current_goal = name
         self._send_goal(name)
+
+    def _on_cancel(self, msg: Bool) -> None:
+        if not msg.data:
+            return
+        self._current_goal = ''
+        self._publish_status('CANCELADO')
+        self.get_logger().info('Navegación cancelada')
+
+    def _on_goal_reached(self, msg: Bool) -> None:
+        if not msg.data or not self._current_goal:
+            return
+        reached = self._current_goal
+        self._current_goal = ''
+        self._publish_status(f'COMPLETADO: {reached}')
+        self.get_logger().info(f'Waypoint completado: {reached}')
 
     def _send_goal(self, name: str) -> None:
         wp = self._waypoints[name]

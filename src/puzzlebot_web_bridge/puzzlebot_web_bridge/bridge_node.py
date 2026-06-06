@@ -106,6 +106,7 @@ class BridgeNode(Node):
             'inference_time_ms': None,
             'ranked_predictions': None,
         }
+        self._last_cmd_vel_log_t = 0.0
 
         # Voice inference engine (optional — loaded if artifact_dir is set or auto-detected).
         self._inference_engine = None
@@ -153,6 +154,7 @@ class BridgeNode(Node):
         self._pub_goal_pose  = self.create_publisher(PoseStamped, DEFAULT_TOPICS['goal_pose'], _latched_qos)
         self._pub_nav_wp     = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
         self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
+        self._pub_nav_cancel = self.create_publisher(Bool, '/navigation/cancel', 10)
         self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
         # Mission control: dashboard → state_machine_node ("1" / "2" / "stop")
         self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_start'], 10)
@@ -560,6 +562,11 @@ class BridgeNode(Node):
                 msg.angular.z = float(data.get('angular_z', 0.0))
                 self._pub_cmd_vel_out.publish(msg)
                 self._pub_cmd_vel_teleop.publish(msg)
+                now = time.monotonic()
+                if now - self._last_cmd_vel_log_t > 0.5:
+                    self._last_cmd_vel_log_t = now
+                    self.get_logger().info(
+                        f'dashboard cmd_vel → lin={msg.linear.x:.2f} ang={msg.angular.z:.2f}')
 
             elif msg_type == 'goal_pose':
                 msg = PoseStamped()
@@ -580,6 +587,14 @@ class BridgeNode(Node):
                 if name:
                     self._pub_nav_wp.publish(String(data=name))
                     self.get_logger().info(f'navigate_to_waypoint → {name}')
+
+            elif msg_type == 'cancel_navigation':
+                stop = Twist()
+                self._pub_nav_cancel.publish(Bool(data=True))
+                self._pub_nav_wp.publish(String(data='stop'))
+                self._pub_cmd_vel_out.publish(stop)
+                self._pub_cmd_vel_teleop.publish(stop)
+                self.get_logger().info('navigation cancel requested from dashboard')
 
             elif msg_type == 'slam_reset':
                 self._pub_slam_reset.publish(Bool(data=True))

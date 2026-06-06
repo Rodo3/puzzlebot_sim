@@ -2,7 +2,10 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 /**
@@ -37,7 +40,11 @@ public:
     sub_path_ = create_subscription<nav_msgs::msg::Path>(
       "/planned_path", 1, std::bind(&SteeringControllerNode::path_cb, this, std::placeholders::_1));
 
+    sub_cancel_ = create_subscription<std_msgs::msg::Bool>(
+      "/navigation/cancel", 10, std::bind(&SteeringControllerNode::cancel_cb, this, std::placeholders::_1));
+
     pub_cmd_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel_in", 10);
+    pub_goal_reached_ = create_publisher<std_msgs::msg::Bool>("/navigation/goal_reached", 10);
 
     double hz = get_parameter("control_frequency").as_double();
     timer_ = create_wall_timer(
@@ -88,6 +95,16 @@ private:
                 path_.size(), path_idx_);
   }
 
+  void cancel_cb(const std_msgs::msg::Bool::SharedPtr msg)
+  {
+    if (!msg->data) return;
+    path_.clear();
+    path_idx_ = 0;
+    goal_reached_ = true;
+    pub_cmd_->publish(geometry_msgs::msg::Twist());
+    RCLCPP_INFO(get_logger(), "Navigation cancelled — path cleared");
+  }
+
   void control_loop()
   {
     geometry_msgs::msg::Twist cmd;
@@ -113,7 +130,11 @@ private:
     double dist_to_goal = std::hypot(goal.x - robot_x_, goal.y - robot_y_);
     if (dist_to_goal < goal_tol_) {
       goal_reached_ = true;
+      path_.clear();
       RCLCPP_INFO(get_logger(), "Goal reached (dist=%.3f m)", dist_to_goal);
+      std_msgs::msg::Bool reached;
+      reached.data = true;
+      pub_goal_reached_->publish(reached);
       pub_cmd_->publish(cmd);
       return;
     }
@@ -171,7 +192,9 @@ private:
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr     sub_path_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr     sub_cancel_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr  pub_cmd_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr        pub_goal_reached_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   std::vector<geometry_msgs::msg::PoseStamped> path_;

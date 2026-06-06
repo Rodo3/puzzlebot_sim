@@ -13,7 +13,19 @@ import MissionPanel      from './components/MissionPanel.jsx';
 import MetricsPanel      from './components/MetricsPanel.jsx';
 import TeamPanel        from './components/TeamPanel.jsx';
 
-const WS_URL            = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
+function normalizeWsUrl(value) {
+  if (!value) return null;
+  if (value.startsWith('ws://') || value.startsWith('wss://')) {
+    return value.endsWith('/ws') ? value : `${value.replace(/\/$/, '')}/ws`;
+  }
+  return `ws://${value.replace(/\/$/, '')}/ws`;
+}
+
+const WS_QUERY_PARAM    = new URLSearchParams(window.location.search).get('ws');
+const DEFAULT_WS_URL    = `ws://${window.location.hostname}:8000/ws`;
+const ENV_WS_URL        = normalizeWsUrl(import.meta.env.VITE_WS_URL);
+const QUERY_WS_URL      = normalizeWsUrl(WS_QUERY_PARAM);
+const WS_URLS           = [...new Set([QUERY_WS_URL, ENV_WS_URL, DEFAULT_WS_URL].filter(Boolean))];
 const ROBOT_ENV         = import.meta.env.VITE_ROBOT_ENV ?? 'sim';
 const MAX_TRAJECTORY    = 500;
 const MAX_LOGS          = 50;
@@ -90,6 +102,7 @@ export default function App() {
   const [trajectory,     setTrajectory]     = useState([]);
   const [voiceHistory,   setVoiceHistory]   = useState([]);
   const [logs,           setLogs]           = useState([]);
+  const [wsEndpoint,     setWsEndpoint]     = useState(WS_URLS[0] ?? DEFAULT_WS_URL);
   const [mode,           setMode]           = useState('mapping');
   const [goalMarker,     setGoalMarker]     = useState(null);
   const [availableMaps,  setAvailableMaps]  = useState([]);
@@ -336,9 +349,10 @@ export default function App() {
   }, [addLog]);
 
   useEffect(() => {
-    const client = createWebSocketClient(WS_URL, {
-      onConnect:    () => { setConnected(true);  addLog('WebSocket connected'); },
-      onDisconnect: () => { setConnected(false); addLog('WebSocket disconnected'); },
+    const client = createWebSocketClient(WS_URLS, {
+      onConnecting: (url) => { setWsEndpoint(url); },
+      onConnect:    (url) => { setConnected(true);  addLog(`WebSocket connected: ${url}`); },
+      onDisconnect: (url) => { setConnected(false); addLog(`WebSocket disconnected: ${url}`); },
       onMessage:    handleMessage,
     });
     clientRef.current = client;
@@ -429,7 +443,10 @@ export default function App() {
 
         <span className="header-sep">|</span>
 
-        <span className={`conn-badge ${connected ? 'conn-ok' : 'conn-err'}`}>
+        <span
+          className={`conn-badge ${connected ? 'conn-ok' : 'conn-err'}`}
+          title={wsEndpoint}
+        >
           {connected ? 'Connected' : 'Disconnected'}
         </span>
 

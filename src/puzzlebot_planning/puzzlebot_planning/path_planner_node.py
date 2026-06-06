@@ -21,6 +21,7 @@ from nav_msgs.msg import OccupancyGrid, Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.ndimage import binary_closing, binary_dilation, distance_transform_edt
+from std_msgs.msg import Bool
 
 try:
     import tf2_ros
@@ -230,6 +231,10 @@ class PathPlannerNode(Node):
         # con el goal persistente hacia el mismo destino final.
         self.sub_replan_ = self.create_subscription(
             PoseStamped, '/replan_trigger', self.replan_trigger_cb, 10)
+        self.sub_cancel_ = self.create_subscription(
+            Bool, '/navigation/cancel', self.cancel_cb, 10)
+        self.sub_goal_reached_ = self.create_subscription(
+            Bool, '/navigation/goal_reached', self.cancel_cb, 10)
         self.pub_path_ = self.create_publisher(Path, '/planned_path', 1)
         # Flag: si ya recibimos /augmented_map, ignorar /map base para evitar duplicados
         self._using_augmented_map = False
@@ -289,6 +294,16 @@ class PathPlannerNode(Node):
             f'[PP] replan_trigger recibido — replanificando hacia goal persistente '
             f'({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f})')
         self._plan(msg)
+
+    def cancel_cb(self, msg: Bool):
+        if not msg.data:
+            return
+        self.goal_msg_ = None
+        empty = Path()
+        empty.header.stamp = self.get_clock().now().to_msg()
+        empty.header.frame_id = self.map_frame
+        self.pub_path_.publish(empty)
+        self.get_logger().info('[PP] navegación cancelada — goal y path limpiados')
 
     # ── TF pose lookup ────────────────────────────────────────────────────────
 
