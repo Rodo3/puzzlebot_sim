@@ -564,17 +564,18 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Footer (always visible) ── */}
-      <footer className="footer">
-        <VelocityPanel
-          cmdVel={cmdVel}
-          cmdVelIn={cmdVelIn}
-          cmdVelSteering={cmdVelSteering}
-          navState={navState}
-          mode={mode}
-        />
-        <LogsPanel logs={logs} />
-      </footer>
+      {mainView === 'robot' && (
+        <footer className="footer">
+          <VelocityPanel
+            cmdVel={cmdVel}
+            cmdVelIn={cmdVelIn}
+            cmdVelSteering={cmdVelSteering}
+            navState={navState}
+            mode={mode}
+          />
+          <LogsPanel logs={logs} />
+        </footer>
+      )}
 
     </div>
   );

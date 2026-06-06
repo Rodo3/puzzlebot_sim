@@ -1243,6 +1243,12 @@ hr {
   border-left: 4px solid var(--purple);
 }
 
+.team-logo-mark {
+  width: 132px;
+  height: 99px;
+  flex-shrink: 0;
+}
+
 .team-hero-text {
   display: flex;
   flex-direction: column;
@@ -1297,6 +1303,7 @@ hr {
   flex-direction: column;
   gap: 10px;
   transition: border-color 0.15s;
+  min-height: 220px;
 }
 
 .team-card:hover {
@@ -1323,27 +1330,50 @@ hr {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  flex: 1;
 }
 
 .team-card-name {
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--text);
+  min-height: 2.4em;
 }
 
 .team-card-role {
   font-size: 0.78rem;
   color: var(--cyan);
-}
-
-.team-card-focus {
-  font-size: 0.75rem;
-  margin-top: 2px;
+  min-height: 2.4em;
 }
 
 .team-card-github {
   margin-top: 4px;
   font-family: var(--font-mono);
+}
+
+.team-github-link {
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  background: rgba(124, 58, 237, 0.12);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.team-github-link:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.08);
 }
 
 .team-tech {
