@@ -31,6 +31,7 @@ Flujo de uso:
   spawn_mode        [on_path]      on_path | near_path | random_free | fixed_sequence
   use_sim_time      [true]         Reloj de simulación
   rviz              [true]         Lanzar RViz
+  web_bridge        [true]         Lanza bridge WebSocket para el dashboard
 """
 import os
 
@@ -109,6 +110,12 @@ def generate_launch_description():
         'use_sim_time', default_value='true')
     arg_rviz = DeclareLaunchArgument(
         'rviz', default_value='true')
+    arg_web_bridge = DeclareLaunchArgument(
+        'web_bridge', default_value='true',
+        description='Lanza puzzlebot_web_bridge para el dashboard')
+    arg_artifact_dir = DeclareLaunchArgument(
+        'artifact_dir', default_value='',
+        description='Ruta a artifacts_final/ con modelos de voz. Vacío = auto-detectar o deshabilitar.')
 
     world       = LaunchConfiguration('world')
     initial_map = LaunchConfiguration('initial_map')
@@ -118,6 +125,8 @@ def generate_launch_description():
     spawn_mode  = LaunchConfiguration('spawn_mode')
     sim_time    = LaunchConfiguration('use_sim_time')
     rviz_en     = LaunchConfiguration('rviz')
+    web_bridge_en = LaunchConfiguration('web_bridge')
+    artifact_dir = LaunchConfiguration('artifact_dir')
 
     # ── Gazebo Fortress ───────────────────────────────────────────────────────
     gz_sim = IncludeLaunchDescription(
@@ -450,6 +459,19 @@ def generate_launch_description():
         condition=IfCondition(dyn_en),
     )
 
+    web_bridge = Node(
+        package='puzzlebot_web_bridge',
+        executable='bridge_node',
+        name='puzzlebot_web_bridge',
+        output='screen',
+        parameters=[{
+            'use_sim_time':       True,
+            'cmd_vel_out_topic':  '/model/puzzlebot/cmd_vel',
+            'artifact_dir':       artifact_dir,
+        }],
+        condition=IfCondition(web_bridge_en),
+    )
+
     # ── RViz (con retraso para que el mapa empiece a aparecer) ───────────────
     rviz = TimerAction(
         period=10.0,
@@ -468,6 +490,7 @@ def generate_launch_description():
         set_resource_path,
         # Argumentos
         arg_world, arg_initial_map, arg_nav, arg_dyn, arg_obs_mgr, arg_spawn_mode, arg_sim_time, arg_rviz,
+        arg_web_bridge, arg_artifact_dir,
         # Gazebo
         gz_sim,
         rsp,
@@ -498,6 +521,8 @@ def generate_launch_description():
         navigation,
         # Spawner de obstáculos (condicional)
         spawner,
+        # Web dashboard bridge (condicional)
+        web_bridge,
         # RViz
         rviz,
     ])
