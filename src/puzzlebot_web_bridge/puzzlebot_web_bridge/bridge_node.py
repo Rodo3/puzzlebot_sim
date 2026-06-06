@@ -155,7 +155,7 @@ class BridgeNode(Node):
         self._pub_nav_wp     = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
         self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
         self._pub_nav_cancel = self.create_publisher(Bool, '/navigation/cancel', 10)
-        self._pub_emergency_stop = self.create_publisher(Bool, '/emergency_stop', 10)
+        self._pub_emergency_stop = self.create_publisher(Bool, '/emergency_stop', _latched_qos)
         self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
         # Mission control: dashboard → state_machine_node ("1" / "2" / "stop")
         self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_start'], 10)
@@ -173,6 +173,8 @@ class BridgeNode(Node):
         self._voice_ang   = self.get_parameter('voice_angular_speed').value
         self._voice_dur   = self.get_parameter('voice_cmd_duration').value
         self._voice_timer = None   # threading.Timer to stop after duration
+        self._emergency_stop_active = False
+        self.create_timer(0.05, self._emergency_loop)
 
         # Start WebSocket server.
         host = self.get_parameter('websocket_host').get_parameter_value().string_value
@@ -367,12 +369,18 @@ class BridgeNode(Node):
         self._pub_cmd_vel_out.publish(stop)
         self._pub_cmd_vel_teleop.publish(stop)
 
+    def _emergency_loop(self):
+        if self._emergency_stop_active:
+            self._publish_zero_cmd()
+            self._pub_emergency_stop.publish(Bool(data=True))
+
     def _stop_all(self, reason: str, emergency: bool = False):
         import threading
         if self._voice_timer is not None:
             self._voice_timer.cancel()
             self._voice_timer = None
         if emergency:
+            self._emergency_stop_active = True
             self._pub_emergency_stop.publish(Bool(data=True))
         self._pub_nav_cancel.publish(Bool(data=True))
         self._pub_nav_wp.publish(String(data='stop'))
@@ -580,6 +588,16 @@ class BridgeNode(Node):
         """Route a JSON command received from the browser to the appropriate ROS publisher."""
         msg_type = data.get('type')
         try:
+            if self._emergency_stop_active and msg_type != 'clear_emergency_stop':
+                if msg_type == 'emergency_stop':
+                    self._stop_all('emergency_stop', emergency=True)
+                else:
+                    self._publish_zero_cmd()
+                    self.get_logger().warn(
+                        f'command {msg_type} ignored: emergency stop active',
+                        throttle_duration_sec=1.0)
+                return
+
             if msg_type == 'cmd_vel':
                 msg = Twist()
                 msg.linear.x  = float(data.get('linear_x', 0.0))
@@ -672,6 +690,12 @@ class BridgeNode(Node):
 
             elif msg_type == 'emergency_stop':
                 self._stop_all('emergency_stop', emergency=True)
+
+            elif msg_type == 'clear_emergency_stop':
+                self._emergency_stop_active = False
+                self._pub_emergency_stop.publish(Bool(data=False))
+                self._publish_zero_cmd()
+                self.get_logger().warn('emergency_stop cleared from dashboard')
 
             else:
                 self.get_logger().debug(f'Unknown command type: {msg_type}')
