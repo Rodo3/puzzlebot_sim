@@ -15,8 +15,8 @@ const DOM_LABELS = {
   FOLLOW_NEW_PATH:   'FOLLOWING',
   BRAKE_FOR_REPLAN:  'BRAKING',
   REPLAN:            'REPLANNING',
-  RECOVERY_REVERSE:  'RECOVERY ↩',
-  RECOVERY_TURN:     'RECOVERY ↻',
+  RECOVERY_REVERSE:  'RECOVERY REV',
+  RECOVERY_TURN:     'RECOVERY TURN',
   SAFE_STOP:         'SAFE STOP',
 };
 
@@ -547,15 +547,15 @@ export default function MetricsPanel({
     <div className="metrics-panel">
       {/* ── Actions ── */}
       <div className="metrics-actions">
-        <button className="btn-sm" onClick={onReset}>↺ Reset</button>
+        <button className="btn-sm" onClick={onReset}>Reset</button>
         <button className="btn-sm btn-sm-accent"
           onClick={() => exportCSV({
             velHistory, lidarHist, domStateLog, poseHist, kalmanCovHist,
             locErrorHist, arucoEvents, scanMatchHist, stats: sessionStats,
-          })}>↓ CSV</button>
+          })}>CSV</button>
         <button className="btn-sm btn-sm-green"
           onClick={() => openPrintReport(sessionStats, domStateLog, arucoEvents, kalmanCovHist, locErrorHist)}>
-          ⎙ PDF
+          PDF
         </button>
       </div>
 
@@ -583,7 +583,7 @@ export default function MetricsPanel({
           max={1}
           displayValue={avgLocError != null ? `${(avgLocError * 100).toFixed(1)} cm` : '—'}
           color="var(--green)"
-          sub={avgLocError != null ? (avgLocError < 0.05 ? '✓ bueno' : '⚠ alto') : 'sin datos'}
+          sub={avgLocError != null ? (avgLocError < 0.05 ? 'bueno' : 'alto') : 'sin datos'}
         />
         <GaugeCard
           label="Kalman P"

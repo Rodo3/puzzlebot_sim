@@ -3,14 +3,14 @@
 
 :root {
   /* ─ Backgrounds ─ */
-  --bg:        #09090f;
-  --surface:   #111118;
-  --surface-2: #18181f;
-  --border:    #242430;
+  --bg:        #16162a;
+  --surface:   #1e1e36;
+  --surface-2: #272742;
+  --border:    #36365a;
 
   /* ─ Text ─ */
-  --text:      #e8e8f0;
-  --muted:     #4a4a6a;
+  --text:      #eeeef8;
+  --muted:     #7070a8;
 
   /* ─ Brand palette (ANTI MASS) ─ */
   --cyan:      #22d3ee;   /* route path  → SLAM / navegación */

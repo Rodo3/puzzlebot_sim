@@ -7,8 +7,8 @@ const DOM_STATE_META = {
   FOLLOW_NEW_PATH:   { cls: 'badge-info',    label: 'FOLLOWING' },
   BRAKE_FOR_REPLAN:  { cls: 'badge-warning', label: 'BRAKING' },
   REPLAN:            { cls: 'badge-warning', label: 'REPLANNING' },
-  RECOVERY_REVERSE:  { cls: 'badge-err',     label: 'RECOVERY ↩' },
-  RECOVERY_TURN:     { cls: 'badge-err',     label: 'RECOVERY ↻' },
+  RECOVERY_REVERSE:  { cls: 'badge-err',     label: 'RECOVERY REV' },
+  RECOVERY_TURN:     { cls: 'badge-err',     label: 'RECOVERY TURN' },
   SAFE_STOP:         { cls: 'badge-err',     label: 'SAFE STOP' },
 };
 

@@ -49,7 +49,7 @@ function ModelPredictions({ label, rows, winner, scoreLabel }) {
       </div>
       {rows.slice(0, 3).map(([cmd, score], i) => (
         <div key={i} className={`ranked-row ${i === 0 && cmd === winner ? 'ranked-winner' : ''}`}>
-          <span>{i === 0 ? '▶ ' : '  '}{cmd}</span>
+          <span>{cmd}</span>
           <span className="muted">
             {typeof score === 'number' ? score.toFixed(4) : score}
           </span>

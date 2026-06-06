@@ -70,7 +70,7 @@ export default function ModePanel({
             onClick={() => onCommand({ type: 'list_maps' })}
             disabled={!connected}
             title="Refrescar lista de mapas"
-          >↻</button>
+          >Refrescar</button>
         </div>
 
         <div className="map-actions">
