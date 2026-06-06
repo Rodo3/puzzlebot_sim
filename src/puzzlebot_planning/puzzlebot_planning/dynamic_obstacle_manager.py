@@ -222,6 +222,8 @@ class DynamicObstacleManager(Node):
         self._state_entry = time.monotonic()
         self._replan_attempts = 0
         self._blocking_until: float = 0.0
+        self._last_teleop_t: Optional[float] = None
+        self._teleop_timeout = 0.5
 
         # ── QoS ───────────────────────────────────────────────────────────────
         latched = QoSProfile(
@@ -238,6 +240,8 @@ class DynamicObstacleManager(Node):
         self.create_subscription(OccupancyGrid, map_topic,  self._map_cb,   latched)
         self.create_subscription(Path,         path_topic,  self._path_cb,  10)
         self.create_subscription(Twist,        cmd_in,      self._cmd_cb,   10)
+        self.create_subscription(Twist, '/cmd_vel_teleop',
+                                 self._teleop_cb, 10)
         self.create_subscription(Bool, '/navigation/cancel',
                                  self._cancel_cb, 10)
         self.create_subscription(Bool, '/navigation/goal_reached',
@@ -304,6 +308,14 @@ class DynamicObstacleManager(Node):
         self._state_entry = time.monotonic()
         self._log('Navegación cancelada — goal persistente limpiado')
 
+    def _teleop_cb(self, msg: Twist):
+        self._last_teleop_t = time.monotonic()
+
+    def _teleop_active(self) -> bool:
+        if self._last_teleop_t is None:
+            return False
+        return (time.monotonic() - self._last_teleop_t) < self._teleop_timeout
+
     def _map_cb(self, msg: OccupancyGrid):
         prev = self._base_map
         self._base_map = msg
@@ -365,6 +377,9 @@ class DynamicObstacleManager(Node):
         """Compuerta de velocidad: filtra según estado FSM."""
         now = time.monotonic()
 
+        if self._teleop_active():
+            return
+
         # Emergencia absoluta — siempre pasa directo (obstacle_avoidance es el último freno)
         # Aquí solo aplicamos la lógica de la FSM
         if self._state in (BRAKE_FOR_REPLAN, REPLAN, SAFE_STOP):
@@ -413,6 +428,12 @@ class DynamicObstacleManager(Node):
             return
 
         now = time.monotonic()
+
+        if self._teleop_active():
+            s = String()
+            s.data = self._state
+            self._pub_state.publish(s)
+            return
 
         # 0. Detectar obstáculos pendientes que el robot ya puede "ver" con LiDAR
         #    Funciona tanto con LiDAR real (_scan_ok=True) como en modo desktop.
