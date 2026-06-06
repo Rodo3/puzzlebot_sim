@@ -17,8 +17,8 @@ const ROBOT_ENV         = import.meta.env.VITE_ROBOT_ENV ?? 'sim';
 const MAX_TRAJECTORY    = 500;
 const MAX_LOGS          = 50;
 const MAX_VOICE_HISTORY = 20;
-const MAX_METRICS       = 400;   // max points per time-series
-const METRICS_MIN_DT    = 0.15;  // min seconds between stored metric points (throttle)
+const MAX_METRICS       = 400;
+const METRICS_MIN_DT    = 0.15;
 
 function nowStr() { return new Date().toLocaleTimeString(); }
 
@@ -28,12 +28,6 @@ function navStateClass(state) {
   if (state === 'BRAKE_FOR_REPLAN' || state === 'REPLAN') return 'nav-state-replan';
   return 'nav-state-recovery';
 }
-
-const TABS = [
-  { id: 'mode',      label: 'Modo' },
-  { id: 'waypoints', label: 'Waypoints' },
-  { id: 'voice',     label: 'Voz' },
-];
 
 function makeSessionStats() {
   return {
@@ -46,6 +40,33 @@ function makeSessionStats() {
     arucoCount:       0,
     scanMatchCount:   0,
   };
+}
+
+// ── ANTI MASS logo mark (inline SVG) ─────────────────────
+function LogoMark() {
+  return (
+    <svg viewBox="0 0 48 36" width="48" height="36" aria-hidden="true" style={{ flexShrink: 0 }}>
+      {/* White A — mountain peak */}
+      <path d="M3 33 L16 5 L22 17 L16 33Z" fill="#f0f0f8" />
+      {/* Purple M */}
+      <path d="M16 5 L22 17 L27 9 L32 17 L38 5 L45 33 L37 33 L32 20 L27 26 L22 20 L18 33 L10 33Z"
+            fill="url(#mGrad)" />
+      {/* Cyan arrow inside A */}
+      <path d="M9 29 L13 14" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" fill="none"/>
+      <polygon points="11 12 16 10 14 17" fill="#22d3ee" />
+      {/* Route start circle */}
+      <circle cx="3" cy="33" r="2.5" fill="none" stroke="#7c3aed" strokeWidth="1.5"/>
+      {/* Route end pin */}
+      <circle cx="45" cy="33" r="2" fill="#22d3ee" />
+      {/* Gradient def */}
+      <defs>
+        <linearGradient id="mGrad" x1="16" y1="5" x2="45" y2="33" gradientUnits="userSpaceOnUse">
+          <stop offset="0%"   stopColor="#7c3aed" />
+          <stop offset="100%" stopColor="#a855f7" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
 }
 
 export default function App() {
@@ -70,22 +91,20 @@ export default function App() {
   const [logs,           setLogs]           = useState([]);
   const [mode,           setMode]           = useState('mapping');
   const [goalMarker,     setGoalMarker]     = useState(null);
-  const [activeTab,      setActiveTab]      = useState('mode');
   const [availableMaps,  setAvailableMaps]  = useState([]);
   const [mapSource,      setMapSource]      = useState('live');
-  const [mainView,       setMainView]       = useState('robot'); // 'robot' | 'metrics'
+  const [mainView,       setMainView]       = useState('robot');
 
   // ── Metrics state ───────────────────────────────────────────────────────────
   const [velHistory,     setVelHistory]     = useState([]);
   const [lidarHist,      setLidarHist]      = useState([]);
   const [domStateLog,    setDomStateLog]    = useState([]);
   const [sessionStats,   setSessionStats]   = useState(makeSessionStats);
-  // Localization metrics
-  const [poseHist,       setPoseHist]       = useState([]);  // [{time,x,y,theta}]  Kalman
-  const [kalmanCovHist,  setKalmanCovHist]  = useState([]);  // [{time,traceP,pTheta}]
-  const [locErrorHist,   setLocErrorHist]   = useState([]);  // [{time,error_xy,error_theta}] Kalman vs SLAM
-  const [arucoEvents,    setArucoEvents]    = useState([]);  // [{time,x,y,theta,cov_xy,innovation}]
-  const [scanMatchHist,  setScanMatchHist]  = useState([]);  // [{time,x,y,cov_xy}]
+  const [poseHist,       setPoseHist]       = useState([]);
+  const [kalmanCovHist,  setKalmanCovHist]  = useState([]);
+  const [locErrorHist,   setLocErrorHist]   = useState([]);
+  const [arucoEvents,    setArucoEvents]    = useState([]);
+  const [scanMatchHist,  setScanMatchHist]  = useState([]);
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const clientRef         = useRef(null);
@@ -94,7 +113,7 @@ export default function App() {
   const lastVelTimeRef    = useRef(0);
   const lastLidTimeRef    = useRef(0);
   const lastKalTimeRef    = useRef(0);
-  const latestKalmanPose  = useRef(null);  // latest raw Kalman pose for innovation calc
+  const latestKalmanPose  = useRef(null);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   const addLog = useCallback((msg) => {
@@ -123,7 +142,6 @@ export default function App() {
           const next = [...prev, msg.pose];
           return next.length > MAX_TRAJECTORY ? next.slice(-MAX_TRAJECTORY) : next;
         });
-        // Accumulate distance traveled
         if (prevPoseRef.current && msg.pose) {
           const dx   = msg.pose.x - prevPoseRef.current.x;
           const dy   = msg.pose.y - prevPoseRef.current.y;
@@ -136,12 +154,9 @@ export default function App() {
           }
         }
         prevPoseRef.current = msg.pose ?? null;
-        // Always update latest raw Kalman pose (for innovation calc)
         if (msg.kalman_pose) latestKalmanPose.current = msg.kalman_pose;
-        // Localization metrics — throttled
         const t = msg.timestamp ?? Date.now() / 1000;
         if (t - lastKalTimeRef.current >= METRICS_MIN_DT) {
-          // Kalman pose history (raw odom estimate)
           const kp = msg.kalman_pose ?? msg.pose;
           if (kp) {
             setPoseHist(prev => {
@@ -149,7 +164,6 @@ export default function App() {
               return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
             });
           }
-          // Kalman covariance
           if (msg.cov_xx != null && msg.cov_yy != null) {
             const traceP = (msg.cov_xx ?? 0) + (msg.cov_yy ?? 0);
             setKalmanCovHist(prev => {
@@ -157,7 +171,6 @@ export default function App() {
               return next.length > MAX_METRICS ? next.slice(-MAX_METRICS) : next;
             });
           }
-          // Localization error: Kalman vs SLAM (only when both available)
           if (msg.kalman_pose && msg.slam_pose) {
             const dx  = msg.slam_pose.x - msg.kalman_pose.x;
             const dy  = msg.slam_pose.y - msg.kalman_pose.y;
@@ -280,7 +293,6 @@ export default function App() {
 
       case 'aruco_pose': {
         const t = msg.timestamp ?? Date.now() / 1000;
-        // Innovation = distance between ArUco measurement and current Kalman estimate
         let innovation = null;
         if (latestKalmanPose.current) {
           const dx = (msg.x ?? 0) - latestKalmanPose.current.x;
@@ -370,7 +382,7 @@ export default function App() {
     addLog('Metrics session reset');
   }, [addLog]);
 
-  // ── Header topic dots ────────────────────────────────────────────────────────
+  // ── Header topic chips ───────────────────────────────────────────────────────
   const topicDots = [
     { key: 'odom',  label: 'odom',  active: !!robotState },
     { key: 'scan',  label: 'scan',  active: !!scanData },
@@ -384,9 +396,21 @@ export default function App() {
 
   return (
     <div className="app">
+
       {/* ── Header ── */}
       <header className="header">
-        <span className="header-title">PUZZLEBOT LIVE DASHBOARD</span>
+        {/* Brand */}
+        <div className="header-brand">
+          <LogoMark />
+          <div className="header-brand-text">
+            <span className="header-title-main">ANTI MASS</span>
+            <span className="header-title-sub">AUTONOMOUS LOGISTICS</span>
+          </div>
+        </div>
+
+        <div className="header-divider" />
+
+        {/* View tabs */}
         <div className="view-tabs">
           <button
             className={`view-tab ${mainView === 'robot'   ? 'view-tab-active' : ''}`}
@@ -397,15 +421,19 @@ export default function App() {
             onClick={() => setMainView('metrics')}
           >Métricas</button>
         </div>
+
         <span className="header-sep">|</span>
+
         <span className={`conn-badge ${connected ? 'conn-ok' : 'conn-err'}`}>
           {connected ? 'Connected' : 'Disconnected'}
         </span>
+
         {lastUpdate && (
           <span className="header-timestamp">
             {new Date(lastUpdate * 1000).toLocaleTimeString()}
           </span>
         )}
+
         <div className="topic-dots">
           {topicDots.map(({ key, label, active }) => (
             <div key={key} className="topic-dot">
@@ -414,6 +442,7 @@ export default function App() {
             </div>
           ))}
         </div>
+
         <span className={`env-badge env-badge-${ROBOT_ENV}`}>
           {ROBOT_ENV.toUpperCase()}
         </span>
@@ -445,52 +474,24 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Robot view ── */}
-      {mainView === 'robot' && <div className="main-area">
-        {/* SLAM map column */}
-        <div className="col-slam">
-          <SlamMap
-            mapData={mapData}
-            augMapData={augMapData}
-            robotPose={robotState?.pose}
-            trajectory={trajectory}
-            mode={mode}
-            goalMarker={goalMarker}
-            onGoalPose={handleGoalPose}
-          />
-        </div>
+      {/* ── Robot view — 3 columns ── */}
+      {mainView === 'robot' && (
+        <div className="main-area">
 
-        {/* Right column */}
-        <div className="col-right">
-          {/* Pinned top: Misión + Cámara — foco visual del reto (siempre visibles) */}
-          <MissionPanel
-            missionState={missionState}
-            connected={connected}
-            onCommand={sendCommand}
-          />
-          <CameraPanel
-            cameraData={cameraData}
-            qrDetections={qrDetections}
-            logoDetections={logoDetections}
-          />
-
-          {/* Scrollable: Lidar + Teleop + Tabs */}
-          <div className="col-right-scroll">
-          <LidarView scanData={scanData} />
-          <TeleopPanel connected={connected} onCommand={sendCommand} />
-
-          <div className="tabs-card">
-            <div className="tabs-header">
-              {TABS.map(t => (
-                <button
-                  key={t.id}
-                  className={`tab-btn ${activeTab === t.id ? 'tab-btn-active' : ''}`}
-                  onClick={() => setActiveTab(t.id)}
-                >{t.label}</button>
-              ))}
+          {/* ── Column 1: Control ── */}
+          <div className="col-left">
+            {/* Mission — pinned at top */}
+            <div className="section-mission">
+              <MissionPanel
+                missionState={missionState}
+                connected={connected}
+                onCommand={sendCommand}
+              />
             </div>
-            <div className="tab-content">
-              {activeTab === 'mode' && (
+
+            {/* Mode + Waypoints — scrollable */}
+            <div className="col-left-scroll">
+              <div className="section-mode">
                 <ModePanel
                   mode={mode}
                   connected={connected}
@@ -500,8 +501,8 @@ export default function App() {
                   mapSource={mapSource}
                   onCommand={handleCommand}
                 />
-              )}
-              {activeTab === 'waypoints' && (
+              </div>
+              <div className="section-waypoints">
                 <WaypointPanel
                   connected={connected}
                   mode={mode}
@@ -509,15 +510,50 @@ export default function App() {
                   onCommand={sendCommand}
                   addLog={addLog}
                 />
-              )}
-              {activeTab === 'voice' && (
-                <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />
-              )}
+              </div>
             </div>
           </div>
-          </div>{/* end col-right-scroll */}
+
+          {/* ── Column 2: SLAM Map ── */}
+          <div className="col-slam">
+            <SlamMap
+              mapData={mapData}
+              augMapData={augMapData}
+              robotPose={robotState?.pose}
+              trajectory={trajectory}
+              mode={mode}
+              goalMarker={goalMarker}
+              onGoalPose={handleGoalPose}
+            />
+          </div>
+
+          {/* ── Column 3: Sensors & I/O ── */}
+          <div className="col-right">
+            {/* Camera — pinned at top */}
+            <div className="section-camera">
+              <CameraPanel
+                cameraData={cameraData}
+                qrDetections={qrDetections}
+                logoDetections={logoDetections}
+              />
+            </div>
+
+            {/* LiDAR + Teleop + Voice — scrollable */}
+            <div className="col-right-scroll">
+              <div className="section-lidar">
+                <LidarView scanData={scanData} />
+              </div>
+              <div className="section-teleop">
+                <TeleopPanel connected={connected} onCommand={sendCommand} />
+              </div>
+              <div className="section-voice">
+                <VoiceCommandPanel voiceData={voiceData} history={voiceHistory} />
+              </div>
+            </div>
+          </div>
+
         </div>
-      </div>}{/* end robot view */}
+      )}
 
       {/* ── Footer (always visible) ── */}
       <footer className="footer">
