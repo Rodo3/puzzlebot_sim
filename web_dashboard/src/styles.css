@@ -895,14 +895,49 @@ hr {
 .btn-waypoint:hover:not(:disabled) { background: var(--cyan-dim); }
 .btn-waypoint:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.btn-stop-nav {
-  border-color: var(--err);
-  color: var(--err);
-  flex: 0 0 auto;
-  padding: 6px 10px;
+.emergency-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
 }
 
-.btn-stop-nav:hover:not(:disabled) { background: var(--err-dim); }
+.btn-emergency,
+.btn-clear-emergency {
+  padding: 7px 6px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-emergency {
+  border-color: var(--err);
+  background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.18);
+}
+
+.btn-emergency:hover:not(:disabled) { background: rgba(248, 113, 113, 0.30); }
+
+.btn-clear-emergency {
+  border-color: var(--warn);
+  background: rgba(251, 191, 36, 0.14);
+  color: #fde68a;
+}
+
+.btn-clear-emergency:hover:not(:disabled) { background: rgba(251, 191, 36, 0.24); }
+
+.btn-emergency:disabled,
+.btn-clear-emergency:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 
 /* ── Voice panel ──────────────────────────────────────── */
 .voice-trigger {
