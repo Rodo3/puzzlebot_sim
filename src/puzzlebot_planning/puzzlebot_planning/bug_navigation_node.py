@@ -40,7 +40,7 @@ from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, QoSProfile, ReliabilityPolicy,
                         qos_profile_sensor_data)
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 
@@ -148,12 +148,17 @@ class BugNavigationNode(Node):
         self.create_subscription(Odometry,      '/odom',             self._odom_cb,     10)
         self.create_subscription(PoseStamped,   '/goal_pose',        self._goal_cb,     latched)
         self.create_subscription(OccupancyGrid, '/map',              self._map_cb,      latched)
+        self.create_subscription(Bool, '/navigation/cancel',
+                                 self._cancel_cb, 10)
+        self.create_subscription(Bool, '/navigation/goal_reached',
+                                 self._cancel_cb, 10)
 
         # ── Publicadores ──────────────────────────────────────────────────────
         self._pub_cmd     = self.create_publisher(Twist,         '/cmd_vel_in',      10)
         self._pub_map     = self.create_publisher(OccupancyGrid, '/map',             latched)
         self._pub_state   = self.create_publisher(String,        '/bug_nav/state',   10)
         self._pub_markers = self.create_publisher(MarkerArray,   '/bug_nav/markers', 10)
+        self._pub_goal_reached = self.create_publisher(Bool, '/navigation/goal_reached', 10)
 
         self.create_timer(0.10, self._loop)
 
@@ -200,6 +205,21 @@ class BugNavigationNode(Node):
         self._goal_x = msg.pose.position.x
         self._goal_y = msg.pose.position.y
         self.get_logger().info(f'[Bug2] Goal: ({self._goal_x:.2f}, {self._goal_y:.2f})')
+
+    def _clear_goal(self):
+        self._goal_x = None
+        self._goal_y = None
+        self._obs_count = 0
+        self._state = CLEAR
+        self._recovery_until = 0.0
+        self._wall_follow_start = 0.0
+        self._hit_dist_goal = float('inf')
+
+    def _cancel_cb(self, msg: Bool):
+        if not msg.data:
+            return
+        self._clear_goal()
+        self.get_logger().info('[Bug2] Goal limpiado por navegación')
 
     def _map_cb(self, msg: OccupancyGrid):
         if self._base_map is None:
@@ -300,7 +320,10 @@ class BugNavigationNode(Node):
                                        self._goal_y - self._robot_y)
                 if dist_goal < 0.15:
                     self.get_logger().info('[Bug2] Goal alcanzado → CLEAR')
-                    self._transition(CLEAR)
+                    reached = Bool()
+                    reached.data = True
+                    self._pub_goal_reached.publish(reached)
+                    self._clear_goal()
                     self._publish_state()
                     return
 
