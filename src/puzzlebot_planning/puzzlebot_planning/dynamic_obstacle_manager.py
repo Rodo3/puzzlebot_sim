@@ -302,7 +302,6 @@ class DynamicObstacleManager(Node):
         self._clear_goal()
         self._state = NORMAL
         self._state_entry = time.monotonic()
-        self._pub_cmd.publish(Twist())
         self._log('Navegación cancelada — goal persistente limpiado')
 
     def _map_cb(self, msg: OccupancyGrid):

@@ -101,7 +101,6 @@ private:
     path_.clear();
     path_idx_ = 0;
     goal_reached_ = true;
-    pub_cmd_->publish(geometry_msgs::msg::Twist());
     RCLCPP_INFO(get_logger(), "Navigation cancelled — path cleared");
   }
 

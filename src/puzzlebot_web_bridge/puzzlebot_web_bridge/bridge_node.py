@@ -589,11 +589,8 @@ class BridgeNode(Node):
                     self.get_logger().info(f'navigate_to_waypoint → {name}')
 
             elif msg_type == 'cancel_navigation':
-                stop = Twist()
                 self._pub_nav_cancel.publish(Bool(data=True))
                 self._pub_nav_wp.publish(String(data='stop'))
-                self._pub_cmd_vel_out.publish(stop)
-                self._pub_cmd_vel_teleop.publish(stop)
                 self.get_logger().info('navigation cancel requested from dashboard')
 
             elif msg_type == 'slam_reset':
