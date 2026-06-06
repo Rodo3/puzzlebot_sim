@@ -13,7 +13,17 @@ const STATE_LABELS = {
   DONE:                '✓ Misión completada',
   ERROR:               '⚠ Error',
   MAPPING:             'Mapeando',
+  RUNNING_M1:          'Misión 1 en curso',
+  RUNNING_M2:          'Misión 2 en curso',
 };
+
+function getLabel(state) {
+  if (STATE_LABELS[state]) return STATE_LABELS[state];
+  // NAVIGATING_TO_WP_N → "Navegando al punto N"
+  const wpMatch = state?.match(/^NAVIGATING_TO_WP_(\d+)$/);
+  if (wpMatch) return `Navegando al punto ${wpMatch[1]}`;
+  return state ?? 'Inactivo';
+}
 
 function badgeClass(state) {
   if (!state || state === 'IDLE')        return 'mission-badge-idle';
@@ -23,30 +33,40 @@ function badgeClass(state) {
   return 'mission-badge-active';
 }
 
-export default function MissionPanel({ missionState, connected, onCommand }) {
-  const state    = missionState || 'IDLE';
-  const isIdle   = state === 'IDLE';
-  const label    = STATE_LABELS[state] ?? state;
+export default function MissionPanel({ missionState, connected, onCommand, onSwitchToNav }) {
+  const state  = missionState || 'IDLE';
+  const isIdle = state === 'IDLE';
+  const isDone = state === 'DONE';
+  const label  = getLabel(state);
 
-  const startMission = (mission) => onCommand({ type: 'mission_start', mission });
-  const stopMission  = ()        => onCommand({ type: 'mission_stop' });
+  const startMission1 = () => {
+    onCommand({ type: 'mission_start', mission: '1' });
+  };
+
+  const startMission2 = () => {
+    // Cambiar a modo navegación automáticamente para que el click en el mapa funcione
+    if (onSwitchToNav) onSwitchToNav();
+    onCommand({ type: 'mission_start', mission: '2' });
+  };
+
+  const stopMission = () => onCommand({ type: 'mission_stop' });
 
   return (
     <div className="panel mission-panel">
       <div className="mission-row">
         <span className="mission-title">MISIÓN</span>
 
-        {isIdle ? (
+        {(isIdle || isDone) ? (
           <div className="mission-btns">
             <button
               className="btn-mission btn-mission-1"
               disabled={!connected}
-              onClick={() => startMission('1')}
+              onClick={startMission1}
             >▶ Misión 1</button>
             <button
               className="btn-mission btn-mission-2"
               disabled={!connected}
-              onClick={() => startMission('2')}
+              onClick={startMission2}
             >▶ Misión 2</button>
           </div>
         ) : (

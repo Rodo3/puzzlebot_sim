@@ -486,6 +486,7 @@ export default function App() {
                 missionState={missionState}
                 connected={connected}
                 onCommand={sendCommand}
+                onSwitchToNav={() => handleModeChange('navigation')}
               />
             </div>
 

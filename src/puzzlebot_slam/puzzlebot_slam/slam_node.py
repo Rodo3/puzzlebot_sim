@@ -265,6 +265,7 @@ class SlamNode(Node):
         if not msg.data:
             return
         self._grid_map.reset()
+        self._localization_only = False
         self._map_odom_x   = 0.0
         self._map_odom_y   = 0.0
         self._map_odom_yaw = 0.0
