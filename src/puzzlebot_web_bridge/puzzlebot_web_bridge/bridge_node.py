@@ -336,7 +336,8 @@ class BridgeNode(Node):
         elif cmd == 'derecha':
             twist.angular.z = -self._voice_ang
         elif cmd == 'alto':
-            pass  # zero twist = stop
+            self._stop_all('voice alto')
+            return
         elif cmd == 'inicio':
             self._pub_nav_wp.publish(String(data='inicio'))
             self.get_logger().info('voice → navigate_to_waypoint: inicio')
@@ -359,6 +360,26 @@ class BridgeNode(Node):
             self._voice_timer = threading.Timer(self._voice_dur, _stop)
             self._voice_timer.daemon = True
             self._voice_timer.start()
+
+    def _publish_zero_cmd(self):
+        stop = Twist()
+        self._pub_cmd_vel_out.publish(stop)
+        self._pub_cmd_vel_teleop.publish(stop)
+
+    def _stop_all(self, reason: str):
+        import threading
+        if self._voice_timer is not None:
+            self._voice_timer.cancel()
+            self._voice_timer = None
+        self._pub_nav_cancel.publish(Bool(data=True))
+        self._pub_nav_wp.publish(String(data='stop'))
+        self._pub_mission.publish(String(data='stop'))
+        self._publish_zero_cmd()
+        for delay in (0.05, 0.10, 0.20, 0.35, 0.50):
+            timer = threading.Timer(delay, self._publish_zero_cmd)
+            timer.daemon = True
+            timer.start()
+        self.get_logger().info(f'{reason} → stop all')
 
     def _odom_cb(self, msg: Odometry):
         if self._rl['odom'].should_send():
@@ -644,8 +665,7 @@ class BridgeNode(Node):
                     self.get_logger().warn(f'mission_start: invalid mission {mission!r}')
 
             elif msg_type == 'mission_stop':
-                self._pub_mission.publish(String(data='stop'))
-                self.get_logger().info('mission_stop → stop')
+                self._stop_all('mission_stop')
 
             else:
                 self.get_logger().debug(f'Unknown command type: {msg_type}')
