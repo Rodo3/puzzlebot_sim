@@ -11,6 +11,7 @@ import WaypointPanel     from './components/WaypointPanel.jsx';
 import LogsPanel         from './components/LogsPanel.jsx';
 import MissionPanel      from './components/MissionPanel.jsx';
 import MetricsPanel      from './components/MetricsPanel.jsx';
+import TeamPanel        from './components/TeamPanel.jsx';
 
 const WS_URL            = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:8000/ws`;
 const ROBOT_ENV         = import.meta.env.VITE_ROBOT_ENV ?? 'sim';
@@ -93,7 +94,7 @@ export default function App() {
   const [goalMarker,     setGoalMarker]     = useState(null);
   const [availableMaps,  setAvailableMaps]  = useState([]);
   const [mapSource,      setMapSource]      = useState('live');
-  const [mainView,       setMainView]       = useState('robot');
+  const [mainView,       setMainView]       = useState('team');
 
   // ── Metrics state ───────────────────────────────────────────────────────────
   const [velHistory,     setVelHistory]     = useState([]);
@@ -413,6 +414,10 @@ export default function App() {
         {/* View tabs */}
         <div className="view-tabs">
           <button
+            className={`view-tab ${mainView === 'team'    ? 'view-tab-active' : ''}`}
+            onClick={() => setMainView('team')}
+          >Equipo</button>
+          <button
             className={`view-tab ${mainView === 'robot'   ? 'view-tab-active' : ''}`}
             onClick={() => setMainView('robot')}
           >Robot</button>
@@ -455,6 +460,9 @@ export default function App() {
           </span>
         )}
       </header>
+
+      {/* ── Team view ── */}
+      {mainView === 'team' && <TeamPanel />}
 
       {/* ── Metrics full-screen view ── */}
       {mainView === 'metrics' && (
