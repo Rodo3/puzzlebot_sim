@@ -285,10 +285,11 @@ class DynamicObstacleManager(Node):
             self._trigger_replan('nuevo goal recibido')
 
     def _map_cb(self, msg: OccupancyGrid):
-        if self._base_map is None:
-            self._base_map = msg
+        prev = self._base_map
+        self._base_map = msg
+        if prev is None or prev.info.width != msg.info.width or prev.info.height != msg.info.height:
             self.get_logger().info(
-                f'[DOM] Mapa base recibido: {msg.info.width}x{msg.info.height} '
+                f'[DOM] Mapa base actualizado: {msg.info.width}x{msg.info.height} '
                 f'@ {msg.info.resolution:.3f} m/px')
         # Publicar siempre el mapa aumentado (con obstáculos activos)
         self._publish_augmented_map()
