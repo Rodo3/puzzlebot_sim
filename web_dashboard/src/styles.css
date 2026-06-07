@@ -378,6 +378,14 @@ hr {
   color: var(--cyan);
 }
 
+/* Sensors — green (hardware / conexión física) */
+.section-sensors .panel {
+  border-left: 3px solid var(--green);
+}
+.section-sensors .sensor-title {
+  color: var(--green);
+}
+
 /* Camera / LiDAR — cyan sensor data */
 .section-camera .panel,
 .section-lidar .panel {
@@ -1437,3 +1445,102 @@ hr {
   text-align: center;
   padding: 12px 0;
 }
+
+/* ── SensorPanel ───────────────────────────────────────── */
+.sensor-panel {
+  padding: 8px 12px 10px 14px;
+}
+
+.sensor-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 8px;
+  font-family: var(--font-ui);
+}
+
+.sensor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sensor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  transition: border-color 0.2s, background 0.2s;
+}
+.sensor-row-online  { border-color: rgba(74,222,128,0.35);  background: var(--green-dim); }
+.sensor-row-starting{ border-color: rgba(250,204,21,0.35);  background: var(--warn-dim);  }
+.sensor-row-error   { border-color: rgba(248,113,113,0.35); background: var(--err-dim);   }
+
+.sensor-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sensor-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--border);
+}
+.sensor-dot-online   { background: var(--green);  box-shadow: 0 0 5px var(--green); }
+.sensor-dot-starting { background: var(--warn);   box-shadow: 0 0 5px var(--warn);  }
+.sensor-dot-error    { background: var(--err);    box-shadow: 0 0 5px var(--err);   }
+.sensor-dot-idle     { background: var(--muted); }
+
+.sensor-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sensor-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: var(--font-ui);
+  line-height: 1.3;
+}
+
+.sensor-desc {
+  font-size: 9px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sensor-btn {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  min-width: 52px;
+  text-align: center;
+}
+.sensor-btn:hover               { background: var(--surface-2); color: var(--text); }
+.sensor-btn-starting            { color: var(--warn);   border-color: rgba(250,204,21,0.4);  cursor: default; }
+.sensor-btn-online              { color: var(--green);  border-color: rgba(74,222,128,0.4);  cursor: default; }
+.sensor-btn-error               { color: var(--err);    border-color: rgba(248,113,113,0.4); }
+.sensor-btn-error:hover         { background: var(--err-dim); }

@@ -37,17 +37,35 @@ todo el cómputo (odometría, SLAM, percepción, control) ocurre en el PC.
   lidar_yaw_offset [3.14159265359] Rota el scan; π corrige frente/atrás invertido
 
 ════════════════════════════════════════════════════════════════
+ FLUJO ROBOT REAL (PC + Jetson via SSH)
+════════════════════════════════════════════════════════════════
+
+  Este launch corre en el PC. La Jetson publica sensores; el PC hace
+  todo el cómputo. ROS_DOMAIN_ID debe ser igual en ambas máquinas.
+
+  # Terminal 1 (Jetson, via SSH) — LiDAR + cámara + micro-ROS:
+  ros2 launch puzzlebot_bringup jetson_sensors.launch.py
+
+  # Terminal 2 (PC) — Todo el cómputo + bridge + voz:
+  ros2 launch puzzlebot_bringup real_robot.launch.py \
+    lidar_topic:=/scan slam:=true navigation:=true \
+    artifact_dir:=src/puzzlebot_voice_commands/artifacts_final
+
+  # Terminal 3 (PC) — Frontend del dashboard:
+  cd web_dashboard && npm run dev -- --host 0.0.0.0
+
+════════════════════════════════════════════════════════════════
  COMBINACIONES TÍPICAS
 ════════════════════════════════════════════════════════════════
 
   # Sesión 1 — Mapeo clásico con corrección ArUco via aruco_map_odom:
-  ros2 launch puzzlebot_bringup real_robot.launch.py slam:=true aruco:=true
+  ros2 launch puzzlebot_bringup real_robot.launch.py slam:=true aruco:=true lidar_topic:=/scan
 
   # Sesión 1 — Mapeo con Kalman EKF + ArUco (Estrategia B):
-  ros2 launch puzzlebot_bringup real_robot.launch.py slam:=true kalman:=true aruco:=true
+  ros2 launch puzzlebot_bringup real_robot.launch.py slam:=true kalman:=true aruco:=true lidar_topic:=/scan
 
   # Sesión 2 — Localización MCL (converge lento):
-  ros2 launch puzzlebot_bringup real_robot.launch.py slam:=false mcl:=true aruco:=true
+  ros2 launch puzzlebot_bringup real_robot.launch.py slam:=false mcl:=true aruco:=true lidar_topic:=/scan
 
   # Sesión 2 — Localización EKF+ArUco con mapa conocido (converge instantáneo):
   #   EKF fusiona encoders+ArUco para odom→base_footprint (suave, sin saltos).
@@ -479,6 +497,10 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': False,
             'artifact_dir': artifact_dir,
+            # scan_restamper re-stamps the raw LiDAR scan (/Lidar or /scan) to
+            # /scan_stamped with the correct frame and timestamp. Use that topic
+            # so the dashboard sees the same scan that SLAM and navigation use.
+            'scan_topic':   '/scan_stamped',
         }],
         condition=IfCondition(web_bridge_en),
     )

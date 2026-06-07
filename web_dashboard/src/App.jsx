@@ -11,7 +11,8 @@ import WaypointPanel     from './components/WaypointPanel.jsx';
 import LogsPanel         from './components/LogsPanel.jsx';
 import MissionPanel      from './components/MissionPanel.jsx';
 import MetricsPanel      from './components/MetricsPanel.jsx';
-import TeamPanel        from './components/TeamPanel.jsx';
+import TeamPanel         from './components/TeamPanel.jsx';
+import SensorPanel       from './components/SensorPanel.jsx';
 
 function normalizeWsUrl(value) {
   if (!value) return null;
@@ -527,6 +528,9 @@ export default function App() {
                   mapSource={mapSource}
                   onCommand={handleCommand}
                 />
+              </div>
+              <div className="section-sensors">
+                <SensorPanel />
               </div>
               <div className="section-waypoints">
                 <WaypointPanel

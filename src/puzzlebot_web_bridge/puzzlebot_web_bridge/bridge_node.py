@@ -159,6 +159,8 @@ class BridgeNode(Node):
         self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
         # Mission control: dashboard → state_machine_node ("1" / "2" / "stop")
         self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_start'], 10)
+        # Forklift/montacargas: dashboard → forklift controller ("up" / "down")
+        self._pub_forklift   = self.create_publisher(String, '/forklift/command', 10)
 
         self.get_logger().info(f'Control publishers ready — cmd_vel_out: {cmd_vel_out}')
 
@@ -324,8 +326,8 @@ class BridgeNode(Node):
         elevator_map = {'subir': 'up', 'bajar': 'down', 'tomar': 'up', 'soltar': 'down'}
         if cmd in elevator_map:
             action = elevator_map[cmd]
-            self._pub_mission.publish(String(data=f'elevator:{action}'))
-            self.get_logger().info(f'voice → elevator: {action}  (comando: {cmd})')
+            self._pub_forklift.publish(String(data=action))
+            self.get_logger().info(f'voice → /forklift/command: {action}  (comando: {cmd})')
             return
 
         # ── Comandos de navegación ────────────────────────────────────────────
@@ -675,7 +677,11 @@ class BridgeNode(Node):
 
             elif msg_type == 'elevator':
                 action = str(data.get('action', '')).strip()
-                self.get_logger().info(f'elevator command: {action} (backend pending)')
+                if action in ('up', 'down'):
+                    self._pub_forklift.publish(String(data=action))
+                    self.get_logger().info(f'dashboard → /forklift/command: {action}')
+                else:
+                    self.get_logger().warn(f'elevator: acción desconocida {action!r} (esperado: up/down)')
 
             elif msg_type == 'mission_start':
                 mission = str(data.get('mission', '')).strip()
