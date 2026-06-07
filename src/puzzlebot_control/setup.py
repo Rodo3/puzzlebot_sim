@@ -23,9 +23,6 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'state_machine_node    = puzzlebot_control.state_machine_node:main',
-            'mission_launcher_node = puzzlebot_control.mission_launcher_node:main',
-            'mission_stub_runner   = puzzlebot_control.mission_stub_runner:main',
             'mission_manager_node = puzzlebot_control.mission_manager_node:main',
             'fork_publisher_node  = puzzlebot_control.fork_publisher_node:main',
         ],
