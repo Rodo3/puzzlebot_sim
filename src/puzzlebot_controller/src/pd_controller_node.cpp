@@ -2,6 +2,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <cmath>
 
@@ -58,8 +59,17 @@ public:
       "/goal_pose", 10,
       std::bind(&PDControllerNode::goal_cb, this, std::placeholders::_1));
 
+    sub_cancel_ = create_subscription<std_msgs::msg::Bool>(
+      "/navigation/cancel", 10,
+      std::bind(&PDControllerNode::cancel_cb, this, std::placeholders::_1));
+
+    sub_goal_reached_ = create_subscription<std_msgs::msg::Bool>(
+      "/navigation/goal_reached", 10,
+      std::bind(&PDControllerNode::cancel_cb, this, std::placeholders::_1));
+
     pub_cmd_   = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel_in", 10);
     pub_debug_ = create_publisher<std_msgs::msg::Float32MultiArray>("/controller/debug", 10);
+    pub_goal_reached_ = create_publisher<std_msgs::msg::Bool>("/navigation/goal_reached", 10);
 
     timer_ = create_wall_timer(
       std::chrono::milliseconds(static_cast<int>(1000.0 / hz)),
@@ -93,6 +103,16 @@ private:
     RCLCPP_INFO(get_logger(), "New goal: (%.2f, %.2f)", goal_x_, goal_y_);
   }
 
+  void cancel_cb(const std_msgs::msg::Bool::SharedPtr msg)
+  {
+    if (!msg->data) return;
+    have_goal_ = false;
+    goal_reached_ = true;
+    was_active_ = false;
+    prev_e_ang_ = 0.0;
+    RCLCPP_INFO(get_logger(), "Goal cleared by navigation event");
+  }
+
   void control_loop()
   {
     geometry_msgs::msg::Twist cmd;  // zero-initialised
@@ -122,7 +142,11 @@ private:
 
     if (e_dist < goal_tol_) {
       goal_reached_ = true;
+      have_goal_ = false;
       RCLCPP_INFO(get_logger(), "Goal reached (dist=%.3f m)", e_dist);
+      std_msgs::msg::Bool reached;
+      reached.data = true;
+      pub_goal_reached_->publish(reached);
       publish_cmd(cmd, e_dist, 0.0, 0.0, 0.0);
       return;
     }
@@ -168,8 +192,11 @@ private:
   // Subscriptions / publishers
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr         sub_odom_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_goal_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr             sub_cancel_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr             sub_goal_reached_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr           pub_cmd_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr    pub_debug_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr                 pub_goal_reached_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Time last_time_;
 

@@ -29,7 +29,13 @@ COLCON_IGNORE
 *.model.backup
 *.world.backup
 
+# Environment files (contain machine-specific IPs)
+web_dashboard/.env
+
 # ROS bag files
 *.bag
 *.db3
 *.mcap
+
+# Node
+node_modules/

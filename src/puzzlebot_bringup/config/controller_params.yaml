@@ -1,13 +1,172 @@
+# ════════════════════════════════════════════════════════════════════════════
+# controller_params.yaml — Parámetros de navegación y evasión de obstáculos
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── dynamic_obstacle_manager — Núcleo de evasión con FSM ────────────────────
+# FSM: NORMAL → BRAKE_FOR_REPLAN → REPLAN → FOLLOW_NEW_PATH →
+#      RECOVERY_REVERSE → RECOVERY_TURN → SAFE_STOP
+#
+# Compuerta directa de velocidad — NO depende de Path vacío para detener.
+# Mantiene goal persistente durante todo el ciclo de evasión.
+dynamic_obstacle_manager:
+  ros__parameters:
+    # ── Detección LiDAR ────────────────────────────────────────────────────
+    # front_stop_distance:  distancia a la que el robot frena inmediatamente.
+    #   Debe ser > emergency_stop_distance para actuar antes que obstacle_avoidance.
+    # front_slow_distance:  zona de frenado suave previo al stop.
+    # emergency_stop_distance: igual que obstacle_avoidance.stop_distance
+    front_detection_angle_deg:   35.0   # [°] semióngulo del cono frontal
+    front_stop_distance:          0.65  # [m] frena y replantea
+    front_slow_distance:          0.90  # [m] empieza a reducir velocidad
+    emergency_stop_distance:      0.22  # [m] stop absoluto (igual que obstacle_avoidance)
+
+    # ── Capa dinámica de obstáculos ────────────────────────────────────────
+    # dynamic_obstacle_radius_m:   radio físico estimado del obstáculo.
+    # obstacle_inflation_radius_m: inflación adicional para A* — cuanto mayor,
+    #   más alejado pasará A* del obstáculo. 0.70 m = margen generoso.
+    # obstacle_cluster_radius_m:   radio para agrupar detecciones cercanas
+    #   como un mismo obstáculo (evita blobs duplicados).
+    # dynamic_obstacle_ttl_sec:    tiempo hasta que un obstáculo expira si no
+    #   vuelve a ser detectado (se borra del mapa aumentado).
+    # obstacle_reinject_cooldown_sec: tiempo mínimo entre re-inyecciones del
+    #   mismo obstáculo (previene spam).
+    dynamic_obstacle_radius_m:    0.35  # [m] radio físico del obstáculo
+    obstacle_inflation_radius_m:  0.70  # [m] inflación para A* — AGRESIVA
+    obstacle_cluster_radius_m:    0.45  # [m] radio de clustering
+    dynamic_obstacle_ttl_sec:     8.0   # [s] TTL — obstáculo desaparece si no se ve
+    obstacle_reinject_cooldown_sec: 5.0 # [s] cooldown entre re-inyecciones
+    min_obstacle_points:          3     # mínimo de puntos LiDAR para confirmar obstáculo
+
+    # ── Replanning ─────────────────────────────────────────────────────────
+    # replan_stop_hold_sec: tiempo que el robot permanece detenido esperando
+    #   la nueva ruta del A*. Durante este tiempo se publica Twist(0).
+    # max_replan_attempts:  intentos de replan antes de entrar en recovery.
+    # replan_timeout_sec:   si A* no responde en este tiempo, cuenta como fallo.
+    # path_collision_check: verificar si la ruta actual cruza obstáculos dinámicos.
+    # path_collision_sample_step_m: resolución del sampling para la verificación.
+    replan_stop_hold_sec:         1.5   # [s] tiempo de parada esperando replan
+    max_replan_attempts:          3     # intentos antes de recovery
+    replan_timeout_sec:           4.0   # [s] timeout por intento de replan
+    path_collision_check_enabled: true
+    path_collision_sample_step_m: 0.05  # [m]
+
+    # ── Recovery ───────────────────────────────────────────────────────────
+    # Si A* no encuentra ruta después de max_replan_attempts:
+    #   1. RECOVERY_REVERSE: retrocede reverse_duration_sec a reverse_speed
+    #   2. RECOVERY_TURN: gira hacia el lado con más espacio libre
+    #   3. Intenta REPLAN de nuevo
+    recovery_enabled:    true
+    reverse_speed:       0.07  # [m/s] velocidad de retroceso
+    reverse_duration_sec: 1.5  # [s] duración del retroceso
+    turn_speed:          0.35  # [rad/s] velocidad angular en recovery
+    turn_duration_sec:   1.2   # [s] duración del giro
+    free_space_angle_deg: 70.0 # [°] cono para medir espacio libre
+
+    # ── Discriminación estática vs dinámica ────────────────────────────────
+    # ignore_points_matching_static_map: filtra puntos del scan que caen sobre
+    #   celdas ya ocupadas en /map base. Solo puntos NUEVOS (no en mapa) se
+    #   consideran obstáculos dinámicos. Requiere que /map esté disponible.
+    # known_map_match_tolerance_m: tolerancia en metros para la comparación.
+    #   Absorbe errores de odometría y quantización del grid.
+    ignore_points_matching_static_map: true
+    known_map_match_tolerance_m:       0.12
+
+    # ── Tópicos y frames ───────────────────────────────────────────────────
+    # scan_topic: en Gazebo Fortress el bridge publica en /scan.
+    #   En robot real con scan_restamper se usa /scan_stamped.
+    #   Cambiar aquí o via launch argument según el entorno.
+    scan_topic:           "/scan"
+    odom_topic:           "/odom"
+    goal_topic:           "/goal_pose"
+    planned_path_topic:   "/planned_path"
+    base_map_topic:       "/map"
+    augmented_map_topic:  "/augmented_map"
+    cmd_vel_input_topic:  "/cmd_vel_steering"
+    cmd_vel_output_topic: "/cmd_vel_in"
+    global_frame:         "map"
+
+    # ── Debug ──────────────────────────────────────────────────────────────
+    enable_rviz_markers:  true
+    debug_logs:           true
+
+
+# ── steering_controller_node — Pure Pursuit ──────────────────────────────────
 steering_controller_node:
   ros__parameters:
-    lookahead_distance:  0.30   # metres
-    max_linear_vel:      0.30   # m/s
-    max_angular_vel:     1.50   # rad/s
-    goal_tolerance:      0.10   # metres
-    control_frequency:   20.0  # Hz
+    lookahead_distance:  0.30  # [m] lookahead corto = curvas más cerradas
+    max_linear_vel:      0.14  # [m/s]
+    max_angular_vel:     0.80  # [rad/s]
+    goal_tolerance:      0.12  # [m]
+    control_frequency:   20.0  # [Hz]
 
+
+# ── obstacle_avoidance_node — Safety layer final ──────────────────────────────
+# Este nodo es el ÚLTIMO filtro de seguridad física.
+# stop_distance debe ser < dynamic_obstacle_manager.emergency_stop_distance
+# para no interferir con la lógica de evasión del DOM.
 obstacle_avoidance_node:
   ros__parameters:
-    stop_distance:   0.30   # metres
-    slow_distance:   0.60   # metres
-    front_angle_deg: 30.0
+    stop_distance:   0.22   # [m] emergencia absoluta — parada sin condiciones
+    slow_distance:   0.45   # [m] zona de frenado gradual
+    front_angle_deg: 30.0   # [°] semióngulo del cono frontal
+
+    # Localización — parar si EKF pierde confianza
+    cov_slow_threshold: 0.15   # [m²] trace(P_xy) → empieza a escalar vel
+    cov_stop_threshold: 0.80   # [m²] trace(P_xy) → parada completa
+    cov_timeout_sec:    2.0    # [s] si /odom no llega → parada
+
+    # Retroceso automático de emergencia (último recurso)
+    stuck_timeout_sec:    3.0  # [s] bloqueado → retroceso
+    reverse_speed:        0.07 # [m/s]
+    reverse_duration_sec: 2.0  # [s]
+
+
+# ── dynamic_obstacle_spawner_node — Pruebas en Gazebo ────────────────────────
+dynamic_obstacle_spawner_node:
+  ros__parameters:
+    enabled:               true
+    spawn_interval_sec:    60.0    # [s] frecuencia de aparición
+    obstacle_ttl_sec:      90.0    # [s] tiempo hasta eliminación automática
+    max_active_obstacles:  3       # máximo simultáneo
+    # Modos: on_path | near_path | random_free | fixed_sequence
+    spawn_mode:            "on_path"
+
+    obstacle_shape:        "box"   # box | cylinder
+    obstacle_length_m:     0.35    # [m]
+    obstacle_width_m:      0.35    # [m]
+    obstacle_height_m:     0.60    # [m]
+
+    min_distance_from_robot_m: 0.80  # [m] no spawnear cerca del robot
+    min_distance_from_goal_m:  0.50  # [m] no spawnear sobre el goal
+    min_distance_from_walls_m: 0.25  # [m] no spawnear pegado a paredes
+    on_path_forward_offset_m:  0.80  # [m] a qué distancia frente al robot
+
+    use_current_planned_path: true
+    planned_path_topic:    "/planned_path"
+    map_topic:             "/map"
+    goal_topic:            "/goal_pose"
+    world_name:            "real_arena"  # nombre del world en Gazebo
+    global_frame:          "map"
+    robot_frame:           "base_footprint"
+
+    enable_rviz_markers:   true
+    auto_remove:           true
+
+    # Posiciones fijas para fixed_sequence mode
+    fixed_obstacles.0.name:   "test_obstacle_1"
+    fixed_obstacles.0.x:       1.5
+    fixed_obstacles.0.y:       1.2
+    fixed_obstacles.0.yaw:     0.0
+    fixed_obstacles.1.name:   "test_obstacle_2"
+    fixed_obstacles.1.x:       2.5
+    fixed_obstacles.1.y:       3.0
+    fixed_obstacles.1.yaw:     0.0
+
+
+# ── Nota: bug_navigation_node (viejo) ─────────────────────────────────────────
+# Reemplazado por dynamic_obstacle_manager. Mantenido aquí solo como referencia.
+# Si se reactiva bug_navigation_node, los parámetros anteriores eran:
+#   front_stop_distance: 0.70
+#   obstacle_inject_radius_m: 0.45
+#   obstacle_inject_decay_sec: 90.0
+# NO activar bug_navigation_node junto con dynamic_obstacle_manager.

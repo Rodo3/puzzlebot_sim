@@ -1,6 +1,6 @@
 """
 grabar.py — Script de grabación para práctica de reconocimiento de voz
-Graba 15 repeticiones de cada palabra a 16 kHz y las guarda en data/<palabra>/
+Graba repeticiones de cada palabra a 16 kHz y las guarda en voice_commands_dataset/<palabra>/
 """
 
 import os
@@ -8,13 +8,16 @@ import time
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+from pathlib import Path
 
 # ── Configuración ──────────────────────────────────────────────────────────────
-PALABRAS = ['avanzar', 'retroceder', 'izquierda', 'derecha', 'alto', 'inicio']
-FS = 16000          # frecuencia de muestreo requerida
-DURACION = 1.5      # segundos por grabación (ajusta si tus palabras son más largas)
+HABLANTES    = ['rodo', 'valeria', 'jesus', 'jorge']
+PALABRAS     = ['avanzar', 'retroceder', 'izquierda', 'derecha', 'alto', 'inicio',
+                'subir', 'bajar', 'tomar', 'soltar']
+FS           = 16000   # frecuencia de muestreo requerida
+DURACION     = 1.5     # segundos por grabación
 REPETICIONES = 20
-DATA_DIR = 'data'
+DATA_DIR     = Path(__file__).parent.parent.parent / 'datasets' / 'voice_commands_dataset'
 # ──────────────────────────────────────────────────────────────────────────────
 
 def grabar(duracion, fs):
@@ -38,11 +41,38 @@ def verificar_dispositivo():
     print(f"    Canales disponibles: {info['max_input_channels']}")
     print(f"    Sample rate por defecto: {int(info['default_samplerate'])} Hz\n")
 
+def seleccionar_hablante():
+    opciones = {str(i + 1): h for i, h in enumerate(HABLANTES)}
+    print("\n¿Quién va a grabar?")
+    for num, nombre in opciones.items():
+        print(f"  {num}. {nombre}")
+    while True:
+        eleccion = input("Escribe el número: ").strip()
+        if eleccion in opciones:
+            return opciones[eleccion]
+        print(f"  Opción inválida. Escribe un número del 1 al {len(HABLANTES)}.")
+
 def main():
     print("=" * 55)
     print("  GRABADOR DE PALABRAS — Reconocimiento de Voz LPC/VQ")
     print("=" * 55)
     verificar_dispositivo()
+
+    HABLANTE = seleccionar_hablante()
+
+    # Mostrar cuántas grabaciones ya tiene este hablante
+    print(f"\nHablante seleccionado: {HABLANTE}")
+    print("Estado actual:")
+    for palabra in PALABRAS:
+        carpeta = DATA_DIR / palabra
+        if carpeta.exists():
+            existentes = len([f for f in os.listdir(carpeta) if f.startswith(f'{HABLANTE}_') and f.endswith('.wav')])
+        else:
+            existentes = 0
+        faltantes = REPETICIONES - existentes
+        estado = "✅ completo" if faltantes == 0 else f"faltan {faltantes}"
+        print(f"  {palabra:<12}: {existentes}/{REPETICIONES}  ({estado})")
+    print()
 
     print(f"Palabras a grabar : {', '.join(PALABRAS)}")
     print(f"Repeticiones      : {REPETICIONES} por palabra")
@@ -51,7 +81,6 @@ def main():
     print(f"Directorio salida : {DATA_DIR}/\n")
     print("Instrucciones:")
     print("  - Graba en una habitación SIN ruido")
-    print("  - Habla tú mismo TODAS las grabaciones")
     print("  - Di la palabra claramente cuando veas ▶ GRABANDO")
     print("  - Presiona Enter para pasar a la siguiente")
     print("  - Escribe 'q' + Enter para salir\n")
@@ -60,7 +89,7 @@ def main():
 
     # Crear estructura de carpetas
     for palabra in PALABRAS:
-        os.makedirs(os.path.join(DATA_DIR, palabra), exist_ok=True)
+        (DATA_DIR / palabra).mkdir(parents=True, exist_ok=True)
 
     total_grabadas = 0
 
@@ -69,10 +98,10 @@ def main():
         print(f"  PALABRA: « {palabra.upper()} »")
         print(f"{'━'*55}")
 
-        # Ver cuántas ya existen (por si se reanuda)
+        # Ver cuántas ya existen (por si se reanuda) — solo cuenta las de este hablante
         existentes = len([
-            f for f in os.listdir(os.path.join(DATA_DIR, palabra))
-            if f.endswith('.wav')
+            f for f in os.listdir(DATA_DIR / palabra)
+            if f.startswith(f'{HABLANTE}_') and f.endswith('.wav')
         ])
         if existentes >= REPETICIONES:
             print(f"  ✅ Ya tiene {existentes} grabaciones. Saltando...")
@@ -90,8 +119,8 @@ def main():
             print(" ✓")
 
             # Guardar
-            nombre = f"{palabra}_{rep:02d}.wav"
-            ruta = os.path.join(DATA_DIR, palabra, nombre)
+            nombre = f"{HABLANTE}_{palabra}_{rep:02d}.wav"
+            ruta = DATA_DIR / palabra / nombre
             sf.write(ruta, audio, FS)
             total_grabadas += 1
 
@@ -127,14 +156,10 @@ def main():
         print(f"\n  ✅ «{palabra}» completada — {REPETICIONES} grabaciones guardadas.")
 
     print(f"\n{'='*55}")
-    print(f"  🎉 ¡Grabación completada!")
+    print(f"  Grabacion completada!")
     print(f"  Total de archivos guardados: {total_grabadas}")
-    print(f"  Carpeta: {os.path.abspath(DATA_DIR)}/")
+    print(f"  Carpeta: {DATA_DIR.resolve()}/")
     print(f"{'='*55}")
-    print("\nSiguiente paso:")
-    print("  git add data/")
-    print("  git commit -m 'feat: grabaciones reales de voz'")
-    print("  git push origin grabaciones-reales\n")
 
 if __name__ == '__main__':
     main()

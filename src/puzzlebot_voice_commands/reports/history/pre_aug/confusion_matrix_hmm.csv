@@ -1,0 +1,7 @@
+true \ pred,alto,avanzar,derecha,inicio,izquierda,retroceder
+alto,24,0,0,0,0,0
+avanzar,0,24,0,0,0,0
+derecha,2,1,18,0,0,3
+inicio,1,2,1,19,0,1
+izquierda,1,0,1,0,20,2
+retroceder,0,1,0,0,0,23

@@ -79,14 +79,37 @@ def generate_launch_description():
         default_value='false',
         description='[real_arena+kalman] Publica /aruco/pose sintético desde ground truth',
     )
+    # navigation:=true → lanza navigation.launch.py (A* + steering_controller + obstacle_avoidance)
+    # Requiere que SLAM haya construido /map (mode:=mapping o que /map ya esté disponible).
+    # Usa 2D Nav Goal en RViz para enviar /goal_pose al planner.
+    arg_navigation = DeclareLaunchArgument(
+        'navigation',
+        default_value='false',
+        description='Lanza navegación autónoma A* + steering_controller + obstacle_avoidance. '
+                    'Envía /goal_pose desde RViz (tecla G → 2D Nav Goal).',
+    )
+    arg_web_bridge = DeclareLaunchArgument(
+        'web_bridge',
+        default_value='true',
+        description='Lanza puzzlebot_web_bridge (WebSocket dashboard). '
+                    'Deshabilitar con web_bridge:=false si no se usa el dashboard.',
+    )
+    arg_artifact_dir = DeclareLaunchArgument(
+        'artifact_dir',
+        default_value='',
+        description='Ruta a artifacts_final/ con modelos de voz. '
+                    'Vacío deshabilita inferencia de voz en el bridge.',
+    )
 
-    world_name   = LaunchConfiguration('world')
-    slam_en      = LaunchConfiguration('slam')
-    rviz_en      = LaunchConfiguration('rviz')
-    mode         = LaunchConfiguration('mode')
-    odom_source  = LaunchConfiguration('odom_source')
-    kalman_en    = LaunchConfiguration('kalman')
-    oracle_en    = LaunchConfiguration('aruco_oracle')
+    world_name    = LaunchConfiguration('world')
+    slam_en       = LaunchConfiguration('slam')
+    rviz_en       = LaunchConfiguration('rviz')
+    mode          = LaunchConfiguration('mode')
+    odom_source   = LaunchConfiguration('odom_source')
+    kalman_en     = LaunchConfiguration('kalman')
+    oracle_en     = LaunchConfiguration('aruco_oracle')
+    nav_en        = LaunchConfiguration('navigation')
+    web_bridge_en = LaunchConfiguration('web_bridge')
 
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -662,11 +685,69 @@ def generate_launch_description():
         ])),
     )
 
+    # ── Navegación autónoma A* (opcional, navigation:=true) ──────────────
+    # Incluye: path_planner_node + steering_controller + obstacle_avoidance
+    # Conecta: /map → A* → /planned_path → steering → /cmd_vel_in → avoidance → /cmd_vel
+    nav_launch_file = os.path.join(bringup_pkg, 'launch', 'navigation.launch.py')
+    navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(nav_launch_file),
+        launch_arguments={
+            'use_sim_time':   'true',
+            'cmd_vel_topic':  '/model/puzzlebot/cmd_vel',  # DiffDrive de Fortress
+        }.items(),
+        condition=IfCondition(nav_en),
+    )
+
+    # ── scan_restamper (requerido para navigation en Gazebo) ─────────────
+    # Los nodos de navegación (bug_navigation, obstacle_avoidance) suscriben /scan_stamped.
+    # En Gazebo el scan llega en /scan directamente. Este nodo reempaqueta el timestamp
+    # y cambia el frame_id a lidar_link para que la cadena TF sea válida.
+    scan_restamper = Node(
+        package='puzzlebot_localization',
+        executable='scan_restamper',
+        name='scan_restamper',
+        output='screen',
+        parameters=[{
+            'use_sim_time':    True,
+            'input_topic':     '/scan',
+            'target_frame':    'lidar_link',
+            'invert_angles':   False,
+            'angle_offset_rad': 0.0,
+        }],
+        condition=IfCondition(nav_en),
+    )
+
+    # ── Web dashboard bridge (opcional, web_bridge:=true) ────────────────
+    # Expone ws://0.0.0.0:8000/ws para el dashboard React.
+    # cmd_vel_out_topic apunta al tópico del DiffDrive de Gazebo para que el teleop funcione.
+    web_bridge = Node(
+        package='puzzlebot_web_bridge',
+        executable='bridge_node',
+        name='puzzlebot_web_bridge',
+        output='screen',
+        parameters=[{
+            'use_sim_time':       True,
+            'cmd_vel_out_topic':  '/model/puzzlebot/cmd_vel',
+            'artifact_dir':       LaunchConfiguration('artifact_dir'),
+        }],
+        condition=IfCondition(web_bridge_en),
+    )
+
+    # ── Mission launcher (activo cuando web_bridge:=true) ─────────────────
+    # Escucha /mission_start del dashboard y lanza los launch files de misión.
+    mission_launcher = Node(
+        package='puzzlebot_control',
+        executable='mission_launcher_node',
+        name='mission_launcher_node',
+        output='screen',
+        condition=IfCondition(web_bridge_en),
+    )
+
     return LaunchDescription([
         set_resource_path,
         # Argumentos
         arg_world, arg_gui, arg_slam, arg_rviz, arg_mode, arg_odom_source,
-        arg_kalman, arg_aruco_oracle,
+        arg_kalman, arg_aruco_oracle, arg_navigation, arg_web_bridge, arg_artifact_dir,
         gz_sim,
         rsp,
         # Bridges (uno activo según world)
@@ -709,4 +790,12 @@ def generate_launch_description():
         rviz_flat_node,
         rviz_maze_node,
         rviz_mapping_node,
+        # Navegación autónoma A* (navigation:=true)
+        navigation,
+        # scan_restamper: adapta /scan → /scan_stamped para nodos de navegación en Gazebo
+        scan_restamper,
+        # Web dashboard bridge (web_bridge:=true)
+        web_bridge,
+        # Mission launcher (web_bridge:=true)
+        mission_launcher,
     ])

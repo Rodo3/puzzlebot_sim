@@ -28,6 +28,7 @@ setup(
             'calib_capture_node = puzzlebot_perception.calib_capture_node:main',
             'calib_compute_node = puzzlebot_perception.calib_compute_node:main',
             'calib_apply_node   = puzzlebot_perception.calib_apply_node:main',
+            'qr_node            = puzzlebot_perception.qr_node:main',
         ],
     },
 )

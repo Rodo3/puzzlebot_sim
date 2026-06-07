@@ -1,0 +1,99 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  WAYPOINTS — Pista 3.76 × 4.86 m
+#  Origen (0,0) = esquina SW de la pista
+#
+#  Cómo agregar un waypoint:
+#    1. Abre RViz con el mapa cargado
+#    2. Hover sobre el punto deseado → anota las coordenadas X,Y del panel
+#       "Displays > ... > Topic" o usa "Publish Point" (clic en la posición)
+#    3. Agrega la entrada aquí con nombre, x, y, yaw (orientación en radianes)
+#
+#  Convención de yaw (radianes):
+#    0.0  → mirando al Este (+X)
+#    1.57 → mirando al Norte (+Y)
+#    3.14 → mirando al Oeste (-X)
+#   -1.57 → mirando al Sur  (-Y)
+# ══════════════════════════════════════════════════════════════════════════════
+
+waypoints:
+
+  # ── Esquinas de la pista ───────────────────────────────────────────────────
+  esquina_sw:
+    x: 0.30
+    y: 0.30
+    yaw: 0.0
+    description: "Esquina suroeste (origen)"
+
+  esquina_se:
+    x: 3.46
+    y: 0.30
+    yaw: 1.57
+    description: "Esquina sureste"
+
+  esquina_ne:
+    x: 3.46
+    y: 4.56
+    yaw: 3.14
+    description: "Esquina noreste"
+
+  esquina_nw:
+    x: 0.30
+    y: 4.56
+    yaw: -1.57
+    description: "Esquina noroeste"
+
+  # ── Centro de la pista ─────────────────────────────────────────────────────
+  centro:
+    x: 1.88
+    y: 2.43
+    yaw: 0.0
+    description: "Centro geométrico de la pista"
+
+  # ── Estaciones de trabajo (personalizar con medidas reales) ────────────────
+  estacion_a:
+    x: 0.60
+    y: 1.20
+    yaw: 0.0
+    description: "Estación A — zona SW libre de obstáculos"
+
+  estacion_b:
+    x: 1.88
+    y: 0.50
+    yaw: 1.57
+    description: "Estación B — centro sur"
+
+  estacion_c:
+    x: 3.10
+    y: 2.43
+    yaw: 3.14
+    description: "Estación C — lado este"
+
+  estacion_d:
+    x: 1.88
+    y: 4.20
+    yaw: -1.57
+    description: "Estación D — centro norte"
+
+  estacion_e:
+    x: 0.60
+    y: 3.50
+    yaw: 0.0
+    description: "Estación E — zona NW"
+
+  # ── Punto de inicio/home ───────────────────────────────────────────────────
+  home:
+    x: 0.50
+    y: 0.50
+    yaw: 0.0
+    description: "Posición de inicio del robot"
+
+  # ── Zona de docks (Misión logística) ───────────────────────────────────────
+  # Punto único desde el que se ven los 3 logos de los tráileres (Walmart /
+  # Pepsi / Amazon). state_machine_node navega aquí en NAVIGATING_TO_DOCKS y
+  # desde aquí compara /logo_detection/result con el target leído del QR.
+  # TODO: medir las coordenadas reales en la pista y reemplazar estos valores.
+  dock_scan:
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    description: "Zona de docks — visible los 3 logos de tráiler (COORDS TODO)"

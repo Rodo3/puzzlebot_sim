@@ -1,0 +1,60 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# obstacles.yaml — Configuración de obstáculos para real_arena.sdf
+#
+# Pista física: 3.76 m (X) × 4.86 m (Y), origen (0,0) = esquina SW.
+# Unidades: metros / radianes.
+#
+# Convención de ejes:
+#   X+ = Este (ancho = 3.76 m)
+#   Y+ = Norte (alto  = 4.86 m)
+#   Z+ = Arriba (altura)
+#
+# Para modificar la posición de los obstáculos:
+#   1. Edita los valores x, y, yaw, length, width, height en este archivo.
+#   2. Actualiza los campos <pose> correspondientes en real_arena.sdf buscando
+#      las secciones "═══ OBSTACLE N ═══".
+#   3. Reconstruye la simulación (no se requiere colcon build — solo relanzar).
+#
+# Nota sobre yaw: el ángulo yaw rota el obstáculo sobre el eje Z.
+#   yaw = 0.0   → el lado "length" apunta en X, el lado "width" apunta en Y
+#   yaw = 1.571 → rotado 90° — el lado "length" apunta en Y
+#
+# Los tres obstáculos son aproximaciones razonables al entorno real.
+# Sus posiciones son PLACEHOLDERS CONFIGURABLES — ajusta según el layout físico real.
+# ══════════════════════════════════════════════════════════════════════════════
+
+obstacles:
+
+  # ── Obstáculo 1 — Cubo central-oeste ──────────────────────────────────────
+  # Posición aproximada: tercio inferior, lado oeste de la pista
+  # Visible desde el arranque en (0.30, 0.30) mirando norte
+  - name:    obstacle_1
+    x:       1.0          # placeholder — ajustar a posición real
+    y:       1.2          # placeholder — ajustar a posición real
+    yaw:     0.0          # radianes
+    length:  0.40         # metros — dimensión en X cuando yaw=0
+    width:   0.30         # metros — dimensión en Y cuando yaw=0
+    height:  0.50         # metros — altura
+    color:   red          # solo visual en Gazebo (rgba en SDF)
+
+  # ── Obstáculo 2 — Cubo central-norte ──────────────────────────────────────
+  # Posición aproximada: tercio superior, centro de la pista
+  - name:    obstacle_2
+    x:       2.0          # placeholder
+    y:       3.2          # placeholder
+    yaw:     0.785        # 45° — orientado en diagonal
+    length:  0.50         # metros
+    width:   0.40         # metros
+    height:  0.50         # metros
+    color:   blue
+
+  # ── Obstáculo 3 — Cubo central-este ───────────────────────────────────────
+  # Posición aproximada: tercio medio, lado este de la pista
+  - name:    obstacle_3
+    x:       2.8          # placeholder
+    y:       2.0          # placeholder
+    yaw:     0.0          # radianes
+    length:  0.30         # metros
+    width:   0.30         # metros
+    height:  0.50         # metros
+    color:   green

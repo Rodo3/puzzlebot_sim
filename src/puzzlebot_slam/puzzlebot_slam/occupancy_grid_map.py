@@ -53,6 +53,10 @@ class OccupancyGridMap:
         self.lidar_yaw = lidar_yaw
         self.grid = np.zeros((self.height_pixels, self.width_pixels), dtype=np.float32)
 
+    def reset(self) -> None:
+        """Reset the log-odds grid to uniform unknown state (all zeros)."""
+        self.grid[:] = 0.0
+
     def world_to_cell(self, wx: float, wy: float):
         col = int(math.floor((wx - self.origin_x) / self.resolution))
         row = int(math.floor((wy - self.origin_y) / self.resolution))
@@ -130,6 +134,48 @@ class OccupancyGridMap:
                 -self.l_clamp,
                 self.grid[end_row, end_col] + self.l_free,
             )
+
+    def load_from_png(self, path: str) -> None:
+        """Load a saved PNG into the log-odds grid (inverse of to_png).
+
+        Expected pixel convention (same as to_png / ROS map_server):
+          255 = free     → log-odds = -l_clamp
+          127 = unknown  → log-odds =  0.0
+            0 = occupied → log-odds = +l_clamp
+        Pixels are clamped to [-l_clamp, +l_clamp] to match the SLAM saturation.
+        The image is flipped vertically because PNG row-0 is top while the grid
+        row-0 is bottom (OccupancyGrid convention).
+        """
+        from PIL import Image
+        img = Image.open(path).convert('L')
+        arr = np.array(img, dtype=np.float32)
+        arr = np.flipud(arr)          # PNG top-left → grid bottom-left
+
+        # Resize if the saved map has different pixel dimensions than the grid.
+        if arr.shape != (self.height_pixels, self.width_pixels):
+            img_resized = Image.fromarray(arr.astype(np.uint8)).resize(
+                (self.width_pixels, self.height_pixels), Image.NEAREST)
+            arr = np.array(img_resized, dtype=np.float32)
+
+        # pixel 255→−l_clamp (free), 0→+l_clamp (occupied), 127→0 (unknown)
+        self.grid = (127.0 - arr) / 127.0 * self.l_clamp
+        self.grid = np.clip(self.grid, -self.l_clamp, self.l_clamp).astype(np.float32)
+
+    def to_png(self, path: str) -> None:
+        """Save the current occupancy grid as a grayscale PNG.
+
+        Convention (matches ROS map_server):
+          127 = unknown  (log-odds ≈ 0)
+          255 = free     (log-odds < -0.5)
+            0 = occupied (log-odds >  0.5)
+        """
+        from PIL import Image
+        img_data = np.full(self.grid.shape, 127, dtype=np.uint8)
+        img_data[self.grid < -0.5] = 255
+        img_data[self.grid > 0.5] = 0
+        # OccupancyGrid origin is bottom-left; PNG row 0 is top → flip vertically
+        img = Image.fromarray(np.flipud(img_data), mode='L')
+        img.save(path)
 
     def to_msg(self, stamp, frame_id: str) -> OccupancyGrid:
         msg = OccupancyGrid()

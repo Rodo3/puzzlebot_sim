@@ -55,28 +55,57 @@ class _SingleHMM:
     # Initialisation
     # ------------------------------------------------------------------
 
-    def _init_params(self, rng: np.random.Generator) -> None:
-        S, M = self.n_states, self.n_symbols
+    def _init_params_from_counts(self, sequences: List[np.ndarray]) -> None:
+        """Initialise A, B, and pi using linear segmentation + observation counts.
 
-        # pi: only the first state has non-zero probability (left-to-right)
+        For each training sequence of length T:
+          - State i covers frames [i*T//S, (i+1)*T//S).
+          - B[i, k] = count of symbol k in segment i (across all sequences).
+          - a_ii estimated from average segment duration; a_{i,i+1} = 1 - a_ii.
+        Epsilon smoothing (1e-6) is applied to every B entry so that no
+        observation can zero-out the Forward probability.
+        """
+        S, M = self.n_states, self.n_symbols
+        EPS = 1e-6
+
+        # pi: first state only (left-to-right)
         pi = np.zeros(S)
         pi[0] = 1.0
         self.log_pi = _safe_log(pi, self.log_zero)
 
-        # A: left-to-right — state i -> i (self) or i+1 (forward), last state loops
-        # Add small random noise so EM can break symmetry
+        # Accumulate symbol counts per state across all sequences
+        B_counts = np.zeros((S, M))
+        total_seg_len = np.zeros(S)
+        n_valid = 0
+
+        for obs in sequences:
+            T = len(obs)
+            if T < S:
+                continue
+            n_valid += 1
+            for i in range(S):
+                start = i * T // S
+                end   = (i + 1) * T // S
+                seg   = obs[start:end]
+                for k in seg:
+                    B_counts[i, int(k)] += 1
+                total_seg_len[i] += len(seg)
+
+        # B: add epsilon, normalise each row to sum to exactly 1
+        B_counts += EPS
+        row_sums = B_counts.sum(axis=1, keepdims=True)
+        B = B_counts / row_sums
+        self.log_B = _safe_log(B, self.log_zero)
+
+        # A: estimate a_ii from average segment duration, a_{i,i+1} = 1 - a_ii
+        avg_dur = total_seg_len / max(n_valid, 1)
         A = np.zeros((S, S))
         for i in range(S - 1):
-            noise = rng.random(2)
-            noise /= noise.sum()
-            A[i, i]     = noise[0]
-            A[i, i + 1] = noise[1]
+            d = max(float(avg_dur[i]), 2.0)   # at least 2 frames to keep a_ii < 1
+            A[i, i]     = (d - 1.0) / d
+            A[i, i + 1] = 1.0 / d
         A[S - 1, S - 1] = 1.0
         self.log_A = _safe_log(A, self.log_zero)
-
-        # B: uniform + small Dirichlet noise
-        noise = rng.dirichlet(np.ones(M), size=S)  # (S, M)
-        self.log_B = _safe_log(noise, self.log_zero)
 
     # ------------------------------------------------------------------
     # Baum-Welch training
@@ -87,10 +116,30 @@ class _SingleHMM:
         sequences: List[np.ndarray],
         n_iter: int,
         rng: np.random.Generator,
+        snapshot_callback=None,
     ) -> None:
-        """Train on a list of observation sequences (each is a 1-D int array)."""
-        self._init_params(rng)
+        """Train on a list of observation sequences (each is a 1-D int array).
+
+        Step 1 — count-based initialisation (linear segmentation).
+        Step 2 — Baum-Welch refinement for n_iter iterations (optional; set
+                 n_iter=0 to skip).
+
+        snapshot_callback: optional callable(stage, log_A, log_B).
+            Fired at 'initial' (after count init), 'mid' (after n_iter//2
+            iterations), and 'final' (after all iterations). Receives copies
+            of the current log-space arrays. Default None = no overhead.
+        """
+        self._init_params_from_counts(sequences)
+
+        if snapshot_callback is not None:
+            snapshot_callback('initial', self.log_A.copy(), self.log_B.copy())
+
+        if n_iter == 0:
+            self._is_fitted = True
+            return
+
         S, M = self.n_states, self.n_symbols
+        _mid_at = max(0, n_iter // 2 - 1) if snapshot_callback is not None else -1
 
         for iteration in range(n_iter):
             # Accumulators for the new parameter estimates
@@ -165,6 +214,12 @@ class _SingleHMM:
                 else:
                     self.log_B[i] = new_log_B[i] - row_sum
 
+            if snapshot_callback is not None and iteration == _mid_at:
+                snapshot_callback('mid', self.log_A.copy(), self.log_B.copy())
+
+        if snapshot_callback is not None:
+            snapshot_callback('final', self.log_A.copy(), self.log_B.copy())
+
         self._is_fitted = True
 
     # ------------------------------------------------------------------
@@ -229,28 +284,17 @@ class _SingleHMM:
     # ------------------------------------------------------------------
 
     def log_likelihood(self, obs: np.ndarray) -> float:
-        """Return log P(obs | model) via Viterbi (sum of log scale factors).
+        """Return log P(obs | model) via the Forward algorithm.
 
-        This is faster than full forward and sufficient for argmax classification.
+        The sum of log-scale factors produced by _forward equals log P(O|λ),
+        which is the correct quantity for argmax classification.
         """
         if not self._is_fitted:
             raise RuntimeError("HMM not fitted — call fit() first.")
-        T = len(obs)
-        S = self.n_states
-        if T == 0:
+        if len(obs) == 0:
             return self.log_zero
-
-        log_delta = np.full((T, S), self.log_zero)
-        log_delta[0] = self.log_pi + self.log_B[:, obs[0]]
-
-        for t in range(1, T):
-            for j in range(S):
-                log_delta[t, j] = (
-                    np.max(log_delta[t - 1] + self.log_A[:, j])
-                    + self.log_B[j, obs[t]]
-                )
-
-        return float(np.max(log_delta[-1]))
+        _, log_scale = self._forward(obs)
+        return float(log_scale.sum())
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +325,7 @@ class HiddenMarkovModelClassifier:
     def fit(
         self,
         sequences_by_class: Dict[str, List[np.ndarray]],
+        snapshots_for: Optional[List[str]] = None,
     ) -> 'HiddenMarkovModelClassifier':
         """Train the classifier.
 
@@ -314,9 +359,23 @@ class HiddenMarkovModelClassifier:
             ]
 
         # --- 3. Train one HMM per class ---
+        self._snapshots_: Dict[str, Dict] = {}
+        _snap_set = set(snapshots_for) if snapshots_for else set()
+
         for label in self.labels_:
-            hmm = _SingleHMM(cfg.n_states, cfg.n_symbols, cfg.log_zero)
-            hmm.fit(quantized[label], cfg.n_iter, np.random.default_rng(cfg.random_state))
+            n_st = cfg.n_states_per_class.get(label, cfg.n_states) if cfg.n_states_per_class else cfg.n_states
+            hmm = _SingleHMM(n_st, cfg.n_symbols, cfg.log_zero)
+            if label in _snap_set:
+                snaps: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+                def _snap_cb(stage, lA, lB, _s=snaps):
+                    _s[stage] = (np.exp(lA.copy()), np.exp(lB.copy()))
+                self._snapshots_[label] = snaps
+                hmm.fit(quantized[label], cfg.n_iter,
+                        np.random.default_rng(cfg.random_state),
+                        snapshot_callback=_snap_cb)
+            else:
+                hmm.fit(quantized[label], cfg.n_iter,
+                        np.random.default_rng(cfg.random_state))
             self.hmms_[label] = hmm
 
         self.is_fitted_ = True
@@ -423,20 +482,29 @@ def _kmeans_codebook(
     max_iter: int,
     tol: float,
     rng: np.random.Generator,
+    chunk_size: int = 1024,
 ) -> np.ndarray:
-    """K-Means from scratch — returns centroids (n_clusters, d)."""
+    """K-Means from scratch — returns centroids (n_clusters, d).
+
+    Distances are computed in row-chunks to avoid the (N, K, d) broadcast
+    that exhausts RAM when N and K are both large.
+    """
     n_points = data.shape[0]
     n_clusters = min(n_clusters, n_points)
     indices = rng.choice(n_points, size=n_clusters, replace=False)
     centroids = data[indices].copy()
 
-    for _ in range(max_iter):
-        # Assignment
-        diff = data[:, np.newaxis, :] - centroids[np.newaxis, :, :]   # (N, K, d)
-        sq_dist = (diff ** 2).sum(axis=2)                              # (N, K)
-        assignments = np.argmin(sq_dist, axis=1)                       # (N,)
+    assignments = np.empty(n_points, dtype=np.int32)
 
-        # Update
+    for _ in range(max_iter):
+        # Chunked assignment — peak RAM = chunk_size × K × d × 8 bytes
+        for start in range(0, n_points, chunk_size):
+            end = min(start + chunk_size, n_points)
+            diff = data[start:end, np.newaxis, :] - centroids[np.newaxis, :, :]
+            sq_dist = (diff ** 2).sum(axis=2)
+            assignments[start:end] = np.argmin(sq_dist, axis=1)
+
+        # Update centroids
         new_centroids = np.empty_like(centroids)
         for k in range(n_clusters):
             mask = assignments == k
