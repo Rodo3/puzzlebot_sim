@@ -11,7 +11,6 @@ Features (all aligned to the same hop grid):
   - RMS energy      : 1 coefficient        (if include_rms)
   - Spectral contrast: 7 coefficients      (if include_contrast)
 """
-import librosa
 import numpy as np
 
 from .config import MFCCConfig
@@ -29,6 +28,8 @@ def extract_librosa_frames(signal: np.ndarray, cfg: MFCCConfig) -> np.ndarray:
     Returns:
         ndarray shape (n_frames, n_features).
     """
+    import librosa
+
     sr          = cfg.sample_rate
     hop_length  = int(cfg.frame_stride * sr)   # 160 at 16 kHz
     win_length  = int(cfg.frame_size   * sr)   # 400 at 16 kHz

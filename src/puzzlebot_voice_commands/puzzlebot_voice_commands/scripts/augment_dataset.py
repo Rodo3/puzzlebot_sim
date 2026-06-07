@@ -26,8 +26,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-EXPECTED_CLASSES = {'avanzar', 'retroceder', 'izquierda', 'derecha', 'alto', 'inicio',
-                    'subir', 'bajar', 'tomar', 'soltar'}
+EXPECTED_CLASSES = {'avanzar', 'retroceder', 'izquierda', 'derecha', 'alto', 'inicio'}
 SR = 16000
 
 

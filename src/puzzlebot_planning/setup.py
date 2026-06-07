@@ -23,9 +23,6 @@ setup(
             'obstacle_avoidance_node  = puzzlebot_planning.obstacle_avoidance_node:main',
             'waypoint_navigator_node  = puzzlebot_planning.waypoint_navigator_node:main',
             'bug_navigation_node      = puzzlebot_planning.bug_navigation_node:main',
-            'dynamic_obstacle_manager      = puzzlebot_planning.dynamic_obstacle_manager:main',
-            'dynamic_obstacle_spawner_node = puzzlebot_planning.dynamic_obstacle_spawner_node:main',
-            'fake_odom_node                = puzzlebot_planning.fake_odom_node:main',
         ],
     },
 )

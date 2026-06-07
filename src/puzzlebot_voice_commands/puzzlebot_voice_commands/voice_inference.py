@@ -18,31 +18,58 @@ import numpy as np
 @dataclass
 class InferenceResult:
     command: str
-    confidence: float          # margen log-lik entre 1er y 2do lugar (positivo = más seguro)
+    confidence: float          # margen KMeans (diferencia con 2do lugar, positivo = más seguro)
     inference_time_ms: float
-    ranked_kmeans: List[Tuple[str, float]]   # siempre vacío (KMeans eliminado)
+    ranked_kmeans: List[Tuple[str, float]]   # [(label, dist), ...] menor dist = mejor
     ranked_hmm: List[Tuple[str, float]]      # [(label, log_lik), ...] mayor = mejor
 
 
 class VoiceInferenceEngine:
-    """Motor de inferencia HMM sobre PCM float32."""
+    """Carga modelos KMeans + HMM y ejecuta inferencia sobre PCM float32."""
 
-    def __init__(self, hmm_model, hmm_cfg):
+    def __init__(self, km_model, km_cfg, hmm_model, hmm_cfg):
+        self._km_model = km_model
+        self._km_cfg = km_cfg
         self._hmm_model = hmm_model
         self._hmm_cfg = hmm_cfg
 
     @classmethod
     def load(cls, artifact_dir) -> 'VoiceInferenceEngine':
-        """Carga el modelo HMM desde artifact_dir.
+        """Carga ambos modelos desde artifact_dir.
 
         Raises:
-            FileNotFoundError: si los archivos de HMM no existen.
+            FileNotFoundError: si algún archivo de modelo no existe.
         """
         artifact_dir = Path(artifact_dir)
 
+        from .models.kmeans_codebook import KMeansCodebookClassifier
         from .models.hmm import HiddenMarkovModelClassifier
         from .config import MFCCConfig
 
+        # --- KMeans ---
+        km_path = artifact_dir / 'kmeans_model.pkl'
+        km_cfg_path = artifact_dir / 'kmeans_feature_config.json'
+        if not km_path.exists():
+            raise FileNotFoundError(f"Modelo KMeans no encontrado: {km_path}")
+        if not km_cfg_path.exists():
+            raise FileNotFoundError(f"Config KMeans no encontrada: {km_cfg_path}")
+
+        km_cfg_data = json.loads(km_cfg_path.read_text())
+        km_cfg = MFCCConfig(
+            sample_rate=km_cfg_data.get('sample_rate', 16000),
+            pre_emphasis=km_cfg_data.get('pre_emphasis', 0.97),
+            frame_size=km_cfg_data.get('frame_size', 0.025),
+            frame_stride=km_cfg_data.get('frame_stride', 0.01),
+            n_fft=km_cfg_data.get('n_fft', 512),
+            n_filters=km_cfg_data.get('n_filters', 26),
+            n_mfcc=km_cfg_data.get('n_mfcc', 13),
+            include_delta=km_cfg_data.get('include_delta', False),
+            include_delta_delta=km_cfg_data.get('include_delta_delta', False),
+            cmvn=km_cfg_data.get('cmvn', False),
+        )
+        km_model = KMeansCodebookClassifier.load(km_path)
+
+        # --- HMM ---
         hmm_path = artifact_dir / 'hmm_model.pkl'
         hmm_cfg_path = artifact_dir / 'hmm_config.json'
         if not hmm_path.exists():
@@ -66,18 +93,7 @@ class VoiceInferenceEngine:
         )
         hmm_model = HiddenMarkovModelClassifier.load(hmm_path)
 
-        engine = cls(hmm_model, hmm_cfg)
-        # Warmup: fuerza la importación de librosa y compila las rutas JIT
-        # para que la primera inferencia real no sufra el costo de import.
-        engine._warmup()
-        return engine
-
-    def _warmup(self) -> None:
-        dummy = np.zeros(16000, dtype=np.float32)
-        try:
-            self.infer(dummy, 16000)
-        except Exception:
-            pass
+        return cls(km_model, km_cfg, hmm_model, hmm_cfg)
 
     def infer(self, signal: np.ndarray, sample_rate: int = 16000) -> InferenceResult:
         """Ejecuta inferencia sobre una señal PCM float32.
@@ -87,7 +103,7 @@ class VoiceInferenceEngine:
             sample_rate: debe coincidir con el SR de entrenamiento (16000).
 
         Returns:
-            InferenceResult con comando, confianza y predicciones HMM rankeadas.
+            InferenceResult con comando, confianza y predicciones rankeadas.
         """
         from .audio_io import normalize, _resample
         from .mfcc import extract_mfcc_frames
@@ -100,21 +116,26 @@ class VoiceInferenceEngine:
 
         t0 = time.perf_counter()
 
+        # KMeans (más preciso — decide el comando final)
+        frames_km = extract_mfcc_frames(signal, self._km_cfg)
+        ranked_km = self._km_model.predict_ranked(frames_km)
+
+        # HMM
         if self._hmm_cfg.use_librosa:
-            frames = extract_librosa_frames(signal, self._hmm_cfg)
+            frames_hmm = extract_librosa_frames(signal, self._hmm_cfg)
         else:
-            frames = extract_mfcc_frames(signal, self._hmm_cfg)
-        ranked_hmm = self._hmm_model.predict_ranked(frames)
+            frames_hmm = extract_mfcc_frames(signal, self._hmm_cfg)
+        ranked_hmm = self._hmm_model.predict_ranked(frames_hmm)
 
         inference_time_ms = (time.perf_counter() - t0) * 1000.0
 
-        label = ranked_hmm[0][0]
-        confidence = float(ranked_hmm[0][1] - ranked_hmm[1][1]) if len(ranked_hmm) > 1 else 0.0
+        label = ranked_km[0][0]
+        confidence = float(ranked_km[1][1] - ranked_km[0][1]) if len(ranked_km) > 1 else 0.0
 
         return InferenceResult(
             command=label,
             confidence=confidence,
             inference_time_ms=inference_time_ms,
-            ranked_kmeans=[],
+            ranked_kmeans=[(lbl, float(dist)) for lbl, dist in ranked_km],
             ranked_hmm=[(lbl, float(ll)) for lbl, ll in ranked_hmm],
         )

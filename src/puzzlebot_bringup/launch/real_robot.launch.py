@@ -148,12 +148,6 @@ def generate_launch_description():
                           description='Navegación autónoma A* + steering_controller + obstacle_avoidance. '
                                       'Requiere /map disponible. Enviar /goal_pose por RViz (G → 2D Nav Goal).')
     #####################################################################################################
-
-    arg_dashboard_features = DeclareLaunchArgument('dashboard_features', default_value='false',
-                          description='Lanza los nodos de soporte del web dashboard: state_machine_node '
-                                      '(misión + montacargas), qr_node y logo_detector_node. '
-                                      'El bridge (ros2 run puzzlebot_web_bridge bridge_node) se corre aparte.')
-    #####################################################################################################
     
     arg_use_map    = DeclareLaunchArgument('use_map', default_value='false',
                           description='Carga mapa PNG estático: activa map_server_node (/map) y '
@@ -173,7 +167,6 @@ def generate_launch_description():
     kalman_en    = LaunchConfiguration('kalman')
     avoidance_en = LaunchConfiguration('avoidance')
     nav_en       = LaunchConfiguration('navigation')
-    dash_en      = LaunchConfiguration('dashboard_features')
     aruco_en     = LaunchConfiguration('aruco')
     viewer_en    = LaunchConfiguration('viewer')
     rviz_en      = LaunchConfiguration('rviz')
@@ -559,59 +552,6 @@ def generate_launch_description():
         condition=IfCondition(nav_en),
     )
 
-    # ── Features del web dashboard (dashboard_features:=true) ─────────────
-    # Nodos que dan soporte a misiones / QR / logo / montacargas controlados
-    # desde el web dashboard. El bridge (puzzlebot_web_bridge bridge_node) se
-    # corre por separado y publica /mission_start, /forklift/command, etc.
-    #   state_machine_node : FSM de misión. Consume /mission_start,
-    #                        /qr/detections, /logo_detection/result; publica
-    #                        /mission_state, /navigate_to_waypoint, /forklift/command.
-    #   qr_node            : detección de QR sobre /camera/image/compressed.
-    #   logo_detector_node : detección de logo (ONNX) sobre /camera/image/compressed.
-    #   waypoint_navigator_node : traduce /navigate_to_waypoint (nombre) → /goal_pose
-    #                        para el path_planner A* de master. Sin él, el botón
-    #                        "ir a waypoint" del dashboard y la navegación de las
-    #                        misiones no tendrían consumidor (master no incluye
-    #                        este traductor; se reincorpora aquí, es aditivo).
-    # La cámara la publica la Jetson (jetson_sensors.launch.py) en
-    # /camera/image/compressed — topic por defecto de ambos detectores.
-    waypoints_cfg = os.path.join(bringup_pkg, 'config', 'waypoints.yaml')
-
-    state_machine = Node(
-        package='puzzlebot_control',
-        executable='state_machine_node',
-        name='state_machine_node',
-        output='screen',
-        parameters=[{'waypoints_file': waypoints_cfg}],
-        condition=IfCondition(dash_en),
-    )
-
-    waypoint_navigator = Node(
-        package='puzzlebot_planning',
-        executable='waypoint_navigator_node',
-        name='waypoint_navigator_node',
-        output='screen',
-        parameters=[{'waypoints_file': waypoints_cfg, 'frame_id': 'map'}],
-        condition=IfCondition(dash_en),
-    )
-
-    qr_detector = Node(
-        package='puzzlebot_perception',
-        executable='qr_node',
-        name='qr_node',
-        output='screen',
-        condition=IfCondition(dash_en),
-    )
-
-    logo_detector = Node(
-        package='puzzlebot_logo_detector',
-        executable='logo_detector_node',
-        name='logo_detector_node',
-        output='screen',
-        parameters=[{'show_window': False}],  # PC del robot suele ser headless
-        condition=IfCondition(dash_en),
-    )
-
     return LaunchDescription([
         # Argumentos
         arg_slam,
@@ -621,7 +561,6 @@ def generate_launch_description():
         arg_initial_map,
         arg_avoidance,
         arg_navigation,
-        arg_dashboard_features,
         arg_aruco,
         arg_viewer,
         arg_rviz,
@@ -650,11 +589,6 @@ def generate_launch_description():
         obstacle_avoidance,
         # Navegación autónoma A* completa (navigation:=true)
         navigation_stack,
-        # Features del web dashboard (dashboard_features:=true)
-        state_machine,
-        waypoint_navigator,
-        qr_detector,
-        logo_detector,
         # Visualización — archivo RViz según modo
         rviz_slam,   # mcl:=false → puzzlebot_rviz.rviz (Fixed Frame: odom)
         rviz_mcl,    # mcl:=true  → mcl_rviz.rviz       (Fixed Frame: map, TRANSIENT_LOCAL)

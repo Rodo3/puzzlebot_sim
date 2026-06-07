@@ -111,36 +111,20 @@ def discover_dataset(root: Path) -> Dict[str, List[Path]]:
     return dict(sorted(result.items()))
 
 
-def _original_stem(path: Path) -> str:
-    """Strip augmentation tags to recover the original clip stem.
-
-    Augmented files are named  <original_stem>_aug_<tag>.wav.
-    Stripping the known tags gives back the original stem so all
-    variants of the same recording are grouped together.
-    """
-    s = path.stem
-    for tag in ('_aug_ts_fast', '_aug_ts_slow', '_aug_ps_up',
-                '_aug_noise', '_aug_vol_up', '_aug_vol_down',
-                '_aug_pitch_up', '_aug_pitch_down'):
-        s = s.replace(tag, '')
-    return s
-
-
 def split_dataset(
     samples_by_class: Dict[str, List[Path]],
     config: DatasetConfig,
 ) -> DatasetSplit:
-    """Stratified, leakage-free train/test split.
+    """Stratified manual train/test split without sklearn.
 
     Algorithm (per class):
-      1. Group all files by their original clip stem so that augmented
-         variants of the same recording are never split across train/test.
-      2. Shuffle the groups using a seeded RNG.
-      3. Reserve the last floor(n_groups * test_ratio) groups for test.
-      4. Expand groups back to individual file paths.
+      1. Shuffle the file list using a seeded random.Random instance.
+      2. Reserve the last ceil(n * test_ratio) files for the test set.
+         (At least 1 test sample; at least 1 train sample.)
+      3. Remaining files go to train.
 
-    This prevents data leakage where an augmented version of a test clip
-    ends up in training, which would inflate test accuracy.
+    Classes with fewer than 2 samples cannot be split — they are
+    assigned entirely to train with a warning.
     """
     rng = random.Random(config.random_state)
 
@@ -149,41 +133,34 @@ def split_dataset(
 
     for label in split.labels:
         paths = list(samples_by_class[label])
-        split.samples_per_class[label] = len(paths)
+        n = len(paths)
+        split.samples_per_class[label] = n
 
-        # Group files by original clip stem
-        groups: Dict[str, List[Path]] = {}
-        for p in paths:
-            stem = _original_stem(p)
-            groups.setdefault(stem, []).append(p)
-
-        group_keys = sorted(groups.keys())
-        n_groups = len(group_keys)
-
-        if n_groups < 2:
+        if n < 2:
             warnings.warn(
-                f"Class '{label}' has only {n_groups} original clip(s) — "
+                f"Class '{label}' has only {n} sample(s) — "
                 "cannot create a test split, assigning all to train.",
                 UserWarning,
                 stacklevel=2,
             )
             split.train.extend(Sample(p, label) for p in paths)
-            split.train_per_class[label] = len(paths)
+            split.train_per_class[label] = n
             split.test_per_class[label] = 0
             continue
 
-        rng.shuffle(group_keys)
+        # Shuffle deterministically per class
+        rng.shuffle(paths)
 
-        n_test_groups = max(1, min(n_groups - 1, int(n_groups * config.test_ratio)))
-        train_keys = group_keys[:n_groups - n_test_groups]
-        test_keys  = group_keys[n_groups - n_test_groups:]
+        # Number of test samples: at least 1, at most n-1
+        n_test = max(1, min(n - 1, int(n * config.test_ratio)))
+        n_train = n - n_test
 
-        train_paths = [p for k in train_keys for p in groups[k]]
-        test_paths  = [p for k in test_keys  for p in groups[k]]
+        train_paths = paths[:n_train]
+        test_paths = paths[n_train:]
 
         split.train.extend(Sample(p, label) for p in train_paths)
         split.test.extend(Sample(p, label) for p in test_paths)
-        split.train_per_class[label] = len(train_paths)
-        split.test_per_class[label] = len(test_paths)
+        split.train_per_class[label] = n_train
+        split.test_per_class[label] = n_test
 
     return split

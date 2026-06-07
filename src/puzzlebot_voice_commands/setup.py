@@ -1,4 +1,3 @@
-import glob
 from setuptools import find_packages, setup
 
 package_name = 'puzzlebot_voice_commands'
@@ -11,8 +10,6 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/artifacts_final',
-            glob.glob('artifacts_final/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -51,8 +48,6 @@ setup(
                 'puzzlebot_voice_commands.scripts.augment_dataset:main',
             'voice_commands_node = '
                 'puzzlebot_voice_commands.voice_commands_node:main',
-            'generate_hmm_parameter_report = '
-                'puzzlebot_voice_commands.scripts.generate_hmm_parameter_report:main',
         ],
     },
 )

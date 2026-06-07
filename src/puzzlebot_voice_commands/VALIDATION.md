@@ -21,67 +21,79 @@ Expected: build succeeds; `voice_commands_node` appears under
 
 ```
 datasets/
-├── voice_commands_dataset/        — originals (800 clips, 4 speakers × 20/cmd × 10 cmds)
+├── voice_commands_dataset/        — original (480 clips, 4 speakers × 20/cmd)
 │   ├── alto/        *.wav
 │   ├── avanzar/     *.wav
-│   ├── bajar/       *.wav
 │   ├── derecha/     *.wav
 │   ├── inicio/      *.wav
 │   ├── izquierda/   *.wav
-│   ├── retroceder/  *.wav
-│   ├── soltar/      *.wav
-│   ├── subir/       *.wav
-│   └── tomar/       *.wav
-└── voice_commands_dataset_aug/    — augmented 4x (3200 clips)
+│   └── retroceder/  *.wav
+└── voice_commands_dataset_aug/    — augmented 4x (1920 clips)
 ```
 
 ---
 
-## 3. Train HMM on augmented dataset
+## 3. Train KMeans + GNB on augmented dataset
+
+```powershell
+python -m puzzlebot_voice_commands.scripts.train_models `
+  --dataset datasets\voice_commands_dataset_aug `
+  --model both --output-dir artifacts `
+  --n-mfcc 20 --delta --min-max --kmeans-delta --kmeans-cmvn
+```
+
+Expected artifacts: `kmeans_model.pkl`, `gnb_model.pkl`, `feature_config.json`,
+`kmeans_feature_config.json`, `labels.json`, `train_metadata.json`.
+
+---
+
+## 4. Train HMM librosa + syllable-states on augmented dataset
 
 ```powershell
 python -m puzzlebot_voice_commands.scripts.train_hmm `
   --dataset datasets\voice_commands_dataset_aug `
-  --output-dir artifacts_final --n-iter 5 --syllable-states `
-  --n-mfcc 20 --n-symbols 64 --cmvn --delta --librosa `
-  --include-zcr --include-rms --include-contrast
+  --output-dir artifacts `
+  --n-mfcc 20 --n-states 5 --n-symbols 32 --n-iter 20 `
+  --cmvn --delta --librosa --include-zcr --include-rms --include-contrast `
+  --syllable-states
 ```
 
-Expected artifacts: `hmm_model.pkl`, `hmm_config.json`. Train sanity accuracy ≥ 0.90.
+Expected: `hmm_model.pkl`, `hmm_config.json`. Train sanity accuracy ≥ 0.90.
 
 ---
 
-## 4. Evaluate HMM
+## 5. Evaluate all models
 
 ```powershell
 python -m puzzlebot_voice_commands.scripts.evaluate_models `
   --dataset datasets\voice_commands_dataset_aug `
-  --artifact-dir artifacts_final --output-dir reports --model hmm
+  --artifact-dir artifacts --output-dir reports --model all
 ```
 
 Quality gates:
 
 | Metric | Minimum |
 |--------|---------|
-| HMM accuracy | ≥ 0.87 |
-| `alto` recall | ≥ 0.93 |
-| Safety errors (alto→avanzar/retroceder) | ≤ 5 |
+| KMeans accuracy | ≥ 0.95 |
+| HMM accuracy | ≥ 0.88 |
+| `alto` recall (any model) | ≥ 0.95 |
+| KMeans safety errors | 0 |
 
 ---
 
-## 5. Live test (mic → prediction)
+## 6. Live test (mic → prediction)
 
 ```powershell
 python -m puzzlebot_voice_commands.scripts.live_test `
-  --artifact-dir artifacts_final --models hmm
+  --artifact-dir artifacts_final --models kmeans hmm
 ```
 
 Press Enter to record 1.5 s. Say one command clearly.
-Expected: correct label predicted. Inference < 100 ms.
+Expected: correct label predicted with positive margin. Inference < 100 ms for KMeans.
 
 ---
 
-## 6. Data augmentation (regenerate if needed)
+## 7. Data augmentation (regenerate if needed)
 
 ```powershell
 python -m puzzlebot_voice_commands.scripts.augment_dataset `
@@ -90,13 +102,14 @@ python -m puzzlebot_voice_commands.scripts.augment_dataset `
   --factor 3
 ```
 
-Expected: 800 originals → 3200 total (4x).
+Expected: 480 originals → 1920 total (4x).
 
 ---
 
-## 7. ROS 2 node (WSL2)
+## 8. ROS 2 node (Phase 9)
 
 ```bash
+# WSL2
 ros2 run puzzlebot_voice_commands voice_commands_node \
   --ros-args -p artifact_dir:=src/puzzlebot_voice_commands/artifacts_final
 
@@ -113,13 +126,15 @@ Quality gates:
 - [ ] `/voice/command` publishes within 3 s of trigger
 - [ ] `/voice/status` transitions: `idle` → `listening` → `processing` → `idle`
 - [ ] `alto` not predicted when silence is recorded
+- [ ] Confidence threshold filters out low-confidence predictions
 
 ---
 
-## 8. Pre-integration checklist
+## 9. Pre-integration checklist
 
-- [ ] HMM accuracy ≥ 0.87 on held-out test set
-- [ ] Safety-critical errors ≤ 5
-- [ ] `artifacts_final/` contains `hmm_model.pkl` + `hmm_config.json`
+- [ ] `alto` recall ≥ 0.95 on held-out test set
+- [ ] Safety-critical errors = 0
+- [ ] `artifacts_final/` contains `hmm_model.pkl` + `kmeans_model.pkl`
 - [ ] `voice_commands_node` builds and runs without error
-- [ ] Node integrated to a `puzzlebot_bringup` launch file
+- [ ] Node added to a `puzzlebot_bringup` launch file
+- [ ] Confidence threshold configured (commands below threshold → no publish)
