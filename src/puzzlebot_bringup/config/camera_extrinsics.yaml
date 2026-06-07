@@ -1,10 +1,9 @@
 # Calibración extrínseca cámara–robot (con lifter montado)
 #
-# Medidas físicas (lifter instalado):
-#   z = 15.2 cm — altura desde el centro del robot hasta la cámara
-#   x =  4.4 cm — distancia frontal desde la placa de montaje hasta la cámara
-#   y =  0.0 cm — centrada lateralmente
-#   La cámara apunta hacia el frente del robot (dirección de avance).
+# Medidas físicas (lifter instalado), referencia = centro de los motores:
+#   x =  6.3 cm — adelante del robot
+#   y = -7.5 cm — desplazada a la derecha (y- en convención ROS: y+ es izquierda)
+#   z = 17.0 cm — altura desde el centro de los motores hasta la cámara
 #
 # Árbol TF:
 #   map → odom → base_footprint → base_link → camera_link
@@ -13,9 +12,9 @@
 camera_extrinsics:
   parent_frame: base_link
   child_frame:  camera_link
-  x:     0.152    # 15.2 cm adelante sobre el eje X de la placa
-  y:     0.000    # centrado lateralmente
-  z:     0.044    # 4.4 cm de altura sobre la placa
+  x:     0.13    # 6.3 cm adelante del centro de motores
+  y:    0.075    # 7.5 cm a la derecha (y- en ROS)
+  z:     0.12     # 17.0 cm de altura
   roll:  0.0
   pitch: 0.0
   yaw:   0.0      # cámara apunta al frente del robot
