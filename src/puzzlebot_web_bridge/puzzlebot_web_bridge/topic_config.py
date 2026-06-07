@@ -20,7 +20,7 @@ DEFAULT_TOPICS = {
     'voice_inference_time':   '/voice/inference_time_ms',
     'mission_state':          '/mission_state',       # state_machine_node FSM state (event)
     'qr_detections':          '/qr/detections',       # qr_node JSON detections (event)
-    'logo_detection':         '/logo_detection/result',  # logo_detector JSON detections (event)
+    'logo_detection':         '/detections',              # yolo_node Detection2DArray (event)
     # Outbound (WebSocket → ROS) — control topics
     'cmd_vel_out':            '/cmd_vel',          # teleop; override in Gazebo to /model/puzzlebot/cmd_vel
     'goal_pose':              '/goal_pose',

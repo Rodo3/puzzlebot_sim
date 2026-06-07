@@ -20,12 +20,13 @@ setup(
     entry_points={
         'console_scripts': [
             'aruco_node         = puzzlebot_perception.aruco_node:main',
+            'qr_reader_node     = puzzlebot_perception.qr_reader_node:main',
+            'yolo_node          = puzzlebot_perception.yolo_node:main',
             'image_viewer_node  = puzzlebot_perception.image_viewer_node:main',
             'calib_capture_node = puzzlebot_perception.calib_capture_node:main',
             'calib_compute_node = puzzlebot_perception.calib_compute_node:main',
             'calib_apply_node   = puzzlebot_perception.calib_apply_node:main',
             'qr_node            = puzzlebot_perception.qr_node:main',
-            'yolo_node          = puzzlebot_perception.yolo_node:main',
         ],
     },
 )

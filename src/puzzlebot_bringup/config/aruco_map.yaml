@@ -61,3 +61,39 @@ aruco_markers:
     roll:   1.5708
     pitch:  0.0
     yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)
+
+  # ── ID 5 — Rack central derecho, cara sur (robot al sur lo ve mirando al norte)
+  5:
+    x:      2.45
+    y:      2.50
+    z:      0.14
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    0.0       # 0 → Z apunta al sur (-Y), robot está al sur del rack
+
+  # ── ID 6 — Rack central izquierdo, cara sur (robot al sur lo ve mirando al norte)
+  6:
+    x:      1.25
+    y:      2.50
+    z:      0.14
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    0.0       # 0 → Z apunta al sur (-Y), robot está al sur del rack
+
+  # ── ID 7 — Rack central izquierdo, cara norte (robot al norte lo ve mirando al sur)
+  7:
+    x:      1.25
+    y:      3.56      # 4.86 - 1.30
+    z:      0.14
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    3.1416    # π → Z apunta al norte (+Y), robot está al norte del rack
+
+  # ── ID 8 — Rack central derecho, cara norte (robot al norte lo ve mirando al sur)
+  8:
+    x:      2.45
+    y:      3.56      # 4.86 - 1.30
+    z:      0.14
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    3.1416    # π → Z apunta al norte (+Y), robot está al norte del rack

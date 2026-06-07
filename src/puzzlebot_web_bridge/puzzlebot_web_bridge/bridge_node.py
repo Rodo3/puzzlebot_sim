@@ -40,6 +40,7 @@ from nav_msgs.msg import Odometry, OccupancyGrid
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, LaserScan
 from std_msgs.msg import Bool, Float32, String
+from vision_msgs.msg import Detection2DArray
 
 from .rate_limiter import RateLimiter
 from .serializers import (
@@ -321,7 +322,7 @@ class BridgeNode(Node):
         self.create_subscription(
             String, DEFAULT_TOPICS['qr_detections'], self._qr_detections_cb, 10)
         self.create_subscription(
-            String, DEFAULT_TOPICS['logo_detection'], self._logo_detection_cb, 10)
+            Detection2DArray, DEFAULT_TOPICS['logo_detection'], self._logo_detection_cb, 10)
 
         self.get_logger().info(f'puzzlebot_web_bridge ready — WebSocket at ws://{host}:{port}/ws')
 
@@ -489,12 +490,22 @@ class BridgeNode(Node):
             'timestamp':  self.get_clock().now().nanoseconds / 1e9,
         })
 
-    def _logo_detection_cb(self, msg: String):
-        # msg.data is a JSON array of {class_name, confidence, bbox}; forward parsed.
-        try:
-            detections = json.loads(msg.data)
-        except (json.JSONDecodeError, TypeError):
-            detections = []
+    def _logo_detection_cb(self, msg: Detection2DArray):
+        detections = []
+        for det in msg.detections:
+            if not det.results:
+                continue
+            hyp = det.results[0].hypothesis
+            detections.append({
+                'class_name': hyp.class_id,
+                'confidence': round(hyp.score, 4),
+                'bbox': {
+                    'cx': round(det.bbox.center.position.x, 4),
+                    'cy': round(det.bbox.center.position.y, 4),
+                    'w':  round(det.bbox.size_x, 4),
+                    'h':  round(det.bbox.size_y, 4),
+                },
+            })
         self._ws.broadcast_sync({
             'type':       'logo_detection',
             'detections': detections,
