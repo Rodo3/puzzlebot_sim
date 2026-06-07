@@ -8,53 +8,59 @@ decisiones. El `state_machine_node` (`puzzlebot_control`) consume `/logo_detecti
 durante la fase `SCANNING_LOGOS` para identificar el tráiler correcto comparándolo
 con el string leído del QR.
 
+> Para correr el detector **en la Jetson Nano sin ROS workspace**, ver `ros2_deploy/CLAUDE.md`.
+
 ---
 
-## Nodo: `logo_detector_node`
+## Nodo: `yolo_node` (en `puzzlebot_perception`)
+
+El nodo de inferencia principal está en `puzzlebot_perception` para estandarizar
+los tópicos del proyecto. Este paquete (`puzzlebot_logo_detector`) provee los modelos.
 
 ```bash
 # Standalone (siempre infiere)
-ros2 run puzzlebot_logo_detector logo_detector_node
+ros2 run puzzlebot_perception yolo_node
 
-# En el robot (headless + gateado por la misión — ver abajo)
-ros2 run puzzlebot_logo_detector logo_detector_node --ros-args \
-  -p show_window:=false -p gate_by_mission:=true
+# En el robot (headless + gateado por la misión)
+ros2 run puzzlebot_perception yolo_node --ros-args \
+  -p show_window:=false \
+  -p gate_by_mission:=true \
+  -p inference_hz:=3.0
 ```
 
 ### Suscribe
 | Tópico | Tipo | Notas |
 |---|---|---|
-| `/camera/image/compressed` | sensor_msgs/CompressedImage | Entrada de cámara (SensorDataQoS) |
-| `/mission_state` | std_msgs/String | **Solo** si `gate_by_mission:=true` |
+| `/camera/image/compressed` | sensor_msgs/CompressedImage | Entrada de cámara (BEST_EFFORT QoS) |
+| `/mission_state` | std_msgs/String | Solo si `gate_by_mission:=true` |
 
 ### Publica
 | Tópico | Tipo | Contenido |
 |---|---|---|
-| `/logo_detection/result` | std_msgs/String | JSON array de detecciones (ver abajo) |
-| `/logo_detection/image` | sensor_msgs/Image | Frame anotado para debug (rqt) |
+| `/detections` | vision_msgs/Detection2DArray | Detecciones con clase y confianza (bbox normalizado [0,1]) |
+| `/yolo/debug_image` | sensor_msgs/Image | Frame anotado para debug (rqt) |
 
-### Formato de salida (`/logo_detection/result`)
+### Formato de salida (`/detections`)
 
-```json
-[{"class_id": 2,
-  "class_name": "Walmart",
-  "confidence": 0.91,
-  "bbox": {"x1": 120.0, "y1": 80.0, "x2": 210.0, "y2": 170.0}}]
+```
+detection.results[0].hypothesis.class_id  → "Pepsi" / "Amazon" / "Walmart"
+detection.results[0].hypothesis.score     → confianza [0, 1]
+detection.bbox.center.position.x/y        → centro normalizado [0, 1]
+detection.bbox.size_x/y                   → tamaño normalizado [0, 1]
 ```
 
-Las coordenadas `bbox` están en **píxeles del frame original** (ya des-letterboxed),
-así que el dashboard puede dibujar el overlay directamente sobre el stream crudo.
 Clases del modelo: `0=Pepsi`, `1=Amazon`, `2=Walmart`.
 
 ### Parámetros
 
 | Parámetro | Default | Descripción |
 |---|---|---|
-| `weights_path` | `models/best.onnx` | Ruta al modelo ONNX |
+| `weights_path` | auto-detect en `puzzlebot_logo_detector/models/best.onnx` | Ruta al modelo ONNX |
 | `confidence` | `0.70` | Umbral mínimo de confianza |
+| `nms_thresh` | `0.45` | IoU threshold para NMS |
 | `imgsz` | `640` | Lado de inferencia (letterbox cuadrado) |
 | `camera_topic` | `/camera/image/compressed` | Fuente de imagen |
-| `show_window` | `true` | Ventana OpenCV — **poner `false` en robot headless** |
+| `show_window` | `false` | Ventana OpenCV — poner `false` en robot headless |
 | `inference_hz` | `5.0` | Máximo de inferencias por segundo |
 | `gate_by_mission` | `false` | Si `true`, solo infiere en `active_states` |
 | `mission_state_topic` | `/mission_state` | Estado de misión a escuchar (si gateado) |
@@ -66,38 +72,42 @@ Clases del modelo: `0=Pepsi`, `1=Amazon`, `2=Walmart`.
 
 YOLO es la parte pesada del stack de percepción. Con `gate_by_mission:=true` el nodo
 **solo corre la inferencia mientras `/mission_state ∈ active_states`** (por default
-`SCANNING_LOGOS`). Fuera de esa fase descarta el frame pendiente sin inferir → cero
-costo de YOLO durante navegación/idle.
+`SCANNING_LOGOS`). Fuera de esa fase descarta el frame pendiente sin inferir.
 
-- Default **`false`** para que el nodo funcione standalone (pruebas) sin depender del
-  `state_machine_node`.
+- Default **`false`** para uso standalone (pruebas) sin depender del `state_machine_node`.
 - Requiere que `state_machine_node` esté publicando `/mission_state`.
-- El `qr_node` tiene el mismo mecanismo (gateado a `SCANNING_QR`).
 
 ---
 
-## Rendimiento en Jetson Orin
+## Modelos
 
-Orden de impacto para aligerar, de mayor a menor:
+| Archivo | Descripción |
+|---|---|
+| `models/best.onnx` | YOLO11n opset 20 — para PC/laptop |
+| `models/best.pt` | Pesos PyTorch (requiere Ultralytics) |
 
-1. **Execution provider:** hoy usa `CPUExecutionProvider`. Cambiar a CUDA/TensorRT EP
-   en la Jetson es el mayor salto de rendimiento.
-2. **Gating por misión:** YOLO solo corre en el dock (fase breve) → ya no es costo continuo.
-   Con esto suele bastar para mantener `imgsz=640`.
-3. **`imgsz`:** bajar a 320 es ~4× más rápido, a costa de detalle (peor para logos
-   chicos/lejanos). Para los logos grandes del dock 320 suele alcanzar.
-4. **`inference_hz`:** 2-3 Hz es suficiente para una escena estática.
+> Para Jetson Nano usar `best_opset19.onnx` (ver `ros2_deploy/CLAUDE.md`).
+
+---
+
+## Rendimiento en Jetson Nano 2GB
+
+| Estrategia | Efecto |
+|---|---|
+| `gate_by_mission:=true` | YOLO solo corre en la fase de detección → 0 costo en navegación |
+| `inference_hz:=3.0` | Limita a 3 inferencias/s para no saturar RAM |
+| `imgsz:=640` | Requerido por el modelo actual |
 
 ---
 
 ## Build
 
 ```bash
-colcon build --packages-select puzzlebot_logo_detector
+colcon build --packages-select puzzlebot_logo_detector puzzlebot_perception
 source install/setup.bash
 ```
 
-Requiere `onnxruntime` (`pip install onnxruntime`, o `onnxruntime-gpu` en Jetson).
+Requiere `onnxruntime` (`pip install onnxruntime`).
 
 ## Herramienta auxiliar: `record_logos`
 
