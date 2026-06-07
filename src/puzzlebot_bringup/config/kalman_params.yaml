@@ -1,35 +1,50 @@
 kalman_filter_node:
   ros__parameters:
-    process_noise_x:     0.01
-    process_noise_y:     0.01
-    process_noise_theta: 0.002
+    # Q BAJO: el encoder da una predicción suave a corto plazo. Bajándolo, la
+    # pose se apoya en esa predicción y NO persigue el jitter de ArUco → estimado
+    # mucho menos disperso. ArUco corrige el drift lentamente (ver R abajo).
+    process_noise_x:     0.008
+    process_noise_y:     0.008
+    process_noise_theta: 0.005
 
-    meas_noise_x:        0.05   # floor de R_x [m²]; activo cuando cov ArUco < 0.05
-    meas_noise_y:        0.05   # floor de R_y [m²]
-    meas_noise_theta:    0.07   # floor de R_θ [rad²] → σ_min ≈ 15°; evita K_θ≈1
+    # R de posición ALTO a propósito: con un solo marcador a 1.2 m, ArUco salta
+    # ±6-8 cm entre frames. Subiendo R, cada lectura solo NUDGEA la pose en vez de
+    # snapearla → mata la dispersión. Si tienes 2+ marcadores estables, baja a 0.03.
+    meas_noise_x:        0.06   # floor de R_x [m²] → σ_min ≈ 24 cm
+    meas_noise_y:        0.06   # floor de R_y [m²]
+    # R de yaw ALTO a propósito: con UN solo marcador el yaw de solvePnP es la
+    # medición menos fiable (osciló ±3° con el robot quieto). Subido a 0.08 para
+    # que el EKF NO persiga ese jitter y use el heading integrado de encoders;
+    # cuando haya 2+ marcadores visibles puedes bajarlo de nuevo a 0.04.
+    meas_noise_theta:    0.08   # floor de R_θ [rad²] → σ_min ≈ 16°
 
     # ── ZUPT — Zero-Velocity Update ─────────────────────────────────────────
     # Escala Q × (speed / zupt_speed_threshold).
     # Con robot quieto: Q_scale ≈ 0 → P no crece → elipse estable ante ArUco continuo.
     # Con robot en movimiento: Q_scale = 1.0 → comportamiento normal.
     # Subir threshold si el robot tarda en encoger el elipse al detenerse.
-    zupt_speed_threshold: 0.02  # m/s + rad/s combinado
+    zupt_speed_threshold: 0.04  # m/s + rad/s combinado
+                                 # subido de 0.02: el ZUPT engancha antes cuando el
+                                 # robot está casi quieto → congela P → mata el jitter
+                                 # de ArUco de un solo marcador en reposo.
 
     # ── P_max clamp ──────────────────────────────────────────────────────────
     # Techo de P para que no explote si ArUco desaparece varios segundos.
     # 1.0 m² → σ_max = 1.0 m (zona de búsqueda razonable al retomar markers).
-    p_max_xy:    0.8   # [m²]
-    p_max_theta: 0.8   # [rad²] → σ_max ≈ 81°
+    p_max_xy:    1.0   # [m²]
+    p_max_theta: 2.0   # [rad²] → σ_max ≈ 81°
     initial_covariance:  0.1
 
     # ── Scan match → EKF feedback ────────────────────────────────────────────
     # Ruido mínimo (floor) de la medición enviada por slam_node en /scan_match/pose.
     # Más conservador que ArUco: el matcher trabaja con un mapa imperfecto.
-    # scan_match_noise_xy: 0.04 m²  → σ_min ≈ 20 cm (floor de posición)
-    # scan_match_noise_theta: 0.03 rad² → σ_min ≈ 10° (floor de yaw)
-    scan_match_noise_x:     0.08
-    scan_match_noise_y:     0.08
-    scan_match_noise_theta: 0.03
+    # scan_match_noise_xy: 0.025 m²  → σ_min ≈ 16 cm (floor de posición)
+    # scan_match_noise_theta: 0.02 rad² → σ_min ≈ 8° (floor de yaw)
+    # Bajados respecto al default para que el scan matcher corrija más drift
+    # cuando ArUco no está visible (mejor localización en tramos ciegos).
+    scan_match_noise_x:     0.025
+    scan_match_noise_y:     0.025
+    scan_match_noise_theta: 0.02
 
     # ── Fase 2: Gating del scan matching por covarianza del EKF ──────────────
     #
@@ -48,7 +63,9 @@ kalman_filter_node:
     #
     # Ajuste: subir alpha si el robot sigue perturbándose con ArUco activo.
     #         bajar alpha si el scan matching nunca corrige el drift.
-    scan_match_gate_alpha:      5.0    # factor de inflación de R cuando P es pequeña
+    scan_match_gate_alpha:      3.0    # factor de inflación de R cuando P es pequeña
+                                        # (bajado de 5.0: deja que el scan match siga
+                                        #  corrigiendo drift aunque ArUco esté activo)
     scan_match_low_cov_thresh:  0.05   # [m²] trace(P_xy) por debajo → gating activo
     scan_match_high_cov_thresh: 0.30   # [m²] trace(P_xy) por encima → sin gating (referencia)
 
@@ -63,7 +80,7 @@ kalman_filter_node:
     #
     # Valor 3.5: conservador, rechaza innovaciones > 3.5σ sin bloquear correcciones válidas.
     # Bajar a 2.5 si siguen ocurriendo saltos; subir a 5.0 si el matcher nunca corrige.
-    scan_match_mahal_gate: 2.5
+    scan_match_mahal_gate: 3.5
     # ── Inicialización desde ArUco (RECOMENDADO para robot real) ─────────────
     #
     # init_from_aruco: true

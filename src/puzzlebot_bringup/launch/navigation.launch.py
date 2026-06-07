@@ -196,7 +196,6 @@ def generate_launch_description():
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
         remappings=[
             ('/cmd_vel', cmd_vel_topic),
-            ('/scan',    '/scan_stamped'),   # obstacle_avoidance suscribe /scan internamente
         ],
         output='screen',
     )

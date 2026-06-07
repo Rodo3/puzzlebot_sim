@@ -113,8 +113,8 @@ class BugNavigationNode(Node):
         self._last_obs_y = None
         self._last_inj_t = 0.0   # timestamp de la última inyección
 
-        # ── QoS TRANSIENT_LOCAL ───────────────────────────────────────────────
-        latched = QoSProfile(depth=1,
+        # ── QoS TRANSIENT_LOCAL — solo para /map (publicado latcheado por slam_node) ──
+        map_qos = QoSProfile(depth=1,
                              reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
@@ -123,8 +123,9 @@ class BugNavigationNode(Node):
         self.create_subscription(LaserScan,    '/scan_stamped',     self._scan_cb,
                                  qos_profile_sensor_data)
         self.create_subscription(Odometry,     '/odom',             self._odom_cb,     10)
-        self.create_subscription(PoseStamped,  '/goal_pose',        self._goal_cb,     latched)
-        self.create_subscription(OccupancyGrid, '/map',             self._map_cb,      latched)
+        # /goal_pose viene de RViz (VOLATILE) — no usar TRANSIENT_LOCAL aquí
+        self.create_subscription(PoseStamped,  '/goal_pose',        self._goal_cb,     10)
+        self.create_subscription(OccupancyGrid, '/map',             self._map_cb,      map_qos)
         # Escuchar las rutas que llegan del A* para saber cuándo hay una ruta válida.
         # Nota: este nodo también publica en /planned_path (path vacío), pero la
         # suscripción solo actúa cuando llega una ruta CON waypoints (del path_planner).
@@ -132,7 +133,7 @@ class BugNavigationNode(Node):
 
         # ── Publicadores ──────────────────────────────────────────────────────
         self._pub_cmd     = self.create_publisher(Twist,        '/cmd_vel_in',    10)
-        self._pub_map     = self.create_publisher(OccupancyGrid, '/map',          latched)
+        self._pub_map     = self.create_publisher(OccupancyGrid, '/map',          map_qos)
         self._pub_path    = self.create_publisher(Path,         '/planned_path',   10)
         self._pub_state   = self.create_publisher(String,       '/bug_nav/state',  10)
         self._pub_markers = self.create_publisher(MarkerArray,  '/bug_nav/markers', 10)

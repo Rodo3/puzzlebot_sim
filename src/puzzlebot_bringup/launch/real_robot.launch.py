@@ -59,6 +59,7 @@ todo el cómputo (odometría, SLAM, percepción, control) ocurre en el PC.
     rviz:=true lidar_topic:=/scan navigation:=true
 """
 
+import glob
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -90,6 +91,16 @@ def generate_launch_description():
 
     with open(urdf_file, 'r') as f:
         robot_description = f.read()
+
+    # Mapa PNG por defecto: busca slam_map_20260529_235356.png en la raíz del
+    # workspace; si no existe, usa el más reciente; si no hay ninguno, cadena vacía.
+    ws_root = os.path.abspath(os.path.join(bringup_pkg, '..', '..', '..', '..'))
+    _preferred = os.path.join(ws_root, 'slam_map_20260529_235356.png')
+    if os.path.exists(_preferred):
+        _default_map_png = _preferred
+    else:
+        _maps = sorted(glob.glob(os.path.join(ws_root, 'slam_map_*.png')))
+        _default_map_png = _maps[-1] if _maps else ''
 
     # ── Argumentos del launch ─────────────────────────────────────────────
     arg_slam        = DeclareLaunchArgument('slam',        default_value='true',
@@ -144,6 +155,13 @@ def generate_launch_description():
                                       'kalman:=true aruco:=true para localización EKF sobre mapa conocido.')
     #####################################################################################################
 
+    arg_initial_map = DeclareLaunchArgument(
+        'initial_map', default_value=_default_map_png,
+        description='PNG del mapa previo para inicializar slam_node (slam:=true). '
+                    'El nodo carga el mapa y sigue integrando scans encima. '
+                    'Vacío = mapear desde cero.')
+    #####################################################################################################
+
     slam_en      = LaunchConfiguration('slam')
     mcl_en       = LaunchConfiguration('mcl')
     kalman_en    = LaunchConfiguration('kalman')
@@ -153,6 +171,7 @@ def generate_launch_description():
     viewer_en    = LaunchConfiguration('viewer')
     rviz_en      = LaunchConfiguration('rviz')
     use_map_en   = LaunchConfiguration('use_map')
+    initial_map  = LaunchConfiguration('initial_map')
     lidar_topic  = LaunchConfiguration('lidar_topic')
     invert_lidar = LaunchConfiguration('invert_lidar')
     lidar_yaw_offset = LaunchConfiguration('lidar_yaw_offset')
@@ -397,6 +416,10 @@ def generate_launch_description():
     )
 
     # ── 8a-1. SLAM en modo mapeo normal (slam:=true) ─────────────────────────
+    # localization_map_path: si se pasa un PNG, el slam_node arranca con ese
+    # mapa cargado y sigue integrando scans encima (mapping+init). Permite
+    # que A* planee desde el primer segundo sobre el mapa conocido y detecta
+    # obstáculos nuevos en tiempo real. Dejar vacío para mapear desde cero.
     slam = Node(
         package='puzzlebot_slam',
         executable='slam_node',
@@ -406,6 +429,8 @@ def generate_launch_description():
             'use_sim_time': False,
             'publish_map_odom_tf': slam_publishes_map_odom,
             'scan_match_updates_map_odom': slam_match_updates_odom,
+            'localization_map_path': initial_map,
+            'localization_only': False,
         }],
         remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(slam_en),
@@ -469,16 +494,24 @@ def generate_launch_description():
         name='obstacle_avoidance_node',
         output='screen',
         parameters=[controller_cfg, {'use_sim_time': False}],
-        remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(avoidance_en),
     )
 
     # ── 10. RViz ──────────────────────────────────────────────────────────
-    # mcl:=true  → mcl_rviz.rviz  (Fixed Frame: map, Map display /map TRANSIENT_LOCAL,
-    #                               herramientas SetInitialPose y SetGoal)
-    # mcl:=false → puzzlebot_rviz.rviz (Fixed Frame: odom, para sesión de mapeo)
-    # mcl_rviz.rviz: Fixed Frame=map, display /map con TRANSIENT_LOCAL, P y G tools.
-    # Se usa cuando hay un mapa estático activo: mcl:=true o use_map:=true.
+    # Selección del archivo según Fixed Frame requerido:
+    #   • puzzlebot_rviz.rviz (Fixed Frame: odom)  → sesión de mapeo pura
+    #     (slam:=true sin navegación, sin mapa estático).
+    #   • mcl_rviz.rviz       (Fixed Frame: map)   → cuando hay que trabajar en
+    #     el frame map: mcl:=true, use_map:=true, O navigation:=true.
+    #     El "2D Nav Goal" publica /goal_pose en el Fixed Frame; el path_planner
+    #     espera goals en 'map', así que navegar exige Fixed Frame: map.
+    #
+    # map_frame_rviz: True cuando se necesita Fixed Frame map.
+    map_frame_rviz = PythonExpression([
+        "'", mcl_en, "' == 'true' or '", use_map_en, "' == 'true' or '",
+        nav_en, "' == 'true'",
+    ])
+
     rviz_slam = Node(
         package='rviz2',
         executable='rviz2',
@@ -487,8 +520,7 @@ def generate_launch_description():
         parameters=[{'use_sim_time': False}],
         remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(PythonExpression([
-            "'", rviz_en, "' == 'true' and '",
-            mcl_en, "' == 'false' and '", use_map_en, "' == 'false'",
+            "'", rviz_en, "' == 'true' and not (", map_frame_rviz, ")",
         ])),
         output='screen',
     )
@@ -501,8 +533,7 @@ def generate_launch_description():
         parameters=[{'use_sim_time': False}],
         remappings=[('/scan', '/scan_stamped')],
         condition=IfCondition(PythonExpression([
-            "'", rviz_en, "' == 'true' and "
-            "('", mcl_en, "' == 'true' or '", use_map_en, "' == 'true')",
+            "'", rviz_en, "' == 'true' and (", map_frame_rviz, ")",
         ])),
         output='screen',
     )
@@ -527,6 +558,7 @@ def generate_launch_description():
         arg_mcl,
         arg_kalman,
         arg_use_map,
+        arg_initial_map,
         arg_avoidance,
         arg_navigation,
         arg_aruco,
