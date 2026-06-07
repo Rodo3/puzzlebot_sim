@@ -1,0 +1,433 @@
+{
+  "n_samples": 960,
+  "labels": [
+    "alto",
+    "avanzar",
+    "bajar",
+    "derecha",
+    "inicio",
+    "izquierda",
+    "retroceder",
+    "soltar",
+    "subir",
+    "tomar"
+  ],
+  "accuracy": 0.690625,
+  "macro_f1": 0.685775,
+  "macro_recall": 0.690625,
+  "top2_accuracy": 0.833333,
+  "per_class": {
+    "alto": {
+      "precision": 0.69863,
+      "recall": 0.53125,
+      "f1": 0.60355
+    },
+    "avanzar": {
+      "precision": 0.669903,
+      "recall": 0.71875,
+      "f1": 0.693467
+    },
+    "bajar": {
+      "precision": 0.666667,
+      "recall": 0.6875,
+      "f1": 0.676923
+    },
+    "derecha": {
+      "precision": 0.740741,
+      "recall": 0.625,
+      "f1": 0.677966
+    },
+    "inicio": {
+      "precision": 0.629032,
+      "recall": 0.8125,
+      "f1": 0.709091
+    },
+    "izquierda": {
+      "precision": 0.654762,
+      "recall": 0.572917,
+      "f1": 0.611111
+    },
+    "retroceder": {
+      "precision": 0.785714,
+      "recall": 0.916667,
+      "f1": 0.846154
+    },
+    "soltar": {
+      "precision": 0.622807,
+      "recall": 0.739583,
+      "f1": 0.67619
+    },
+    "subir": {
+      "precision": 0.978022,
+      "recall": 0.927083,
+      "f1": 0.951872
+    },
+    "tomar": {
+      "precision": 0.455696,
+      "recall": 0.375,
+      "f1": 0.411429
+    }
+  },
+  "per_command_accuracy": {
+    "alto": 0.53125,
+    "avanzar": 0.71875,
+    "bajar": 0.6875,
+    "derecha": 0.625,
+    "inicio": 0.8125,
+    "izquierda": 0.572917,
+    "retroceder": 0.916667,
+    "soltar": 0.739583,
+    "subir": 0.927083,
+    "tomar": 0.375
+  },
+  "confusion_matrix_list": [
+    [
+      51,
+      12,
+      2,
+      4,
+      6,
+      0,
+      9,
+      4,
+      0,
+      8
+    ],
+    [
+      6,
+      69,
+      9,
+      3,
+      0,
+      2,
+      5,
+      0,
+      0,
+      2
+    ],
+    [
+      1,
+      8,
+      66,
+      0,
+      0,
+      0,
+      0,
+      5,
+      0,
+      16
+    ],
+    [
+      6,
+      1,
+      0,
+      60,
+      10,
+      16,
+      2,
+      0,
+      0,
+      1
+    ],
+    [
+      0,
+      0,
+      0,
+      8,
+      78,
+      10,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      2,
+      1,
+      25,
+      55,
+      5,
+      7,
+      1,
+      0
+    ],
+    [
+      0,
+      1,
+      0,
+      5,
+      1,
+      1,
+      88,
+      0,
+      0,
+      0
+    ],
+    [
+      5,
+      3,
+      0,
+      0,
+      0,
+      0,
+      0,
+      71,
+      1,
+      16
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      3,
+      0,
+      3,
+      1,
+      89,
+      0
+    ],
+    [
+      4,
+      9,
+      20,
+      0,
+      1,
+      0,
+      0,
+      26,
+      0,
+      36
+    ]
+  ],
+  "safety": {
+    "safety_critical_count": 25,
+    "safety_critical_rate": 0.026042,
+    "safety_critical_cases": [
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "derecha"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "derecha"
+      },
+      {
+        "true": "alto",
+        "pred": "derecha"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "derecha"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      },
+      {
+        "true": "alto",
+        "pred": "avanzar"
+      },
+      {
+        "true": "alto",
+        "pred": "retroceder"
+      }
+    ],
+    "opposite_direction_count": 23,
+    "opposite_direction_rate": 0.023958,
+    "opposite_direction_cases": [
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "avanzar",
+        "pred": "retroceder"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "derecha",
+        "pred": "izquierda"
+      },
+      {
+        "true": "izquierda",
+        "pred": "derecha"
+      },
+      {
+        "true": "retroceder",
+        "pred": "avanzar"
+      }
+    ],
+    "stop_recall": {
+      "alto": 0.53125
+    }
+  },
+  "safety_critical_count": 25,
+  "safety_critical_rate": 0.026042,
+  "opposite_direction_count": 23,
+  "confidence_stats": {
+    "mean": 0.3829609895721726,
+    "std": 0.3479213330396686,
+    "min": 0.00016740857789088182,
+    "max": 1.8164059924484661
+  },
+  "inference_time": {
+    "mean": 0.7017136459277632,
+    "std": 0.2234075501542617,
+    "min": 0.520200002938509,
+    "max": 2.279799897223711
+  },
+  "avg_inference_ms": 0.7017,
+  "artifact_size_kb": 8.86,
+  "model_config": {
+    "n_clusters": 16,
+    "max_iter": 300,
+    "tolerance": 0.0001,
+    "random_state": 42
+  }
+}

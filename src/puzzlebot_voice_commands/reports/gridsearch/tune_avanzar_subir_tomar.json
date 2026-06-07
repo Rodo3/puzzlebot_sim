@@ -1,0 +1,947 @@
+[
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 6,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 6,
+      "tomar": 6
+    },
+    "accuracy": 0.8770833333333333,
+    "macro_f1": 0.873592001608458,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.5104166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.9791666666666666,
+      "tomar": 0.9166666666666666
+    },
+    "train_time_s": 949.6132675999979
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 5,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 5,
+      "tomar": 6
+    },
+    "accuracy": 0.8760416666666667,
+    "macro_f1": 0.87259990531187,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.5104166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.96875,
+      "tomar": 0.9166666666666666
+    },
+    "train_time_s": 948.4464368000008
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 4,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 4,
+      "tomar": 6
+    },
+    "accuracy": 0.8739583333333333,
+    "macro_f1": 0.8704427757985286,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.5104166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.9479166666666666,
+      "tomar": 0.9166666666666666
+    },
+    "train_time_s": 975.1549646999993
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 6,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 6,
+      "tomar": 6
+    },
+    "accuracy": 0.871875,
+    "macro_f1": 0.8696222498409243,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.8854166666666666,
+      "bajar": 0.5416666666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.9791666666666666,
+      "tomar": 0.90625
+    },
+    "train_time_s": 971.3852425000005
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 5,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 5,
+      "tomar": 6
+    },
+    "accuracy": 0.8708333333333333,
+    "macro_f1": 0.8686532522553854,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.8854166666666666,
+      "bajar": 0.5416666666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.96875,
+      "tomar": 0.90625
+    },
+    "train_time_s": 974.123775
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 5,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 5,
+      "tomar": 5
+    },
+    "accuracy": 0.8697916666666666,
+    "macro_f1": 0.866570117239125,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.5104166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.90625,
+      "subir": 0.96875,
+      "tomar": 0.8125
+    },
+    "train_time_s": 983.1933500999985
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 4,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 4,
+      "tomar": 6
+    },
+    "accuracy": 0.86875,
+    "macro_f1": 0.8665098853738176,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.8854166666666666,
+      "bajar": 0.5416666666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.9479166666666666,
+      "tomar": 0.90625
+    },
+    "train_time_s": 1209.7685978000009
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 4,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 4,
+      "tomar": 5
+    },
+    "accuracy": 0.86875,
+    "macro_f1": 0.8655141361246134,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.5104166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9166666666666666,
+      "subir": 0.9479166666666666,
+      "tomar": 0.8125
+    },
+    "train_time_s": 941.5384435999986
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 6,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 6,
+      "tomar": 5
+    },
+    "accuracy": 0.8677083333333333,
+    "macro_f1": 0.8642857895942899,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.5104166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8854166666666666,
+      "subir": 0.9791666666666666,
+      "tomar": 0.8020833333333334
+    },
+    "train_time_s": 939.7908252999987
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 5,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 5,
+      "tomar": 5
+    },
+    "accuracy": 0.8677083333333333,
+    "macro_f1": 0.8655211633240837,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.90625,
+      "bajar": 0.5416666666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.90625,
+      "subir": 0.96875,
+      "tomar": 0.8125
+    },
+    "train_time_s": 983.6707490000008
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 4,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 4,
+      "tomar": 5
+    },
+    "accuracy": 0.8666666666666667,
+    "macro_f1": 0.8644650489955662,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.90625,
+      "bajar": 0.5416666666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9166666666666666,
+      "subir": 0.9479166666666666,
+      "tomar": 0.8125
+    },
+    "train_time_s": 1168.1963785000007
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 6,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 6,
+      "tomar": 5
+    },
+    "accuracy": 0.865625,
+    "macro_f1": 0.8632250420170602,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.90625,
+      "bajar": 0.5416666666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8854166666666666,
+      "subir": 0.9791666666666666,
+      "tomar": 0.8020833333333334
+    },
+    "train_time_s": 969.0998951000001
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 5,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 5,
+      "tomar": 4
+    },
+    "accuracy": 0.8625,
+    "macro_f1": 0.8596991648114516,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9166666666666666,
+      "bajar": 0.71875,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9166666666666666,
+      "subir": 0.96875,
+      "tomar": 0.5625
+    },
+    "train_time_s": 1016.9622137000006
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 6,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 6,
+      "tomar": 4
+    },
+    "accuracy": 0.8614583333333333,
+    "macro_f1": 0.8583363082254779,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9166666666666666,
+      "bajar": 0.71875,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8958333333333334,
+      "subir": 0.9791666666666666,
+      "tomar": 0.5625
+    },
+    "train_time_s": 971.195756699999
+  },
+  {
+    "states": {
+      "avanzar": 5,
+      "subir": 4,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 5,
+      "subir": 4,
+      "tomar": 4
+    },
+    "accuracy": 0.8614583333333333,
+    "macro_f1": 0.8586862964135511,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9166666666666666,
+      "bajar": 0.71875,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9270833333333334,
+      "subir": 0.9479166666666666,
+      "tomar": 0.5625
+    },
+    "train_time_s": 967.2136852000003
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 6,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 6,
+      "tomar": 6
+    },
+    "accuracy": 0.8572916666666667,
+    "macro_f1": 0.8560626398252463,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.71875,
+      "bajar": 0.5520833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.9791666666666666,
+      "tomar": 0.9166666666666666
+    },
+    "train_time_s": 976.1318197
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 5,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 5,
+      "tomar": 6
+    },
+    "accuracy": 0.85625,
+    "macro_f1": 0.8550980516567346,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.71875,
+      "bajar": 0.5520833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.96875,
+      "tomar": 0.9166666666666666
+    },
+    "train_time_s": 925.6101224000013
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 5,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 5,
+      "tomar": 4
+    },
+    "accuracy": 0.8552083333333333,
+    "macro_f1": 0.8502221113590434,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.6770833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9166666666666666,
+      "subir": 0.96875,
+      "tomar": 0.4895833333333333
+    },
+    "train_time_s": 1023.347857599998
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 4,
+      "tomar": 6
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 4,
+      "tomar": 6
+    },
+    "accuracy": 0.8541666666666666,
+    "macro_f1": 0.8529590273828452,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.71875,
+      "bajar": 0.5520833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8645833333333334,
+      "subir": 0.9479166666666666,
+      "tomar": 0.9166666666666666
+    },
+    "train_time_s": 940.7434110000004
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 6,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 6,
+      "tomar": 4
+    },
+    "accuracy": 0.8541666666666666,
+    "macro_f1": 0.8488797739372936,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.6770833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8958333333333334,
+      "subir": 0.9791666666666666,
+      "tomar": 0.4895833333333333
+    },
+    "train_time_s": 939.6582789999993
+  },
+  {
+    "states": {
+      "avanzar": 6,
+      "subir": 4,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 6,
+      "subir": 4,
+      "tomar": 4
+    },
+    "accuracy": 0.8541666666666666,
+    "macro_f1": 0.8492136751488288,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.9583333333333334,
+      "bajar": 0.6770833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9270833333333334,
+      "subir": 0.9479166666666666,
+      "tomar": 0.4895833333333333
+    },
+    "train_time_s": 978.8280678999981
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 5,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 5,
+      "tomar": 5
+    },
+    "accuracy": 0.853125,
+    "macro_f1": 0.8518554971734323,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.75,
+      "bajar": 0.5520833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.90625,
+      "subir": 0.96875,
+      "tomar": 0.8125
+    },
+    "train_time_s": 936.2877723999991
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 4,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 4,
+      "tomar": 5
+    },
+    "accuracy": 0.8520833333333333,
+    "macro_f1": 0.8508156876782926,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.75,
+      "bajar": 0.5520833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9166666666666666,
+      "subir": 0.9479166666666666,
+      "tomar": 0.8125
+    },
+    "train_time_s": 927.5259267000001
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 6,
+      "tomar": 5
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 6,
+      "tomar": 5
+    },
+    "accuracy": 0.8510416666666667,
+    "macro_f1": 0.8495490688485798,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.75,
+      "bajar": 0.5520833333333334,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8854166666666666,
+      "subir": 0.9791666666666666,
+      "tomar": 0.8020833333333334
+    },
+    "train_time_s": 935.2829415999986
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 5,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 5,
+      "tomar": 4
+    },
+    "accuracy": 0.85,
+    "macro_f1": 0.8486620251137529,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.75,
+      "bajar": 0.7604166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9166666666666666,
+      "subir": 0.96875,
+      "tomar": 0.5625
+    },
+    "train_time_s": 938.3114337000006
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 6,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 6,
+      "tomar": 4
+    },
+    "accuracy": 0.8489583333333334,
+    "macro_f1": 0.8472630540144308,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.75,
+      "bajar": 0.7604166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.8958333333333334,
+      "subir": 0.9791666666666666,
+      "tomar": 0.5625
+    },
+    "train_time_s": 922.9273016000006
+  },
+  {
+    "states": {
+      "avanzar": 4,
+      "subir": 4,
+      "tomar": 4
+    },
+    "n_symbols": 64,
+    "n_states_per_class": {
+      "alto": 4,
+      "bajar": 4,
+      "derecha": 5,
+      "inicio": 4,
+      "izquierda": 5,
+      "retroceder": 6,
+      "soltar": 5,
+      "avanzar": 4,
+      "subir": 4,
+      "tomar": 4
+    },
+    "accuracy": 0.8489583333333334,
+    "macro_f1": 0.847666919822706,
+    "per_class_recall": {
+      "alto": 0.96875,
+      "avanzar": 0.75,
+      "bajar": 0.7604166666666666,
+      "derecha": 0.7291666666666666,
+      "inicio": 0.8958333333333334,
+      "izquierda": 1.0,
+      "retroceder": 0.9479166666666666,
+      "soltar": 0.9270833333333334,
+      "subir": 0.9479166666666666,
+      "tomar": 0.5625
+    },
+    "train_time_s": 938.8866760000001
+  }
+]

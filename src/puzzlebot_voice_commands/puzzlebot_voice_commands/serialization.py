@@ -15,8 +15,39 @@ def save_pickle(obj: Any, path: Path) -> None:
         pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
+def _patch_numpy_core() -> None:
+    """Permite cargar pickles guardados con numpy 2.x bajo numpy 1.x.
+
+    numpy 2.x movió internals a numpy._core.*; numpy 1.x no tiene ese módulo.
+    Se registran alias en sys.modules para que pickle los encuentre.
+    """
+    import sys
+    import types
+    import importlib
+    import numpy as _np
+
+    if hasattr(_np, '_core'):
+        return  # ya es numpy 2.x, no hace falta
+
+    _alias = sys.modules.setdefault('numpy._core', types.ModuleType('numpy._core'))
+    for _sub in [
+        'numeric', 'multiarray', 'umath', 'fromnumeric',
+        'shape_base', 'function_base', '_methods',
+        'arrayprint', 'defchararray', 'records',
+    ]:
+        _full = f'numpy._core.{_sub}'
+        if _full not in sys.modules:
+            try:
+                _m = importlib.import_module(f'numpy.core.{_sub}')
+                sys.modules[_full] = _m
+                setattr(_alias, _sub, _m)
+            except ImportError:
+                pass
+
+
 def load_pickle(path: Path) -> Any:
     """Deserialize a pickle file."""
+    _patch_numpy_core()
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Artifact not found: {path}")

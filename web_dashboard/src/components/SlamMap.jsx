@@ -10,27 +10,31 @@ const DRAG_THRESHOLD = 4;
 const ZOOM_MIN       = 0.25;
 const ZOOM_MAX       = 12;
 
-export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMarker, onGoalPose }) {
+export default function SlamMap({ mapData, augMapData, robotPose, trajectory, mode, goalMarker, onGoalPose }) {
   const canvasRef    = useRef(null);
   const offscreenRef = useRef(null);
   const lastMapRef   = useRef(null);
-  const dragRef      = useRef(null);       // { startX, startY, startPanX, startPanY, moved }
-  const mapOffsetRef = useRef({ x: 0, y: 0 }); // centering offset stored for canvasToWorld
+  const dragRef      = useRef(null);
+  const mapOffsetRef = useRef({ x: 0, y: 0 });
 
   const [zoom,     setZoom]     = useState(1);
   const [pan,      setPan]      = useState({ x: 0, y: 0 });
   const [grabbing, setGrabbing] = useState(false);
+  // Toggle: show augmented map (with dynamic obstacles) vs base SLAM map
+  const [showAug, setShowAug] = useState(true);
 
-  // Refs to access current zoom/pan inside event handlers without stale closures
   const zoomRef = useRef(1);
   const panRef  = useRef({ x: 0, y: 0 });
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current  = pan;  }, [pan]);
 
-  // Build offscreen canvas when map data changes
+  // Active map: augmented when available and toggle is on, else base map
+  const activeMapData = (showAug && augMapData) ? augMapData : mapData;
+
+  // Rebuild offscreen canvas when the active map changes
   useEffect(() => {
-    if (!mapData) return;
-    const { width, height, data } = mapData;
+    if (!activeMapData) return;
+    const { width, height, data } = activeMapData;
     const off = document.createElement('canvas');
     off.width  = width;
     off.height = height;
@@ -39,8 +43,8 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
     renderGridToImageData(imageData, data, width, height);
     octx.putImageData(imageData, 0, 0);
     offscreenRef.current = off;
-    lastMapRef.current   = mapData;
-  }, [mapData]);
+    lastMapRef.current   = activeMapData;
+  }, [activeMapData]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -53,7 +57,6 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-    // Apply zoom/pan transform (zoom around canvas center)
     ctx.save();
     ctx.translate(panX + CANVAS_W / 2, panY + CANVAS_H / 2);
     ctx.scale(z, z);
@@ -72,7 +75,6 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
     const { width, height, resolution, origin } = map;
     const cellSize = Math.min(CANVAS_W / width, CANVAS_H / height);
 
-    // Center the map inside the canvas
     const mapW    = width  * cellSize;
     const mapH    = height * cellSize;
     const offsetX = (CANVAS_W - mapW) / 2;
@@ -102,7 +104,7 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
       ctx.stroke();
     }
 
-    // Goal marker (green X)
+    // Goal marker (green circle + X)
     if (goalMarker) {
       const { px: gx, py: gy } = worldToPx(goalMarker.x, goalMarker.y);
       const r = GOAL_RADIUS / z;
@@ -129,7 +131,7 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
 
     ctx.restore();
 
-    // Navigation hint overlay (not zoomed/panned — stays at corner)
+    // Overlays (not zoomed — stay at canvas corner)
     if (mode === 'navigation') {
       ctx.fillStyle = 'rgba(74,222,128,0.05)';
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
@@ -140,10 +142,9 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
     }
   }, [robotPose, trajectory, goalMarker, mode]);
 
-  // Redraw on prop or zoom/pan changes
-  useEffect(() => { draw(); }, [draw, mapData, zoom, pan]);
+  useEffect(() => { draw(); }, [draw, activeMapData, zoom, pan]);
 
-  // --- Zoom (scroll wheel) ---
+  // Zoom (scroll wheel)
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     const canvas = canvasRef.current;
@@ -159,7 +160,6 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
     const factor = e.deltaY > 0 ? 0.9 : 1.1;
     const newZ   = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, oldZ * factor));
 
-    // Zoom-to-cursor: adjust pan so the point under cursor stays fixed
     const { x: oldPanX, y: oldPanY } = panRef.current;
     const newPanX = oldPanX + (cx - oldPanX - CANVAS_W / 2) * (1 - newZ / oldZ);
     const newPanY = oldPanY + (cy - oldPanY - CANVAS_H / 2) * (1 - newZ / oldZ);
@@ -175,7 +175,7 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
     return () => canvas.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // --- Pan (drag) + click-to-goal ---
+  // Pan (drag) + click-to-goal
   const getCanvasXY = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -191,19 +191,17 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
   const canvasToWorld = useCallback((cx, cy) => {
     const map = lastMapRef.current;
     if (!map) return null;
-    const z              = zoomRef.current;
-    const { x: pX, y: pY } = panRef.current;
+    const z                   = zoomRef.current;
+    const { x: pX, y: pY }   = panRef.current;
     const { x: offX, y: offY } = mapOffsetRef.current;
 
-    // Undo zoom/pan transform
     const ux = (cx - pX - CANVAS_W / 2) / z + CANVAS_W / 2;
     const uy = (cy - pY - CANVAS_H / 2) / z + CANVAS_H / 2;
 
-    // Undo map centering offset, then convert to world coords
     const { width, height, resolution, origin } = map;
     const cellSize = Math.min(CANVAS_W / width, CANVAS_H / height);
     const col = (ux - offX) / cellSize;
-    const row = height - 1 - (uy - offY) / cellSize; // inverse of cellToCanvas (flip Y)
+    const row = height - 1 - (uy - offY) / cellSize;
     return {
       x: origin.x + col * resolution,
       y: origin.y + row * resolution,
@@ -267,6 +265,8 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
       ? 'slam-canvas-nav'
       : 'slam-canvas-map';
 
+  const augAvailable = !!augMapData;
+
   return (
     <div className="panel slam-panel">
       <div className="slam-header">
@@ -279,6 +279,16 @@ export default function SlamMap({ mapData, robotPose, trajectory, mode, goalMark
               {lastMapRef.current.width}×{lastMapRef.current.height} —{' '}
               {lastMapRef.current.resolution} m/cell
             </span>
+          )}
+          {/* Augmented map layer toggle — only shown once /augmented_map arrives */}
+          {augAvailable && (
+            <button
+              className={`btn-aug-toggle ${showAug ? 'btn-aug-active' : ''}`}
+              onClick={() => setShowAug(v => !v)}
+              title={showAug ? 'Mostrando mapa aumentado (obstáculos dinámicos). Clic para ver mapa base.' : 'Mostrando mapa base. Clic para ver obstáculos dinámicos.'}
+            >
+              {showAug ? 'AUG' : 'BASE'}
+            </button>
           )}
         </div>
         <button className="btn-reset-view" onClick={resetView} title="Reset view">⌂</button>

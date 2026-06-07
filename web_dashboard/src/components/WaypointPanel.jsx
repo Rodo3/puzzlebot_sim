@@ -27,9 +27,14 @@ export default function WaypointPanel({ connected, mode, onGoalPose, onCommand, 
     addLog(`Waypoint → ${selected}`);
   };
 
-  const sendStop = () => {
-    onCommand({ type: 'cmd_vel', linear_x: 0, angular_z: 0 });
-    addLog('Navigation stop');
+  const emergencyStop = () => {
+    onCommand({ type: 'emergency_stop' });
+    addLog('Emergencia activada');
+  };
+
+  const clearEmergencyStop = () => {
+    onCommand({ type: 'clear_emergency_stop' });
+    addLog('Emergencia liberada');
   };
 
   return (
@@ -57,11 +62,18 @@ export default function WaypointPanel({ connected, mode, onGoalPose, onCommand, 
           onClick={sendWaypoint}
           disabled={disabled || !selected}
         >Ir al Waypoint</button>
+      </div>
+      <div className="emergency-actions">
         <button
-          className="btn-waypoint btn-stop-nav"
-          onClick={sendStop}
+          className="btn-emergency"
+          onClick={emergencyStop}
           disabled={!connected}
-        >Stop</button>
+        >Emergencia</button>
+        <button
+          className="btn-clear-emergency"
+          onClick={clearEmergencyStop}
+          disabled={!connected}
+        >Liberar emergencia</button>
       </div>
     </div>
   );

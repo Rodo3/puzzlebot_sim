@@ -1,0 +1,38 @@
+{
+  "labels": [
+    "alto",
+    "avanzar",
+    "derecha",
+    "inicio",
+    "izquierda",
+    "retroceder"
+  ],
+  "n_train": 1344,
+  "n_test": 576,
+  "test_ratio": 0.3,
+  "random_state": 42,
+  "samples_per_class": {
+    "alto": 320,
+    "avanzar": 320,
+    "derecha": 320,
+    "inicio": 320,
+    "izquierda": 320,
+    "retroceder": 320
+  },
+  "train_per_class": {
+    "alto": 224,
+    "avanzar": 224,
+    "derecha": 224,
+    "inicio": 224,
+    "izquierda": 224,
+    "retroceder": 224
+  },
+  "test_per_class": {
+    "alto": 96,
+    "avanzar": 96,
+    "derecha": 96,
+    "inicio": 96,
+    "izquierda": 96,
+    "retroceder": 96
+  }
+}

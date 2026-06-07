@@ -34,18 +34,41 @@ def _clean_ranges(ranges) -> List[Optional[float]]:
 
 def odom_to_json(msg) -> Dict[str, Any]:
     q = msg.pose.pose.orientation
+    cov = msg.pose.covariance  # flat 36-element array
+    kp = {
+        'x': round(msg.pose.pose.position.x, 4),
+        'y': round(msg.pose.pose.position.y, 4),
+        'theta': round(_quat_to_yaw(q.x, q.y, q.z, q.w), 4),
+    }
     return {
         'type': 'robot_state',
         'timestamp': _stamp_to_float(msg.header),
-        'pose': {
-            'x': round(msg.pose.pose.position.x, 4),
-            'y': round(msg.pose.pose.position.y, 4),
-            'theta': round(_quat_to_yaw(q.x, q.y, q.z, q.w), 4),
-        },
+        'pose': kp,          # overridden in bridge_node with SLAM pose when available
+        'kalman_pose': kp,   # always the raw Kalman/odom estimate
         'odom_twist': {
             'linear_x': round(msg.twist.twist.linear.x, 4),
             'angular_z': round(msg.twist.twist.angular.z, 4),
         },
+        # Kalman covariance diagonal: P_xx, P_yy, P_tt
+        'cov_xx': round(float(cov[0]),  6),
+        'cov_yy': round(float(cov[7]),  6),
+        'cov_tt': round(float(cov[35]), 6),
+    }
+
+
+def pose_with_cov_to_json(msg, type_str: str) -> Dict[str, Any]:
+    """Serialize a PoseWithCovarianceStamped message (ArUco pose, scan match pose)."""
+    q   = msg.pose.pose.orientation
+    cov = msg.pose.covariance
+    return {
+        'type':      type_str,
+        'timestamp': _stamp_to_float(msg.header),
+        'x':     round(msg.pose.pose.position.x, 4),
+        'y':     round(msg.pose.pose.position.y, 4),
+        'theta': round(_quat_to_yaw(q.x, q.y, q.z, q.w), 4),
+        'cov_xx': round(float(cov[0]),  6),
+        'cov_yy': round(float(cov[7]),  6),
+        'cov_tt': round(float(cov[35]), 6),
     }
 
 
