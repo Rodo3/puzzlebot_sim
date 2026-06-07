@@ -24,7 +24,7 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'logo_detector_node = puzzlebot_logo_detector.logo_detector_node:main',
+            'yolo_node          = puzzlebot_logo_detector.yolo_node:main',
             'record_logos       = puzzlebot_logo_detector.record_logos:main',
         ],
     },
