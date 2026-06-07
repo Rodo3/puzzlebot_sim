@@ -25,6 +25,10 @@ setup(
         'console_scripts': [
             'mission_manager_node = puzzlebot_control.mission_manager_node:main',
             'fork_publisher_node  = puzzlebot_control.fork_publisher_node:main',
+            'fork_mock_node       = puzzlebot_control.fork_mock_node:main',
+            'qr_mock_node         = puzzlebot_control.qr_mock_node:main',
+            'yolo_mock_node       = puzzlebot_control.yolo_mock_node:main',
+            'voice_fsm_router_node = puzzlebot_control.voice_fsm_router_node:main',
         ],
     },
 )

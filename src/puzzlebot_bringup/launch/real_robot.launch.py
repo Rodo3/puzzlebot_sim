@@ -150,9 +150,16 @@ def generate_launch_description():
     #####################################################################################################
 
     arg_dashboard_features = DeclareLaunchArgument('dashboard_features', default_value='false',
-                          description='Lanza los nodos de soporte del web dashboard: state_machine_node '
-                                      '(misión + montacargas), qr_node y logo_detector_node. '
+                          description='Lanza la capa de misión: mission_manager_node (FSM + '
+                                      'montacargas), qr_reader_node y waypoint_navigator_node. '
+                                      'El YOLO de logos corre standalone en la Jetson (ver launch_yolo). '
                                       'El bridge (ros2 run puzzlebot_web_bridge bridge_node) se corre aparte.')
+    #####################################################################################################
+
+    arg_launch_yolo = DeclareLaunchArgument('launch_yolo', default_value='false',
+                          description='Lanzar yolo_node del workspace (publica /detections). Por '
+                                      'defecto FALSE: el detector ONNX corre standalone en la Jetson. '
+                                      'Activar solo si no hay YOLO externo, para no duplicar /detections.')
     #####################################################################################################
     
     arg_use_map    = DeclareLaunchArgument('use_map', default_value='false',
@@ -174,6 +181,7 @@ def generate_launch_description():
     avoidance_en = LaunchConfiguration('avoidance')
     nav_en       = LaunchConfiguration('navigation')
     dash_en      = LaunchConfiguration('dashboard_features')
+    launch_yolo  = LaunchConfiguration('launch_yolo')
     aruco_en     = LaunchConfiguration('aruco')
     viewer_en    = LaunchConfiguration('viewer')
     rviz_en      = LaunchConfiguration('rviz')
@@ -559,30 +567,31 @@ def generate_launch_description():
         condition=IfCondition(nav_en),
     )
 
-    # ── Features del web dashboard (dashboard_features:=true) ─────────────
-    # Nodos que dan soporte a misiones / QR / logo / montacargas controlados
-    # desde el web dashboard. El bridge (puzzlebot_web_bridge bridge_node) se
-    # corre por separado y publica /mission_start, /forklift/command, etc.
-    #   state_machine_node : FSM de misión. Consume /mission_start,
-    #                        /qr/detections, /logo_detection/result; publica
-    #                        /mission_state, /navigate_to_waypoint, /forklift/command.
-    #   qr_node            : detección de QR sobre /camera/image/compressed.
-    #   logo_detector_node : detección de logo (ONNX) sobre /camera/image/compressed.
-    #   waypoint_navigator_node : traduce /navigate_to_waypoint (nombre) → /goal_pose
-    #                        para el path_planner A* de master. Sin él, el botón
-    #                        "ir a waypoint" del dashboard y la navegación de las
-    #                        misiones no tendrían consumidor (master no incluye
-    #                        este traductor; se reincorpora aquí, es aditivo).
+    # ── Capa de misión (dashboard_features:=true) ─────────────────────────
+    # Nodos de la FSM logística + percepción de misión + montacargas.
+    #   mission_manager_node  : FSM logística completa. Consume /mission_state_in
+    #                           (START/PAUSE/RESET), /localization/status, /qr/*,
+    #                           /detections, /fork/status; publica /mission_state,
+    #                           /goal_pose, /cmd_vel_in, /fork/command.
+    #   qr_reader_node        : QR del pallet → /qr/detected, /qr/client, /qr/pose.
+    #   yolo_node (perception): logos del tráiler → /detections (Detection2DArray).
+    #   waypoint_navigator_node : traduce /navigate_to_waypoint (nombre) → /goal_pose.
     # La cámara la publica la Jetson (jetson_sensors.launch.py) en
-    # /camera/image/compressed — topic por defecto de ambos detectores.
+    # /camera/image/compressed — topic por defecto de los detectores.
+    #
+    # NOTA: el control de voz (WAIT_FOR_VOICE_START / GLOBAL_VOICE_STOP) y los
+    # mocks (lifter / QR) viven en puzzlebot_control/mission.launch.py, que se
+    # lanza por separado durante las pruebas por etapas.
     waypoints_cfg = os.path.join(bringup_pkg, 'config', 'waypoints.yaml')
+    control_pkg   = get_package_share_directory('puzzlebot_control')
+    mission_cfg   = os.path.join(control_pkg, 'config', 'mission_config.yaml')
 
     state_machine = Node(
         package='puzzlebot_control',
-        executable='state_machine_node',
-        name='state_machine_node',
+        executable='mission_manager_node',
+        name='mission_manager_node',
         output='screen',
-        parameters=[{'waypoints_file': waypoints_cfg}],
+        parameters=[mission_cfg, {'waypoints_file': waypoints_cfg}],
         condition=IfCondition(dash_en),
     )
 
@@ -597,19 +606,23 @@ def generate_launch_description():
 
     qr_detector = Node(
         package='puzzlebot_perception',
-        executable='qr_node',
-        name='qr_node',
+        executable='qr_reader_node',
+        name='qr_reader_node',
         output='screen',
         condition=IfCondition(dash_en),
     )
 
+    # yolo_node del workspace: solo si dashboard_features Y launch_yolo. Por
+    # defecto NO se lanza — el detector ONNX corre standalone en la Jetson y ya
+    # publica /detections; lanzar dos nodos en ese tópico los duplicaría.
     logo_detector = Node(
-        package='puzzlebot_logo_detector',
-        executable='logo_detector_node',
-        name='logo_detector_node',
+        package='puzzlebot_perception',
+        executable='yolo_node',
+        name='yolo_node',
         output='screen',
         parameters=[{'show_window': False}],  # PC del robot suele ser headless
-        condition=IfCondition(dash_en),
+        condition=IfCondition(PythonExpression(
+            ["'", dash_en, "' == 'true' and '", launch_yolo, "' == 'true'"])),
     )
 
     return LaunchDescription([
@@ -622,6 +635,7 @@ def generate_launch_description():
         arg_avoidance,
         arg_navigation,
         arg_dashboard_features,
+        arg_launch_yolo,
         arg_aruco,
         arg_viewer,
         arg_rviz,

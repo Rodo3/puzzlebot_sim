@@ -1,47 +1,114 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  MISSION CONFIG — state_machine_node (puzzlebot_control)
+#  MISSION CONFIG — mission_manager_node (puzzlebot_control)
 #
 #  Parámetros de la misión logística de almacén:
-#    escanear QR → recoger pallet → navegar a docks → identificar tráiler → depositar
+#    START por voz → localización → barrer zona de pickup → QR del pallet →
+#    acercarse/alinear/tomar → navegar a expedición → barrer docks →
+#    identificar tráiler por logo (YOLO) → alinear/entrar/depositar/salir.
 #
-#  Se carga con el parámetro mission_config_file. Las coordenadas de los
-#  waypoints viven en puzzlebot_bringup/config/waypoints.yaml (parámetro
-#  waypoints_file).
+#  ZONAS = BOUNDING BOXES, no waypoints discretos. La FSM genera un barrido
+#  lineal dentro de cada caja y la detección (QR/logo) interrumpe el barrido.
+#  Ajusta los 4 límites de cada zona midiendo en RViz (Publish Point) sobre tu
+#  pista real. Referencia de zonas en puzzlebot_bringup/config/waypoints.yaml.
+#
+#  SISTEMA DE COORDENADAS (igual que waypoints.yaml):
+#    Origen (0,0) = esquina inferior DERECHA de la arena (sureste).
+#    X crece hacia la IZQUIERDA (Oeste).  Y crece hacia ARRIBA (Norte).
+#    Pista útil ≈ 3.76 m (X) × 4.86 m (Y).
+#    yaw: 0=mira -X (Este) · 1.57=mira +Y (Norte) · 3.14=mira +X · -1.57=mira -Y
+#
+#  CLIENTE ↔ LOGO: el texto del QR del pallet debe ser EXACTAMENTE el nombre
+#  de la clase que publica YOLO: "Walmart", "Pepsi" o "Amazon" (case-insensitive).
+#  No hay tabla de alias: imprime los QR con el nombre real del cliente.
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Mapeo string del QR → nombre de clase que publica el logo_detector.
-# (El logo_detector usa: Pepsi / Amazon / Walmart)
-qr_logo_map:
-  wolmar: Walmart
-  popsi: Pepsi
-  emezon: Amazon
+mission_manager_node:
+  ros__parameters:
 
-# Waypoint único de la zona de docks (desde donde se ven los 3 logos).
-# Debe existir en waypoints.yaml.
-dock_waypoint: dock_scan
+    # ── Misión ────────────────────────────────────────────────────────────────
+    # 1 = conveyor (zona roja, franja superior) · 2 = rack (zona verde, centro).
+    # Se puede sobreescribir en el launch: mission_number:=2
+    mission_number: 1
 
-# Waypoints que el robot recorre buscando el QR (Misión 1).
-# Deben existir en waypoints.yaml.
-patrol_waypoints: [estacion_a, estacion_b, estacion_c, estacion_d, estacion_e]
+    # ── Alias QR → clase de YOLO (DESACTIVADO) ──────────────────────────────────
+    # El QR del pallet y el detector YOLO usan la MISMA nomenclatura de analogías
+    # (Wolmar / Popsi / Emezon), así que el match es directo y no hace falta
+    # traducir. Si algún día YOLO se reentrena con otros nombres (p.ej. los reales
+    # Walmart/Pepsi/Amazon), rellena estas listas paralelas para mapear el QR a la
+    # clase de YOLO:  client_alias_from[i] (texto del QR) → client_alias_to[i].
+    client_alias_from: ['']
+    client_alias_to:   ['']
 
-# Segundos en cada waypoint de patrulla escaneando el QR antes de avanzar
-# al siguiente.
-scan_timeout_sec: 8.0
+    # ── Localización ────────────────────────────────────────────────────────────
+    # Segundos esperando /localization/status == OK antes de ir a recovery.
+    localization_timeout: 5.0
 
-# Confianza mínima del logo_detector para aceptar un match de logo.
-logo_confidence_threshold: 0.70
+    # ── ZONA PICKUP — Misión 1: conveyors (zona ROJA, franja superior) ──────────
+    # waypoints.yaml: conveyors en y ≈ 4.0–4.4 m; el robot barre en X.
+    conveyor_x_min: 0.60
+    conveyor_x_max: 3.20
+    conveyor_y_min: 3.80     # borde interior: el robot se sitúa aquí (y_min+0.15) y barre en X
+    conveyor_y_max: 4.40     # hacia la pared
+    conveyor_sweep_yaw: 1.57    # mira +Y (Norte): cámara hacia los conveyors, que están arriba
 
-# Tolerancia de llegada a waypoint (metros) — compara /odom con la coord del wp.
-goal_reached_tolerance: 0.20
+    # ── ZONA PICKUP — Misión 2: racks (zona VERDE, bloque central) ──────────────
+    # waypoints.yaml: racks en x ≈ 1.2–2.2 m, y ≈ 2.2–3.5 m; el robot barre en Y.
+    rack_x_min: 1.10
+    rack_x_max: 2.30
+    rack_y_min: 2.10
+    rack_y_max: 3.60
+    # ⚠️ VERIFICAR EN PISTA (ver docs/calibracion_zonas.md): el robot barre en
+    # x = rack_x_min + 0.15 = 1.25 recorriendo Y. La cámara debe mirar HACIA la
+    # cara accesible del rack. Si barre por el lado de X baja y el rack está hacia
+    # +X → yaw = 3.14 (Oeste). Si barre por el otro lado → 0.0 (Este). Ajustar
+    # según de qué lado del bloque pasa físicamente el robot.
+    rack_sweep_yaw: 3.14
 
-# Frames consecutivos con el mismo string de QR para aceptarlo como válido.
-qr_stable_frames: 3
+    # ── ZONA DOCKS — tráilers (zona MORADA, franja inferior) ────────────────────
+    # waypoints.yaml: docks en y ≈ 0.6–1.2 m; el robot barre en X mirando +Y.
+    # La maniobra de entrada al tráiler es hacia +Y (Norte).
+    dock_x_min: 1.00
+    dock_x_max: 2.80
+    dock_y_min: 0.80
+    dock_y_max: 1.30
+    dock_sweep_yaw: 1.57      # mira +Y (Norte), cámara hacia los tráilers
 
-# Frames consecutivos con el mismo logo (≥ umbral) para aceptar el match.
-logo_stable_frames: 5
+    # ── ZONA EXPEDICIÓN — punto intermedio antes de buscar tráiler ──────────────
+    # Punto libre de obstáculos entre la zona de pickup y los docks.
+    expedition_x: 1.88
+    expedition_y: 1.80
+    expedition_yaw: 1.57
 
-# Segundos que el montacargas (stub) tarda en subir/bajar antes de continuar.
-forklift_timeout_sec: 3.0
+    # ── Barrido (común a pickup y docks) ────────────────────────────────────────
+    sweep_step_m: 0.50       # separación entre puntos del barrido lineal
+    sweep_wp_tol: 0.20       # tolerancia de llegada a cada punto del barrido (m)
+    sweep_speed:  0.10       # velocidad lineal durante el barrido (m/s)
 
-# Timeout total de búsqueda de logos en la zona de docks antes de ERROR (seg).
-logo_scan_timeout_sec: 30.0
+    # ── Acercamiento / alineación al pallet (control sobre /qr/pose) ────────────
+    approach_distance:  0.40   # distancia frontal objetivo al QR antes de alinear (m)
+    align_angle_thresh: 0.08   # error angular máximo para considerar alineado (rad)
+    align_dist_thresh:  0.05   # error de distancia máximo en PRE_PICK (m)
+
+    # ── Toma del pallet (maniobra hardcodeada — sin sensor físico todavía) ──────
+    # PICK_MANEUVER ordena subir horquillas durante pick_lift_time; VERIFY_PICK
+    # espera /fork/status == True (limit switch futuro; hoy lo da el driver/mock).
+    pick_lift_time: 2.0
+
+    # ── Detección de logo del tráiler (YOLO → /detections) ──────────────────────
+    logo_confidence_thresh: 0.65   # score mínimo para aceptar una detección
+    logo_confirm_count:     3      # frames distintos con match cliente para confirmar
+    dock_center_thresh:     0.05   # |bbox_cx - 0.5| para considerar centrado en ALIGN_TO_DOCK
+
+    # ── Entrada / salida del tráiler (open-loop por tiempo) ─────────────────────
+    dock_forward_speed:  0.10   # m/s al entrar al tráiler
+    dock_forward_time:   3.0    # s avanzando dentro del tráiler
+    exit_backward_speed: 0.10   # m/s al salir
+    exit_backward_time:  3.0    # s retrocediendo para salir
+
+    # ── Timeouts de búsqueda ────────────────────────────────────────────────────
+    qr_search_timeout:   60.0   # s barriendo pickup sin QR → FAIL_QR_NOT_FOUND
+    logo_search_timeout: 60.0   # s barriendo docks sin logo → FAIL_TRAILER_NOT_FOUND
+
+    # ── Recuperación (giro en sitio buscando referencia) ────────────────────────
+    recovery_rotate_speed: 0.3
+    recovery_rotate_time:  8.0

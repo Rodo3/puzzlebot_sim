@@ -141,6 +141,7 @@ from vision_msgs.msg import Detection2DArray
 
 class State(enum.Enum):
     INIT_SYSTEM            = 'INIT_SYSTEM'
+    WAIT_FOR_VOICE_START   = 'WAIT_FOR_VOICE_START'
     LOCALIZATION_CHECK     = 'LOCALIZATION_CHECK'
     SELECT_MISSION         = 'SELECT_MISSION'
     NAVIGATE_TO_ZONE       = 'NAVIGATE_TO_ZONE'
@@ -167,6 +168,8 @@ class State(enum.Enum):
     FAIL_QR_NOT_FOUND      = 'FAIL_QR_NOT_FOUND'
     FAIL_TRAILER_NOT_FOUND = 'FAIL_TRAILER_NOT_FOUND'
     FAIL_PICK              = 'FAIL_PICK'
+    # Pausa global por voz (máxima prioridad — interrumpe cualquier estado)
+    GLOBAL_VOICE_STOP      = 'GLOBAL_VOICE_STOP'
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -248,9 +251,23 @@ class MissionManagerNode(Node):
         self.declare_parameter('expedition_y',   1.80)
         self.declare_parameter('expedition_yaw', 1.57)
 
+        # Alias QR → clase de YOLO. El texto del QR (p.ej. "Wolmar") puede no
+        # coincidir literalmente con la clase que publica YOLO (p.ej. "Walmart").
+        # Se declaran como dos listas paralelas porque ROS 2 no admite dict como
+        # parámetro: client_alias_from[i] → client_alias_to[i].
+        self.declare_parameter('client_alias_from', [''])
+        self.declare_parameter('client_alias_to',   [''])
+
         p = self.get_parameter
         self._mission_number        = p('mission_number').value
         self._loc_timeout           = p('localization_timeout').value
+
+        # Mapa de alias (en minúsculas) QR → clase YOLO, descartando entradas vacías.
+        _af = [s.strip().lower() for s in p('client_alias_from').value if s.strip()]
+        _at = [s.strip() for s in p('client_alias_to').value if s.strip()]
+        self._client_aliases = dict(zip(_af, _at))
+        if self._client_aliases:
+            self.get_logger().info(f'Alias QR→logo: {self._client_aliases}')
         self._approach_dist         = p('approach_distance').value
         self._align_angle_thresh    = p('align_angle_thresh').value
         self._align_dist_thresh     = p('align_dist_thresh').value
@@ -316,6 +333,11 @@ class MissionManagerNode(Node):
         self._state: State            = State.INIT_SYSTEM
         self._prev_state: State | None = None
         self._state_entry_time: float = time.monotonic()
+
+        # Estado guardado al entrar en GLOBAL_VOICE_STOP, para reanudar con
+        # CONTINUE. Es independiente de _prev_state (que cambia en cada
+        # transición) para sobrevivir a un STOP repetido.
+        self._resume_state: State | None = None
 
         # ── Contexto de misión ────────────────────────────────────────────────
         self._loc_status:        str   = 'INITIALIZING'
@@ -454,7 +476,12 @@ class MissionManagerNode(Node):
 
     def _qr_cli_cb(self, msg: String):
         if msg.data:
-            self._qr_client = msg.data.strip()
+            raw = msg.data.strip()
+            # Traducir alias del QR (p.ej. "Wolmar") a la clase de YOLO
+            # (p.ej. "Walmart") para que el match con /detections funcione.
+            self._qr_client = self._client_aliases.get(raw.lower(), raw)
+            if self._qr_client != raw:
+                self.get_logger().info(f'QR "{raw}" → cliente "{self._qr_client}"')
 
     def _qr_pose_cb(self, msg: PoseStamped):
         self._qr_pose = msg
@@ -469,10 +496,36 @@ class MissionManagerNode(Node):
     def _fork_cb(self, msg: Bool):
         self._fork_up = msg.data
 
+    # Estados durante los cuales una pausa NO debe reanudarse exactamente donde
+    # quedó, sino regresar a un subestado seguro de revalidación. Son maniobras
+    # críticas (toma de pallet, entrada/salida de tráiler, drop-off) donde
+    # reanudar a ciegas sería peligroso o dejaría el robot mal alineado.
+    _CRITICAL_RESUME = {
+        State.PICK_MANEUVER:       State.ALIGN_TO_PALLET,
+        State.VERIFY_PICK:         State.ALIGN_TO_PALLET,
+        State.PRE_PICK_VALIDATION: State.ALIGN_TO_PALLET,
+        State.ENTER_TRAILER:       State.ALIGN_TO_DOCK,
+        State.DROP_PALLET:         State.ALIGN_TO_DOCK,
+        State.EXIT_TRAILER:        State.ALIGN_TO_DOCK,
+    }
+
     def _override_cb(self, msg: String):
         cmd = msg.data.strip().upper()
         if cmd == 'RESET':
+            self._resume_state = None
             self._transition(State.INIT_SYSTEM)
+        elif cmd == 'START':
+            # Comando de voz contextual ('inicio'):
+            #   - en WAIT_FOR_VOICE_START → arranca la misión
+            #   - en GLOBAL_VOICE_STOP    → se trata como CONTINUE (reanuda)
+            #   - en cualquier otro estado → ignorado (misión ya en curso)
+            self._handle_voice_start()
+        elif cmd == 'PAUSE':
+            # STOP por voz ('alto'): máxima prioridad, desde cualquier estado.
+            self._enter_pause()
+        elif cmd == 'CONTINUE':
+            # Reanudación explícita (dashboard/terminal). Por voz llega como START.
+            self._resume_from_pause()
         elif cmd == 'START_M1':
             self._mission_number = 1
             self._transition(State.SELECT_MISSION)
@@ -483,6 +536,63 @@ class MissionManagerNode(Node):
             self._transition(State.FAIL_SAFE_STOP)
         else:
             self.get_logger().warn(f'Comando desconocido: {msg.data!r}')
+
+    # ── Jerarquía de voz: START / PAUSE / CONTINUE ─────────────────────────────
+
+    def _handle_voice_start(self):
+        if self._state == State.WAIT_FOR_VOICE_START:
+            self.get_logger().info(
+                f'START de voz → arrancando misión {self._mission_number}')
+            self._transition(State.LOCALIZATION_CHECK)
+        elif self._state == State.GLOBAL_VOICE_STOP:
+            # 'inicio' estando en pausa = CONTINUE (tu punto #8).
+            self._resume_from_pause()
+        else:
+            self.get_logger().info(
+                'START de voz ignorado — misión ya en curso '
+                f'(estado {self._state.value})')
+
+    def _enter_pause(self):
+        if self._state == State.GLOBAL_VOICE_STOP:
+            # STOP repetido: permanece detenido (tu requisito).
+            self.get_logger().info('PAUSE repetido — robot permanece detenido')
+            self._stop()
+            return
+        if self._state in (State.WAIT_FOR_VOICE_START, State.INIT_SYSTEM):
+            # Aún no hay misión que pausar; solo aseguramos robot quieto.
+            self.get_logger().info('PAUSE recibido antes de iniciar — sin efecto')
+            return
+        # Guardar el estado a reanudar y cancelar toda acción activa.
+        self._resume_state = self._state
+        self.get_logger().warn(
+            f'PAUSE por voz — pausando misión en {self._state.value}')
+        self._stop()
+        self._cancel_active_navigation()
+        self._transition(State.GLOBAL_VOICE_STOP)
+
+    def _resume_from_pause(self):
+        if self._state != State.GLOBAL_VOICE_STOP:
+            self.get_logger().info('CONTINUE ignorado — la misión no está en pausa')
+            return
+        target = self._resume_state or State.LOCALIZATION_CHECK
+        # Maniobra crítica → reanudar en un subestado seguro de revalidación.
+        safe = self._CRITICAL_RESUME.get(target)
+        if safe is not None:
+            self.get_logger().warn(
+                f'CONTINUE — {target.value} es maniobra crítica; '
+                f'reanudando en subestado seguro {safe.value}')
+            target = safe
+        else:
+            self.get_logger().info(f'CONTINUE — reanudando en {target.value}')
+        self._resume_state = None
+        self._transition(target)
+
+    def _cancel_active_navigation(self):
+        # Reafirma velocidad cero. El stack de navegación (path_planner /
+        # bug_navigation / obstacle_avoidance) deja de moverse al no recibir
+        # más comandos por /cmd_vel_in y con cmd_vel=0 latcheado por el watchdog
+        # de GLOBAL_VOICE_STOP. NUNCA publicamos /initialpose.
+        self._stop()
 
     # ── Publicadores activos ──────────────────────────────────────────────────
 
@@ -538,6 +648,10 @@ class MissionManagerNode(Node):
 
         if s == State.INIT_SYSTEM:
             self._step_init_system()
+        elif s == State.WAIT_FOR_VOICE_START:
+            self._step_wait_for_voice_start()
+        elif s == State.GLOBAL_VOICE_STOP:
+            self._step_global_voice_stop()
         elif s == State.LOCALIZATION_CHECK:
             self._step_localization_check()
         elif s == State.SELECT_MISSION:
@@ -586,10 +700,25 @@ class MissionManagerNode(Node):
     # ── Implementaciones de estados ───────────────────────────────────────────
 
     def _step_init_system(self):
-        # Espera mínimo 2 s para que los nodos de localización arranquen,
-        # luego pasa a verificar localización.
+        # Espera mínimo 2 s para que los nodos (localización, percepción,
+        # actuadores) arranquen. La misión NO comienza automáticamente: tras la
+        # inicialización el robot queda en espera del comando de voz de inicio.
         if self._time_in_state() > 2.0:
-            self._transition(State.LOCALIZATION_CHECK)
+            self._transition(State.WAIT_FOR_VOICE_START)
+
+    def _step_wait_for_voice_start(self):
+        # Robot detenido, esperando el comando de voz START ('inicio').
+        # El arranque real lo dispara _override_cb al recibir 'START' por
+        # /mission_state_in (lo publica voice_fsm_router_node). Aquí solo
+        # mantenemos el robot quieto.
+        self._stop()
+
+    def _step_global_voice_stop(self):
+        # Pausa de máxima prioridad: robot completamente detenido, sin avanzar
+        # la misión, hasta recibir CONTINUE ('inicio' estando en pausa).
+        # Publica velocidad cero de forma continua (watchdog) y reafirma la
+        # cancelación de cualquier goal de navegación en curso.
+        self._stop()
 
     def _step_localization_check(self):
         if self._loc_status == 'OK':
@@ -786,14 +915,17 @@ class MissionManagerNode(Node):
             self._transition(State.ALIGN_TO_PALLET)
 
     def _step_pick_maneuver(self):
-        # Primer tick: registrar tiempo de inicio y mandar comando de subida
-        if self._time_in_state() < 0.05:
-            self._maneuver_start = time.monotonic()
-            self._send_fork(True)   # sube horquillas
-            self.get_logger().info('PICK: subiendo horquillas…')
-            return
+        # Ordena subir las horquillas durante toda la maniobra. El plazo se mide
+        # con _time_in_state() (basado en _state_entry_time, que _transition
+        # siempre actualiza), no con una ventana "< 0.05 s": el dispatcher corre
+        # a 10 Hz, así que esa ventana se salta el primer tick y el comando de
+        # horquillas nunca se enviaría. Reenviar cada tick es idempotente para el
+        # actuador real y robusto ante pérdida del primer mensaje.
+        self._send_fork(True)
+        self.get_logger().info(
+            'PICK: subiendo horquillas…', throttle_duration_sec=1.0)
 
-        if time.monotonic() - self._maneuver_start >= self._pick_lift_time:
+        if self._time_in_state() >= self._pick_lift_time:
             self._transition(State.VERIFY_PICK)
 
     def _step_verify_pick(self):
