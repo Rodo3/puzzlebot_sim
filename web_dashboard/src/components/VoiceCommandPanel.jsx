@@ -49,7 +49,7 @@ function ModelPredictions({ label, rows, winner, scoreLabel }) {
       </div>
       {rows.slice(0, 3).map(([cmd, score], i) => (
         <div key={i} className={`ranked-row ${i === 0 && cmd === winner ? 'ranked-winner' : ''}`}>
-          <span>{i === 0 ? '▶ ' : '  '}{cmd}</span>
+          <span>{cmd}</span>
           <span className="muted">
             {typeof score === 'number' ? score.toFixed(4) : score}
           </span>
@@ -71,14 +71,16 @@ export default function VoiceCommandPanel({ voiceData, history }) {
 
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: false, noiseSuppression: false },
+      });
     } catch (e) {
       setRecError(`Mic: ${e.message}`);
       setRecState('error');
       return;
     }
 
-    const ctx = new AudioContext();
+    const ctx = new AudioContext({ sampleRate: 16000 });
     const source = ctx.createMediaStreamSource(stream);
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (e) => {
@@ -158,7 +160,7 @@ export default function VoiceCommandPanel({ voiceData, history }) {
           <div className="voice-main">
             <div className="voice-decision-row">
               <span className="voice-command">{voiceData.command ?? '—'}</span>
-              <span className="badge badge-info">KMeans decide</span>
+              <span className="badge badge-info">HMM</span>
             </div>
             <div className="voice-meta">
               <span className="muted">margen: <b>{voiceData.confidence != null ? voiceData.confidence.toFixed(4) : '—'}</b></span>
@@ -168,15 +170,9 @@ export default function VoiceCommandPanel({ voiceData, history }) {
             </div>
           </div>
 
-          {/* Per-model predictions */}
-          {(kmeansRows || hmmRows) && (
+          {/* HMM top-3 */}
+          {hmmRows && (
             <div className="models-grid">
-              <ModelPredictions
-                label="KMeans"
-                rows={kmeansRows}
-                winner={voiceData.command}
-                scoreLabel="dist ↓"
-              />
               <ModelPredictions
                 label="HMM"
                 rows={hmmRows}

@@ -1,0 +1,22 @@
+{
+  "hmm": {
+    "safety_critical_count": 0,
+    "safety_critical_rate": 0.0,
+    "safety_critical_cases": [],
+    "opposite_direction_count": 2,
+    "opposite_direction_rate": 0.013889,
+    "opposite_direction_cases": [
+      {
+        "true": "izquierda",
+        "pred": "derecha"
+      },
+      {
+        "true": "retroceder",
+        "pred": "avanzar"
+      }
+    ],
+    "stop_recall": {
+      "alto": 1.0
+    }
+  }
+}

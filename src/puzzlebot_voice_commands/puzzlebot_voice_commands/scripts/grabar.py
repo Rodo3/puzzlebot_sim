@@ -12,7 +12,8 @@ from pathlib import Path
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 HABLANTES    = ['rodo', 'valeria', 'jesus', 'jorge']
-PALABRAS     = ['avanzar', 'retroceder', 'izquierda', 'derecha', 'alto', 'inicio']
+PALABRAS     = ['avanzar', 'retroceder', 'izquierda', 'derecha', 'alto', 'inicio',
+                'subir', 'bajar', 'tomar', 'soltar']
 FS           = 16000   # frecuencia de muestreo requerida
 DURACION     = 1.5     # segundos por grabación
 REPETICIONES = 20

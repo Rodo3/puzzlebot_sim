@@ -27,6 +27,9 @@ Paquete ROS 2 Python (ament_python) que actúa como **puente bidireccional** ent
 
 ### Opcionales
 - `/cmd_vel_in`, `/voice/command`, `/voice/confidence`, `/voice/status`, `/voice/ranked_predictions`, `/voice/inference_time_ms`, `/camera/image/compressed`
+- `/mission_state` — std_msgs/String → `mission_state` (estado actual de la máquina de misión, event-driven)
+- `/qr/detections` — std_msgs/String → `qr_detections` (JSON, event-driven)
+- `/logo_detection/result` — std_msgs/String → `logo_detection` (JSON, event-driven)
 
 ## Tópicos que publica (WebSocket → ROS)
 
@@ -36,6 +39,7 @@ Paquete ROS 2 Python (ament_python) que actúa como **puente bidireccional** ent
 | `/goal_pose` | geometry_msgs/PoseStamped | `"type":"goal_pose"` | QoS TRANSIENT_LOCAL (latched) |
 | `/navigate_to_waypoint` | std_msgs/String | `"type":"navigate_to_waypoint"` | Nombre del waypoint |
 | `/slam/reset` | std_msgs/Bool | `"type":"slam_reset"` | True → slam_node limpia el mapa |
+| `/mission_start` | std_msgs/String | `"type":"mission_start"` | `"1"`, `"2"`, o `"stop"` |
 
 ## Parámetro crítico: `cmd_vel_out_topic`
 
@@ -57,7 +61,22 @@ En `gz_sim.launch.py` este parámetro ya está configurado correctamente para Ga
 { "type": "goal_pose",            "x": 1.5, "y": 2.3, "theta": 0.0, "frame_id": "map" }
 { "type": "navigate_to_waypoint", "name": "centro" }
 { "type": "slam_reset" }
+{ "type": "mission_start",        "mission": "1" }
+{ "type": "mission_start",        "mission": "2" }
+{ "type": "mission_stop" }
+{ "type": "elevator",             "action": "up" }
 ```
+
+> `mission_start "2"` pone al `state_machine_node` en estado `WAITING_FOR_GOAL`.
+> El siguiente `goal_pose` que llegue del dashboard (click en mapa) será el punto de inicio de la Misión 2.
+
+## Mensajes salientes al browser (JSON)
+
+| `type` | Tópico ROS | Descripción |
+|---|---|---|
+| `mission_state` | `/mission_state` | Estado actual: `IDLE/WAITING_FOR_GOAL/SCANNING_QR/FORKLIFT_UP/NAVIGATING_TO_DOCKS/SCANNING_LOGOS/FORKLIFT_DOWN/DONE/ERROR` |
+| `qr_detections` | `/qr/detections` | JSON array con QR detectados `[{data, corners, area_px, center}]` |
+| `logo_detection` | `/logo_detection/result` | JSON array de logos `[{class_name, confidence, bbox}]` (para overlay en cámara) |
 
 ## Endpoints HTTP/WebSocket
 - `ws://0.0.0.0:8000/ws` — canal bidireccional con el dashboard
@@ -86,3 +105,4 @@ pip install fastapi "uvicorn[standard]" websockets "numpy>=1.25" scipy librosa
 - NUNCA publicar `/initialpose`.
 - El bridge NO hace planeación ni navegación — solo retransmite comandos del usuario.
 - No fallar si los tópicos opcionales no existen.
+- El bridge NO interpreta el estado de misión — solo retransmite `/mission_state` al dashboard y `/mission_start` al nodo.

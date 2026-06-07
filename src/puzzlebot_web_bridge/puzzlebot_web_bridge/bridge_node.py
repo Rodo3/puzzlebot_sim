@@ -27,22 +27,27 @@ import json
 import logging
 import math
 import os
+import shutil
+import subprocess
+import threading
 import time
 
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, LaserScan
 from std_msgs.msg import Bool, Float32, String
+from vision_msgs.msg import Detection2DArray
 
 from .rate_limiter import RateLimiter
 from .serializers import (
     camera_to_json,
     map_to_json,
     odom_to_json,
+    pose_with_cov_to_json,
     scan_to_json,
     twist_to_json,
     voice_to_json,
@@ -57,6 +62,20 @@ from .websocket_server import WebSocketServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+#  Inicialización de sensores de la Jetson vía SSH (toggle desde el dashboard)
+# --------------------------------------------------------------------------- #
+# Comando remoto que se ejecuta en la Jetson para cada sensor. PLACEHOLDER:
+# rellenar con los comandos exactos (ros2 launch/run) cuando estén confirmados.
+# Cada valor se ejecuta como: sshpass -p <pwd> ssh -tt <user>@<host> "<cmd>"
+# y se mantiene vivo hasta que el dashboard vuelve a pulsar el botón (toggle).
+SENSOR_SSH_CMDS = {
+    'lidar':    'ros2 launch sllidar_ros2 view_sllidar_launch.py',  # PENDIENTE: comando real
+    'camera':   'ros2 run v4l2_camera v4l2_camera_node',            # PENDIENTE: comando real
+    'microros': 'ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0',  # PENDIENTE
+}
 
 
 class BridgeNode(Node):
@@ -84,9 +103,14 @@ class BridgeNode(Node):
         self.declare_parameter('maps_dir', '')
         # cmd_vel_out_topic: topic to publish teleop commands.
         # Default /cmd_vel for real robot; use /model/puzzlebot/cmd_vel for Gazebo.
-        self.declare_parameter('cmd_vel_out_topic', DEFAULT_TOPICS['cmd_vel_out'])
+        self.declare_parameter('cmd_vel_out_topic',     DEFAULT_TOPICS['cmd_vel_out'])
+        self.declare_parameter('cmd_vel_steering_topic', DEFAULT_TOPICS['cmd_vel_steering'])
+        self.declare_parameter('dom_state_topic',        DEFAULT_TOPICS['dom_state'])
+        self.declare_parameter('augmented_map_topic',    DEFAULT_TOPICS['augmented_map'])
+        self.declare_parameter('aruco_pose_topic',       DEFAULT_TOPICS['aruco_pose'])
+        self.declare_parameter('scan_match_pose_topic',  DEFAULT_TOPICS['scan_match_pose'])
 
-        # Rate limiters.
+        # Rate limiters — one per rate-limited topic key.
         self._rl = {
             key: RateLimiter(hz)
             for key, hz in RATE_LIMITS_HZ.items()
@@ -100,10 +124,25 @@ class BridgeNode(Node):
             'inference_time_ms': None,
             'ranked_predictions': None,
         }
+        self._last_cmd_vel_log_t = 0.0
 
-        # Voice inference engine (optional — loaded if artifact_dir is set).
+        # Voice inference engine (optional — loaded if artifact_dir is set or auto-detected).
         self._inference_engine = None
         artifact_dir = self.get_parameter('artifact_dir').get_parameter_value().string_value
+        if not artifact_dir:
+            # Auto-detect: buscar en el share directory del paquete de voz (instalado por colcon)
+            try:
+                from ament_index_python.packages import get_package_share_directory
+                import os as _os
+                _auto = _os.path.join(
+                    get_package_share_directory('puzzlebot_voice_commands'),
+                    'artifacts_final',
+                )
+                if _os.path.isdir(_auto):
+                    artifact_dir = _auto
+                    self.get_logger().info(f'artifact_dir auto-detectado: {artifact_dir}')
+            except Exception:
+                pass
         if artifact_dir:
             self._load_voice_engine(artifact_dir)
 
@@ -121,7 +160,9 @@ class BridgeNode(Node):
 
         # ── Control publishers (outgoing: dashboard → ROS) ─────────────────
         cmd_vel_out = self.get_parameter('cmd_vel_out_topic').get_parameter_value().string_value
-        self._pub_cmd_vel_out = self.create_publisher(Twist, cmd_vel_out, 10)
+        self._pub_cmd_vel_out    = self.create_publisher(Twist, cmd_vel_out, 10)
+        # Teleop-priority signal: obstacle_avoidance suppresses navigation while this arrives
+        self._pub_cmd_vel_teleop = self.create_publisher(Twist, '/cmd_vel_teleop', 10)
 
         _latched_qos = QoSProfile(
             depth=1,
@@ -131,9 +172,39 @@ class BridgeNode(Node):
         self._pub_goal_pose  = self.create_publisher(PoseStamped, DEFAULT_TOPICS['goal_pose'], _latched_qos)
         self._pub_nav_wp     = self.create_publisher(String, DEFAULT_TOPICS['navigate_to_waypoint'], 10)
         self._pub_slam_reset = self.create_publisher(Bool, DEFAULT_TOPICS['slam_reset'], 10)
+        self._pub_nav_cancel = self.create_publisher(Bool, '/navigation/cancel', 10)
+        self._pub_emergency_stop = self.create_publisher(Bool, '/emergency_stop', _latched_qos)
         self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
+        # Mission control: dashboard → state_machine_node ("1" / "2" / "stop")
+        self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_start'], 10)
+        # Forklift/montacargas: dashboard → forklift controller ("up" / "down")
+        self._pub_forklift   = self.create_publisher(String, '/forklift/command', 10)
 
         self.get_logger().info(f'Control publishers ready — cmd_vel_out: {cmd_vel_out}')
+
+        # ── Inicialización de sensores Jetson vía SSH (toggle) ────────────
+        # La contraseña se pasa como parámetro al lanzar el bridge; NO hay
+        # secretos versionados. Default presente solo por conveniencia local.
+        self.declare_parameter('robot_ssh_host',     '10.42.0.1')
+        self.declare_parameter('robot_ssh_user',     'puzzlebot')
+        self.declare_parameter('robot_ssh_password', 'Puzzlebot72')
+        # sensor_id -> subprocess.Popen del túnel SSH vivo
+        self._sensor_procs: dict[str, subprocess.Popen] = {}
+        self._sensor_lock = threading.Lock()
+
+        # Cache for map-frame robot pose from slam_node (overrides odom frame pose).
+        self._map_pose: dict | None = None
+
+        # Voice command executor state
+        self.declare_parameter('voice_linear_speed',  0.20)
+        self.declare_parameter('voice_angular_speed', 0.50)
+        self.declare_parameter('voice_cmd_duration',  1.00)   # seconds per command
+        self._voice_lin   = self.get_parameter('voice_linear_speed').value
+        self._voice_ang   = self.get_parameter('voice_angular_speed').value
+        self._voice_dur   = self.get_parameter('voice_cmd_duration').value
+        self._voice_timer = None   # threading.Timer to stop after duration
+        self._emergency_stop_active = False
+        self.create_timer(0.05, self._emergency_loop)
 
         # Start WebSocket server.
         host = self.get_parameter('websocket_host').get_parameter_value().string_value
@@ -176,11 +247,44 @@ class BridgeNode(Node):
             self.get_parameter('cmd_vel_topic').get_parameter_value().string_value,
             lambda msg: self._twist_cb(msg, 'cmd_vel'), 10)
 
+        # Map-frame robot pose from slam_node — overrides odom-frame pose for drawing.
+        self.create_subscription(
+            PoseStamped, '/slam/robot_pose_in_map', self._slam_pose_cb, 10)
+
+        # Execute voice commands as robot actions.
+        self.create_subscription(
+            String, DEFAULT_TOPICS['voice_command'], self._voice_exec_cb, 10)
+
         # Optional subscribers — tolerate missing topics.
         self.create_subscription(
             Twist,
             self.get_parameter('cmd_vel_in_topic').get_parameter_value().string_value,
             lambda msg: self._twist_cb(msg, 'cmd_vel_in'), 10)
+
+        self.create_subscription(
+            Twist,
+            self.get_parameter('cmd_vel_steering_topic').get_parameter_value().string_value,
+            lambda msg: self._twist_cb(msg, 'cmd_vel_steering'), 10)
+
+        self.create_subscription(
+            String,
+            self.get_parameter('dom_state_topic').get_parameter_value().string_value,
+            self._dom_state_cb, 10)
+
+        self.create_subscription(
+            OccupancyGrid,
+            self.get_parameter('augmented_map_topic').get_parameter_value().string_value,
+            self._aug_map_cb, 1)
+
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            self.get_parameter('aruco_pose_topic').get_parameter_value().string_value,
+            self._aruco_pose_cb, 10)
+
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            self.get_parameter('scan_match_pose_topic').get_parameter_value().string_value,
+            self._scan_match_cb, 10)
 
         self.create_subscription(
             String,
@@ -212,15 +316,120 @@ class BridgeNode(Node):
             self.get_parameter('camera_topic').get_parameter_value().string_value,
             self._camera_cb, _sensor_qos)
 
+        # Mission state machine → dashboard (event-driven, no rate limit).
+        self.create_subscription(
+            String, DEFAULT_TOPICS['mission_state'], self._mission_state_cb, 10)
+        self.create_subscription(
+            String, DEFAULT_TOPICS['qr_detections'], self._qr_detections_cb, 10)
+        self.create_subscription(
+            Detection2DArray, DEFAULT_TOPICS['logo_detection'], self._logo_detection_cb, 10)
+
         self.get_logger().info(f'puzzlebot_web_bridge ready — WebSocket at ws://{host}:{port}/ws')
 
     # ------------------------------------------------------------------ #
     #  Core callbacks
     # ------------------------------------------------------------------ #
 
+    def _slam_pose_cb(self, msg: PoseStamped):
+        import math as _math
+        q = msg.pose.orientation
+        siny = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        self._map_pose = {
+            'x': round(msg.pose.position.x, 4),
+            'y': round(msg.pose.position.y, 4),
+            'theta': round(_math.atan2(siny, cosy), 4),
+        }
+
+    def _voice_exec_cb(self, msg: String):
+        import threading
+        cmd = msg.data.strip().lower()
+
+        # Cancel any in-progress timed command
+        if self._voice_timer is not None:
+            self._voice_timer.cancel()
+            self._voice_timer = None
+
+        # ── Comandos de elevador (sin cmd_vel) ───────────────────────────────
+        elevator_map = {'subir': 'up', 'bajar': 'down', 'tomar': 'up', 'soltar': 'down'}
+        if cmd in elevator_map:
+            action = elevator_map[cmd]
+            self._pub_forklift.publish(String(data=action))
+            self.get_logger().info(f'voice → /forklift/command: {action}  (comando: {cmd})')
+            return
+
+        # ── Comandos de navegación ────────────────────────────────────────────
+        twist = Twist()
+        if cmd == 'avanzar':
+            twist.linear.x = self._voice_lin
+        elif cmd == 'retroceder':
+            twist.linear.x = -self._voice_lin
+        elif cmd == 'izquierda':
+            twist.angular.z = self._voice_ang
+        elif cmd == 'derecha':
+            twist.angular.z = -self._voice_ang
+        elif cmd == 'alto':
+            self._stop_all('voice alto')
+            return
+        elif cmd == 'inicio':
+            self._pub_nav_wp.publish(String(data='inicio'))
+            self.get_logger().info('voice → navigate_to_waypoint: inicio')
+            return
+        else:
+            self.get_logger().warn(f'voice_exec: unknown command "{cmd}"')
+            return
+
+        self._pub_cmd_vel_out.publish(twist)
+        self._pub_cmd_vel_teleop.publish(twist)
+        self.get_logger().info(
+            f'voice → cmd_vel: {cmd}  '
+            f'(lin={twist.linear.x:.2f} ang={twist.angular.z:.2f})')
+
+        if cmd != 'alto':
+            def _stop():
+                stop = Twist()
+                self._pub_cmd_vel_out.publish(stop)
+                self._pub_cmd_vel_teleop.publish(stop)
+            self._voice_timer = threading.Timer(self._voice_dur, _stop)
+            self._voice_timer.daemon = True
+            self._voice_timer.start()
+
+    def _publish_zero_cmd(self):
+        stop = Twist()
+        self._pub_cmd_vel_out.publish(stop)
+        self._pub_cmd_vel_teleop.publish(stop)
+
+    def _emergency_loop(self):
+        if self._emergency_stop_active:
+            self._publish_zero_cmd()
+            self._pub_emergency_stop.publish(Bool(data=True))
+
+    def _stop_all(self, reason: str, emergency: bool = False):
+        import threading
+        if self._voice_timer is not None:
+            self._voice_timer.cancel()
+            self._voice_timer = None
+        if emergency:
+            self._emergency_stop_active = True
+            self._pub_emergency_stop.publish(Bool(data=True))
+        self._pub_nav_cancel.publish(Bool(data=True))
+        self._pub_nav_wp.publish(String(data='stop'))
+        self._pub_mission.publish(String(data='stop'))
+        self._publish_zero_cmd()
+        for delay in (0.05, 0.10, 0.20, 0.35, 0.50):
+            timer = threading.Timer(delay, self._publish_zero_cmd)
+            timer.daemon = True
+            timer.start()
+        self.get_logger().info(f'{reason} → stop all')
+
     def _odom_cb(self, msg: Odometry):
         if self._rl['odom'].should_send():
-            self._ws.broadcast_sync(odom_to_json(msg))
+            payload = odom_to_json(msg)
+            # kalman_pose stays as raw Kalman estimate; pose gets SLAM override for display
+            if self._map_pose is not None:
+                payload['pose']      = self._map_pose
+                payload['slam_pose'] = self._map_pose
+            self._ws.broadcast_sync(payload)
 
     def _scan_cb(self, msg: LaserScan):
         if self._rl['scan'].should_send():
@@ -235,9 +444,73 @@ class BridgeNode(Node):
             self._ws.broadcast_sync(camera_to_json(msg))
 
     def _twist_cb(self, msg: Twist, source: str):
-        key = 'cmd_vel' if source == 'cmd_vel' else 'cmd_vel_in'
+        key = source if source in self._rl else 'cmd_vel_in'
         if self._rl[key].should_send():
             self._ws.broadcast_sync(twist_to_json(msg, source))
+
+    def _dom_state_cb(self, msg: String):
+        if self._rl['dom_state'].should_send():
+            self._ws.broadcast_sync({
+                'type':      'nav_state',
+                'state':     msg.data,
+                'timestamp': self.get_clock().now().nanoseconds / 1e9,
+            })
+
+    def _aug_map_cb(self, msg: OccupancyGrid):
+        if self._rl['augmented_map'].should_send():
+            payload = map_to_json(msg)
+            payload['type'] = 'augmented_map'
+            self._ws.broadcast_sync(payload)
+
+    def _aruco_pose_cb(self, msg: PoseWithCovarianceStamped):
+        if self._rl['aruco_pose'].should_send():
+            self._ws.broadcast_sync(pose_with_cov_to_json(msg, 'aruco_pose'))
+
+    def _scan_match_cb(self, msg: PoseWithCovarianceStamped):
+        if self._rl['scan_match_pose'].should_send():
+            self._ws.broadcast_sync(pose_with_cov_to_json(msg, 'scan_match_pose'))
+
+    def _mission_state_cb(self, msg: String):
+        # Pure relay — the bridge does NOT interpret mission state.
+        self._ws.broadcast_sync({
+            'type':      'mission_state',
+            'state':     msg.data,
+            'timestamp': self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _qr_detections_cb(self, msg: String):
+        # msg.data is a JSON array of {data, corners, area_px, center}; forward parsed.
+        try:
+            detections = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            detections = []
+        self._ws.broadcast_sync({
+            'type':       'qr_detections',
+            'detections': detections,
+            'timestamp':  self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _logo_detection_cb(self, msg: Detection2DArray):
+        detections = []
+        for det in msg.detections:
+            if not det.results:
+                continue
+            hyp = det.results[0].hypothesis
+            detections.append({
+                'class_name': hyp.class_id,
+                'confidence': round(hyp.score, 4),
+                'bbox': {
+                    'cx': round(det.bbox.center.position.x, 4),
+                    'cy': round(det.bbox.center.position.y, 4),
+                    'w':  round(det.bbox.size_x, 4),
+                    'h':  round(det.bbox.size_y, 4),
+                },
+            })
+        self._ws.broadcast_sync({
+            'type':       'logo_detection',
+            'detections': detections,
+            'timestamp':  self.get_clock().now().nanoseconds / 1e9,
+        })
 
     # ------------------------------------------------------------------ #
     #  Voice callbacks — accumulate fields, send on command arrival
@@ -245,7 +518,7 @@ class BridgeNode(Node):
 
     def _voice_command_cb(self, msg: String):
         self._voice['command'] = msg.data
-        self._ws.broadcast_sync(self._build_voice_payload())
+        # Don't broadcast yet — wait for ranked_predictions which arrives right after.
 
     def _voice_confidence_cb(self, msg: Float32):
         self._voice['confidence'] = msg.data
@@ -254,7 +527,10 @@ class BridgeNode(Node):
         self._voice['status'] = msg.data
 
     def _voice_ranked_cb(self, msg: String):
+        # ranked_predictions is published last by voice_commands_node, so by here
+        # all other fields (command, confidence, inference_time_ms) are already set.
         self._voice['ranked_predictions'] = msg.data
+        self._ws.broadcast_sync(self._build_voice_payload())
 
     def _voice_inference_cb(self, msg: Float32):
         self._voice['inference_time_ms'] = msg.data
@@ -352,11 +628,27 @@ class BridgeNode(Node):
         """Route a JSON command received from the browser to the appropriate ROS publisher."""
         msg_type = data.get('type')
         try:
+            if self._emergency_stop_active and msg_type != 'clear_emergency_stop':
+                if msg_type == 'emergency_stop':
+                    self._stop_all('emergency_stop', emergency=True)
+                else:
+                    self._publish_zero_cmd()
+                    self.get_logger().warn(
+                        f'command {msg_type} ignored: emergency stop active',
+                        throttle_duration_sec=1.0)
+                return
+
             if msg_type == 'cmd_vel':
                 msg = Twist()
                 msg.linear.x  = float(data.get('linear_x', 0.0))
                 msg.angular.z = float(data.get('angular_z', 0.0))
                 self._pub_cmd_vel_out.publish(msg)
+                self._pub_cmd_vel_teleop.publish(msg)
+                now = time.monotonic()
+                if now - self._last_cmd_vel_log_t > 0.5:
+                    self._last_cmd_vel_log_t = now
+                    self.get_logger().info(
+                        f'dashboard cmd_vel → lin={msg.linear.x:.2f} ang={msg.angular.z:.2f}')
 
             elif msg_type == 'goal_pose':
                 msg = PoseStamped()
@@ -377,6 +669,11 @@ class BridgeNode(Node):
                 if name:
                     self._pub_nav_wp.publish(String(data=name))
                     self.get_logger().info(f'navigate_to_waypoint → {name}')
+
+            elif msg_type == 'cancel_navigation':
+                self._pub_nav_cancel.publish(Bool(data=True))
+                self._pub_nav_wp.publish(String(data='stop'))
+                self.get_logger().info('navigation cancel requested from dashboard')
 
             elif msg_type == 'slam_reset':
                 self._pub_slam_reset.publish(Bool(data=True))
@@ -418,7 +715,35 @@ class BridgeNode(Node):
 
             elif msg_type == 'elevator':
                 action = str(data.get('action', '')).strip()
-                self.get_logger().info(f'elevator command: {action} (backend pending)')
+                if action in ('up', 'down'):
+                    self._pub_forklift.publish(String(data=action))
+                    self.get_logger().info(f'dashboard → /forklift/command: {action}')
+                else:
+                    self.get_logger().warn(f'elevator: acción desconocida {action!r} (esperado: up/down)')
+
+            elif msg_type == 'mission_start':
+                mission = str(data.get('mission', '')).strip()
+                if mission in ('1', '2'):
+                    self._pub_mission.publish(String(data=mission))
+                    self.get_logger().info(f'mission_start → {mission}')
+                else:
+                    self.get_logger().warn(f'mission_start: invalid mission {mission!r}')
+
+            elif msg_type == 'launch_sensor':
+                sensor = str(data.get('sensor', '')).strip()
+                self._toggle_sensor(sensor)
+
+            elif msg_type == 'mission_stop':
+                self._stop_all('mission_stop')
+
+            elif msg_type == 'emergency_stop':
+                self._stop_all('emergency_stop', emergency=True)
+
+            elif msg_type == 'clear_emergency_stop':
+                self._emergency_stop_active = False
+                self._pub_emergency_stop.publish(Bool(data=False))
+                self._publish_zero_cmd()
+                self.get_logger().warn('emergency_stop cleared from dashboard')
 
             else:
                 self.get_logger().debug(f'Unknown command type: {msg_type}')
@@ -426,7 +751,109 @@ class BridgeNode(Node):
         except Exception as exc:
             self.get_logger().error(f'Error handling command {msg_type}: {exc}')
 
+    # ------------------------------------------------------------------ #
+    #  Sensor initialization over SSH (dashboard toggle)
+    # ------------------------------------------------------------------ #
+
+    def _broadcast_sensor_status(self, sensor: str, status: str, detail: str = '') -> None:
+        """Push sensor state back to the dashboard. status: idle|starting|online|error."""
+        try:
+            self._ws.broadcast_sync({
+                'type':   'sensor_status',
+                'sensor': sensor,
+                'status': status,
+                'detail': detail,
+            })
+        except Exception as exc:
+            self.get_logger().warn(f'sensor_status broadcast failed: {exc}')
+
+    def _toggle_sensor(self, sensor: str) -> None:
+        """Start the sensor's SSH process if stopped, or stop it if running (toggle)."""
+        if sensor not in SENSOR_SSH_CMDS:
+            self.get_logger().warn(f'launch_sensor: sensor desconocido {sensor!r}')
+            self._broadcast_sensor_status(sensor, 'error', 'sensor desconocido')
+            return
+
+        with self._sensor_lock:
+            proc = self._sensor_procs.get(sensor)
+            if proc is not None and proc.poll() is None:
+                self._stop_sensor_locked(sensor)
+            else:
+                self._start_sensor_locked(sensor)
+
+    def _start_sensor_locked(self, sensor: str) -> None:
+        """Launch the remote sensor command over SSH. Caller holds _sensor_lock."""
+        if shutil.which('sshpass') is None:
+            self.get_logger().error('sshpass no está instalado en la PC del bridge (sudo apt install sshpass)')
+            self._broadcast_sensor_status(sensor, 'error', 'falta sshpass en la PC')
+            return
+
+        host = self.get_parameter('robot_ssh_host').get_parameter_value().string_value
+        user = self.get_parameter('robot_ssh_user').get_parameter_value().string_value
+        pwd  = self.get_parameter('robot_ssh_password').get_parameter_value().string_value
+        cmd  = SENSOR_SSH_CMDS[sensor]
+
+        self._broadcast_sensor_status(sensor, 'starting')
+        argv = [
+            'sshpass', '-p', pwd,
+            'ssh', '-tt',
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'UserKnownHostsFile=/dev/null',
+            f'{user}@{host}',
+            cmd,
+        ]
+        try:
+            proc = subprocess.Popen(
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,   # propio grupo de procesos → terminate limpio
+            )
+        except Exception as exc:
+            self.get_logger().error(f'launch_sensor {sensor}: no se pudo iniciar SSH: {exc}')
+            self._broadcast_sensor_status(sensor, 'error', str(exc))
+            return
+
+        self._sensor_procs[sensor] = proc
+        self.get_logger().info(f'launch_sensor {sensor}: SSH iniciado (pid {proc.pid}) → {user}@{host}: {cmd}')
+        self._broadcast_sensor_status(sensor, 'online')
+        threading.Thread(target=self._monitor_sensor, args=(sensor, proc), daemon=True).start()
+
+    def _stop_sensor_locked(self, sensor: str) -> None:
+        """Terminate the running SSH process (≈ Ctrl+C). Caller holds _sensor_lock."""
+        proc = self._sensor_procs.pop(sensor, None)
+        if proc is None:
+            return
+        self.get_logger().info(f'launch_sensor {sensor}: deteniendo SSH (pid {proc.pid})')
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        except Exception as exc:
+            self.get_logger().warn(f'launch_sensor {sensor}: error al detener: {exc}')
+        self._broadcast_sensor_status(sensor, 'idle')
+
+    def _monitor_sensor(self, sensor: str, proc: subprocess.Popen) -> None:
+        """Watch the SSH process; report 'error' if it dies on its own."""
+        proc.wait()
+        with self._sensor_lock:
+            # Si sigue registrado con este mismo proceso, murió solo (no fue stop manual).
+            if self._sensor_procs.get(sensor) is proc:
+                self._sensor_procs.pop(sensor, None)
+                rc = proc.returncode
+                self.get_logger().warn(f'launch_sensor {sensor}: SSH terminó inesperadamente (rc={rc})')
+                self._broadcast_sensor_status(sensor, 'error', f'el proceso terminó (rc={rc})')
+
+    def _stop_all_sensors(self) -> None:
+        with self._sensor_lock:
+            for sensor in list(self._sensor_procs.keys()):
+                self._stop_sensor_locked(sensor)
+
     def destroy_node(self):
+        self._stop_all_sensors()
         self._ws.stop()
         super().destroy_node()
 
