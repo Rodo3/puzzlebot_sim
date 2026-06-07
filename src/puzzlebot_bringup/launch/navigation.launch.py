@@ -64,7 +64,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -84,10 +84,15 @@ def generate_launch_description():
     arg_cmd_vel_topic = DeclareLaunchArgument(
         'cmd_vel_topic', default_value='/model/puzzlebot/cmd_vel',
         description='Topic final de velocidad. Gazebo: /model/puzzlebot/cmd_vel  |  Real: /cmd_vel')
+    arg_avoidance = DeclareLaunchArgument(
+        'avoidance', default_value='true',
+        description='Lanzar bug_navigation + obstacle_avoidance. '
+                    'false → steering_controller publica directo a cmd_vel_topic')
 
     use_sim_time   = LaunchConfiguration('use_sim_time')
     use_pd         = LaunchConfiguration('use_pd')
     cmd_vel_topic  = LaunchConfiguration('cmd_vel_topic')
+    avoidance_en   = LaunchConfiguration('avoidance')
 
     # ── A* Path Planner ───────────────────────────────────────────────────
     # Suscribe: /map, /goal_pose, /initialpose (fallback pose)
@@ -155,9 +160,9 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ── Steering Controller (pure pursuit) — DEFAULT ──────────────────────
-    # Suscribe: /odom, /planned_path
-    # Publica:  /cmd_vel_steering  (antes /cmd_vel_in — ahora va al bug_navigation_node)
+    # ── Steering Controller (pure pursuit) ────────────────────────────────
+    # avoidance:=true  → /cmd_vel_steering → bug_navigation → obstacle_avoidance → cmd_vel
+    # avoidance:=false → directo a cmd_vel_topic (sin capas reactivas)
     steering_controller = Node(
         package='puzzlebot_controller',
         executable='steering_controller_node',
@@ -165,30 +170,36 @@ def generate_launch_description():
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
         remappings=[('/cmd_vel_in', '/cmd_vel_steering')],
         output='screen',
-        condition=UnlessCondition(use_pd),
+        condition=IfCondition(
+            PythonExpression(["'", use_pd, "' == 'false' and '", avoidance_en, "' == 'true'"])
+        ),
+    )
+
+    steering_controller_direct = Node(
+        package='puzzlebot_controller',
+        executable='steering_controller_node',
+        name='steering_controller_node',
+        parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
+        remappings=[('/cmd_vel_in', cmd_vel_topic)],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(["'", use_pd, "' == 'false' and '", avoidance_en, "' == 'false'"])
+        ),
     )
 
 
     # ── Bug Navigation (capa reactiva entre controller y obstacle_avoidance) ──
-    # Suscribe: /cmd_vel_steering, /scan_stamped, /odom, /goal_pose
-    # Publica:  /cmd_vel_in
-    # Lógica:   pasa comandos sin modificar en GO_TO_WAYPOINT.
-    #           Al detectar obstáculo frontal activa wall-following (Bug0/Bug2).
-    #           Cuando encuentra leave point seguro reanuda el pure-pursuit.
     bug_navigation = Node(
         package='puzzlebot_planning',
         executable='bug_navigation_node',
         name='bug_navigation_node',
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
-        # scan_restamper publica en /scan_stamped — conectar explícitamente
         remappings=[('/scan_stamped', '/scan_stamped')],
         output='screen',
+        condition=IfCondition(avoidance_en),
     )
 
     # ── Obstacle Avoidance (safety layer final entre bug_nav y cmd_vel) ───
-    # Suscribe: /scan_stamped, /cmd_vel_in, /odom
-    # Publica:  /cmd_vel
-    # Lógica:   parada de emergencia si LiDAR < stop_distance (último filtro)
     obstacle_avoidance = Node(
         package='puzzlebot_planning',
         executable='obstacle_avoidance_node',
@@ -196,16 +207,20 @@ def generate_launch_description():
         parameters=[controller_cfg, {'use_sim_time': use_sim_time}],
         remappings=[
             ('/cmd_vel', cmd_vel_topic),
+            ('/scan',    '/scan_stamped'),
         ],
         output='screen',
+        condition=IfCondition(avoidance_en),
     )
 
     return LaunchDescription([
         arg_sim_time,
         arg_use_pd,
         arg_cmd_vel_topic,
+        arg_avoidance,
         path_planner,
         steering_controller,
+        steering_controller_direct,
         bug_navigation,
         obstacle_avoidance,
     ])

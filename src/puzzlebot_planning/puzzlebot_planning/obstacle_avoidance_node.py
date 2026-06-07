@@ -123,7 +123,7 @@ class ObstacleAvoidanceNode(Node):
 
         # ── Subscriptions ────────────────────────────────────────────────────
         self.sub_scan_ = self.create_subscription(
-            LaserScan, '/scan_stamped', self.scan_cb, qos_profile_sensor_data)
+            LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
         self.sub_cmd_  = self.create_subscription(
             Twist, '/cmd_vel_in', self.cmd_cb, 10)
         self.sub_odom_ = self.create_subscription(
@@ -209,6 +209,7 @@ class ObstacleAvoidanceNode(Node):
                 if reverse_elapsed < self.reverse_dur:
                     out.linear.x  = -self.reverse_speed
                     out.angular.z = 0.20   # giro suave durante retroceso
+                    self._pub_status('REVERSING')
                     self.pub_cmd_.publish(out)
                     self.get_logger().info(
                         f'REVERSING {reverse_elapsed:.1f}s/{self.reverse_dur}s',
@@ -229,6 +230,7 @@ class ObstacleAvoidanceNode(Node):
                 if self.emerg_rotate:
                     out.angular.z = max(-self.emerg_max_ang,
                                         min(msg.angular.z, self.emerg_max_ang))
+                self._pub_status('EMERGENCY')
                 self.pub_cmd_.publish(out)
                 self.get_logger().warn(
                     f'EMERGENCY STOP — obstacle at {self.min_front:.2f} m '
@@ -244,6 +246,7 @@ class ObstacleAvoidanceNode(Node):
         # ── Prioridad 2: timeout de localización (fuente /odom muerta) ────────
         odom_age = self._odom_age_sec()
         if odom_age is not None and odom_age > self.cov_timeout:
+            self._pub_status('LOC_TIMEOUT')
             self.pub_cmd_.publish(out)
             self.get_logger().warn(
                 f'LOCALIZATION TIMEOUT — sin /odom por {odom_age:.1f}s → parado',
@@ -252,6 +255,7 @@ class ObstacleAvoidanceNode(Node):
 
         # ── Prioridad 3: localización perdida (P_xy demasiado grande) ─────────
         if self.trace_p_xy > self.cov_stop:
+            self._pub_status('LOC_LOST')
             self.pub_cmd_.publish(out)
             self.get_logger().warn(
                 f'LOCALIZATION LOST — trace(P_xy)={self.trace_p_xy:.3f} m² '
@@ -286,12 +290,19 @@ class ObstacleAvoidanceNode(Node):
         if scale < 1.0:
             out.linear.x  = msg.linear.x  * scale
             out.angular.z = msg.angular.z  * scale
+            self._pub_status('SLOW')
         else:
             out = msg   # campo libre — pasa el comando sin modificar
+            self._pub_status('NORMAL')
 
         self.pub_cmd_.publish(out)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _pub_status(self, status: str):
+        msg = String()
+        msg.data = status
+        self.pub_status_.publish(msg)
 
     def _odom_age_sec(self):
         if self._last_odom_t is None:
