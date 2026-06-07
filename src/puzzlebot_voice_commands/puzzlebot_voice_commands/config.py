@@ -2,6 +2,7 @@
 Central configuration dataclasses for the voice command recognition pipeline.
 """
 from dataclasses import dataclass, field
+from typing import Dict
 from typing import List
 
 
@@ -19,6 +20,11 @@ class MFCCConfig:
     include_delta_delta: bool = False
     cmvn: bool = False              # per-utterance cepstral mean-variance normalization
     include_min_max: bool = False   # append per-coefficient min and max to summary vector
+    # librosa-backend flags (HMM only)
+    use_librosa: bool = False
+    include_zcr: bool = False       # zero-crossing rate (1 feature/frame)
+    include_rms: bool = False       # root-mean-square energy (1 feature/frame)
+    include_contrast: bool = False  # spectral contrast (7 features/frame)
 
 
 @dataclass
@@ -49,10 +55,12 @@ class GNBConfig:
 @dataclass
 class HMMConfig:
     """Parameters for HiddenMarkovModel classifier."""
-    n_states: int = 5               # hidden states per HMM (left-to-right topology)
-    n_symbols: int = 32             # codebook size for observation quantization
+    n_states: int = 5               # default hidden states per HMM
+    n_symbols: int = 256            # codebook size for observation quantization
     n_iter: int = 20                # Baum-Welch EM iterations
     kmeans_max_iter: int = 300      # K-Means iterations for codebook training
     kmeans_tol: float = 1e-4
     random_state: int = 42
     log_zero: float = -1e30         # substitute for log(0)
+    # Per-command n_states override — if set, each label gets its own state count
+    n_states_per_class: Dict[str, int] = field(default_factory=dict)

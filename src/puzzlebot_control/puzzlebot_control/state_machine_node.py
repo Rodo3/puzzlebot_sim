@@ -1,20 +1,37 @@
 """
-High-level mission state machine for the Puzzlebot.
+state_machine_node.py — Máquina de estados de misión del Puzzlebot.
 
-States
-------
-IDLE        → waiting for a goal
-MAPPING     → executing SLAM while exploring the environment
-NAVIGATING  → following a planned path to a goal
-DOCKING     → approaching a detected target (ArUco / YOLO)
-DONE        → mission completed
-ERROR       → unrecoverable fault; publishes zero velocity and waits for reset
+FUNCIÓN:
+  Coordina a alto nivel en qué modo está operando el robot. No controla
+  directamente los motores; administra transiciones y reenvía goals.
 
-Transitions are driven by:
-  - /goal_pose         (PoseStamped)   → IDLE → NAVIGATING
-  - /planned_path      (Path)          → triggers path following
-  - /detections        (Detection2DArray) → may trigger DOCKING
-  - /mission_state_in  (String)        → external override (e.g. 'reset', 'map')
+ESTADOS:
+  IDLE       — robot detenido, esperando una misión
+  MAPPING    — ejecutando SLAM exploratorio
+  NAVIGATING — siguiendo una ruta planificada hacia un goal
+  DOCKING    — acercándose a un objetivo detectado (ArUco / YOLO)
+  DONE       — misión completada
+  ERROR      — falla irrecuperable; publica velocidad cero y espera reset
+
+TRANSICIONES AUTOMÁTICAS:
+  /goal_pose recibido      → IDLE/DONE → NAVIGATING
+  Detección con conf. alta → NAVIGATING → DOCKING
+  /mission_state_in = 'RESET' → cualquier estado → IDLE
+
+TOPICS SUSCRITOS:
+  /goal_pose         (geometry_msgs/PoseStamped)   — meta de navegación
+  /planned_path      (nav_msgs/Path)               — ruta calculada
+  /detections        (vision_msgs/Detection2DArray) — objetos detectados por YOLO/ArUco
+  /mission_state_in  (std_msgs/String)             — override externo ('RESET','MAP','DONE','ERROR')
+
+TOPICS PUBLICADOS:
+  /mission_state     (std_msgs/String)             — estado actual a 1 Hz
+  /goal_pose_out     (geometry_msgs/PoseStamped)   — reenvío del goal al planner
+  /cmd_vel           (geometry_msgs/Twist)         — solo en ERROR (velocidad cero)
+
+PARÁMETROS:
+  docking_confidence_thresh [0.60] — umbral de confianza para activar DOCKING
+  goal_reached_tolerance    [0.10 m]
 """
 
 import enum

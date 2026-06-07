@@ -23,11 +23,4 @@ setup(
     maintainer_email='mario.mtz@manchester-robotics.com',
     description='Launch files for the Puzzlebot simulation',
     license='Apache-2.0',
-    entry_points={
-        'console_scripts': [
-            'mock_encoders = puzzlebot_bringup.mock_encoders:main',
-            'smoke_test    = puzzlebot_bringup.smoke_test:main',
-            'teleop        = puzzlebot_bringup.teleop_node:main',
-        ],
-    },
 )

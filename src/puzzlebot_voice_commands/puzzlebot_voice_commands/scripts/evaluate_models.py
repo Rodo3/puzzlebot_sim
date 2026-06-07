@@ -314,11 +314,17 @@ def _evaluate_hmm(
     margins:      List[float]     = []
     times_ms:     List[float]     = []
 
+    if mfcc_cfg.use_librosa:
+        from ..librosa_features import extract_librosa_frames
+        _extract = lambda sig, cfg: extract_librosa_frames(sig, cfg)
+    else:
+        _extract = extract_mfcc_frames
+
     for sample in split.test:
         try:
             signal, _ = load_wav(sample.path, target_sr=mfcc_cfg.sample_rate)
             signal = normalize(signal)
-            frames = extract_mfcc_frames(signal, mfcc_cfg)
+            frames = _extract(signal, mfcc_cfg)
 
             t0 = time.perf_counter()
             ranked = model.predict_ranked(frames)
@@ -543,6 +549,10 @@ def _load_hmm_mfcc_config(artifact_dir: Path) -> MFCCConfig:
                 include_delta=m.get('include_delta', False),
                 include_delta_delta=m.get('include_delta_delta', False),
                 cmvn=m.get('cmvn', False),
+                use_librosa=m.get('use_librosa', False),
+                include_zcr=m.get('include_zcr', False),
+                include_rms=m.get('include_rms', False),
+                include_contrast=m.get('include_contrast', False),
             )
     return _load_mfcc_config(artifact_dir)
 

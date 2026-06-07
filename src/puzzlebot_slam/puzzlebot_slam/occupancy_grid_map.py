@@ -1,4 +1,30 @@
-"""Log-odds occupancy grid map and lidar ray integration."""
+"""
+occupancy_grid_map.py — Mapa de ocupación con log-odds e integración de rayos LiDAR.
+
+FUNCIÓN:
+  Mantiene un grid 2D donde cada celda almacena la probabilidad acumulada
+  de que esté ocupada, representada en escala log-odds para facilitar la
+  actualización bayesiana con sumas en lugar de multiplicaciones.
+
+  Representación log-odds:
+    l = log(p / (1-p))   → libre: l < 0,  ocupado: l > 0,  desconocido: l = 0
+
+  Por cada scan integrado:
+    1. Calcula la pose del LiDAR en el frame map (incluye offset lidar_x/y/yaw).
+    2. Para cada rayo válido traza una línea Bresenham desde el sensor al hit.
+    3. Celdas a lo largo del rayo → actualización libre (+l_free, negativo).
+    4. Celda final (hit) → actualización ocupada (+l_occ, positivo).
+    5. Los valores se recortan en ±l_clamp para evitar celdas "permanentemente" ocupadas.
+
+  Al publicar (/map):
+    l > 0.5  → 100 (ocupado)
+    l < -0.5 → 0   (libre)
+    resto    → -1  (desconocido)
+
+USADO POR:
+  slam_node.py — llama a integrate_scan() por cada keyframe y to_msg() cada segundo.
+  path_planner_node.py — lee /map para construir el grid binario de A*.
+"""
 
 import math
 
@@ -52,6 +78,10 @@ class OccupancyGridMap:
         self.lidar_y = lidar_y
         self.lidar_yaw = lidar_yaw
         self.grid = np.zeros((self.height_pixels, self.width_pixels), dtype=np.float32)
+
+    def reset(self) -> None:
+        """Reset the log-odds grid to uniform unknown state (all zeros)."""
+        self.grid[:] = 0.0
 
     def world_to_cell(self, wx: float, wy: float):
         col = int(math.floor((wx - self.origin_x) / self.resolution))
@@ -130,6 +160,57 @@ class OccupancyGridMap:
                 -self.l_clamp,
                 self.grid[end_row, end_col] + self.l_free,
             )
+
+    def load_from_png(
+        self,
+        path: str,
+        occupied_thresh: float = 0.196,
+        free_thresh: float = 0.65,
+    ) -> None:
+        """Load a saved PNG into the log-odds grid using the same thresholds
+        as map_server_node, so the scan_matcher sees identical walls to RViz.
+
+        Pixel convention (nav2_map_server compatible):
+          pixel/255 >= free_thresh     → free     → log-odds = -l_clamp
+          pixel/255 <= occupied_thresh → occupied → log-odds = +l_clamp
+          between both thresholds      → unknown  → log-odds =  0.0
+
+        Using thresholds instead of a linear ramp eliminates the diffuse halo
+        of semi-occupied cells around walls that the old linear formula produced,
+        and removes artefact blobs in gray areas from contributing to match scores.
+        """
+        from PIL import Image
+        img = Image.open(path).convert('L')
+        arr = np.array(img, dtype=np.float32)
+        arr = np.flipud(arr)          # PNG top-left → grid bottom-left
+
+        # Resize if the saved map has different pixel dimensions than the grid.
+        if arr.shape != (self.height_pixels, self.width_pixels):
+            img_resized = Image.fromarray(arr.astype(np.uint8)).resize(
+                (self.width_pixels, self.height_pixels), Image.NEAREST)
+            arr = np.array(img_resized, dtype=np.float32)
+
+        norm = arr / 255.0
+        grid = np.zeros_like(arr)                        # unknown → 0.0
+        grid[norm >= free_thresh]     = -self.l_clamp    # free
+        grid[norm <= occupied_thresh] =  self.l_clamp    # occupied
+        self.grid = grid.astype(np.float32)
+
+    def to_png(self, path: str) -> None:
+        """Save the current occupancy grid as a grayscale PNG.
+
+        Convention (matches ROS map_server):
+          127 = unknown  (log-odds ≈ 0)
+          255 = free     (log-odds < -0.5)
+            0 = occupied (log-odds >  0.5)
+        """
+        from PIL import Image
+        img_data = np.full(self.grid.shape, 127, dtype=np.uint8)
+        img_data[self.grid < -0.5] = 255
+        img_data[self.grid > 0.5] = 0
+        # OccupancyGrid origin is bottom-left; PNG row 0 is top → flip vertically
+        img = Image.fromarray(np.flipud(img_data), mode='L')
+        img.save(path)
 
     def to_msg(self, stamp, frame_id: str) -> OccupancyGrid:
         msg = OccupancyGrid()

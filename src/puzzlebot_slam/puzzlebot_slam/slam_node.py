@@ -31,11 +31,16 @@ Esto evita el feedback loop: scan_matcher → sobreescribe corrección de ArUco
 """
 
 import math
+import os
+from datetime import datetime
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from std_msgs.msg import Bool, String
 from rclpy.qos import (
     DurabilityPolicy,
     QoSProfile,
@@ -113,14 +118,41 @@ class SlamNode(Node):
             min_translation=float(self.get_parameter('keyframe_min_translation').value),
             min_rotation=float(self.get_parameter('keyframe_min_rotation').value),
         )
+        self._localization_only = bool(self.get_parameter('localization_only').value)
+        loc_map_path = self.get_parameter('localization_map_path').value
+
+        # Cargar mapa PNG inicial si se especificó.
+        # localization_only=True  → solo localiza, no modifica el mapa.
+        # localization_only=False → carga PNG como punto de partida y sigue mapeando
+        #   (integra nuevos scans encima: detecta obstáculos dinámicos en tiempo real).
+        if loc_map_path:
+            if not os.path.isfile(loc_map_path):
+                self.get_logger().error(
+                    f'localization_map_path no existe: {loc_map_path}')
+            else:
+                self._grid_map.load_from_png(loc_map_path)
+                mode_str = 'LOCALIZATION-ONLY' if self._localization_only else 'MAPPING+INIT'
+                self.get_logger().info(
+                    f'[{mode_str}] Mapa inicial cargado desde: {loc_map_path}')
+        elif self._localization_only:
+            self.get_logger().error(
+                'localization_only=true pero localization_map_path está vacío')
+
+        scan_matching_param = (
+            True if self._localization_only
+            else bool(self.get_parameter('scan_matching_enabled').value)
+        )
         self._scan_matcher = LocalScanMatcher(
-            enabled=bool(self.get_parameter('scan_matching_enabled').value),
+            enabled=scan_matching_param,
+            skip_warmup=self._localization_only,
         )
 
         # Parámetros para scan match → EKF feedback
-        self._scan_match_min_score  = float(self.get_parameter('scan_match_min_score').value)
-        self._scan_match_cov_xy     = float(self.get_parameter('scan_match_cov_xy').value)
-        self._scan_match_cov_theta  = float(self.get_parameter('scan_match_cov_theta').value)
+        self._scan_match_min_score      = float(self.get_parameter('scan_match_min_score').value)
+        self._scan_match_cov_xy         = float(self.get_parameter('scan_match_cov_xy').value)
+        self._scan_match_cov_theta      = float(self.get_parameter('scan_match_cov_theta').value)
+        self._scan_match_cov_by_score   = bool(self.get_parameter('scan_match_cov_scale_by_score').value)
+        self._scan_match_max_cov_scale  = float(self.get_parameter('scan_match_max_cov_scale').value)
 
         map_qos = QoSProfile(
             depth=1,
@@ -132,11 +164,19 @@ class SlamNode(Node):
             PoseWithCovarianceStamped, '/scan_match/pose', 10)
         self._tf = tf2_ros.TransformBroadcaster(self)
 
+        # El callback de scan corre en su propio thread para que el scan_matcher
+        # (NumPy puro — libera el GIL) no bloquee los timers de TF ni los demás
+        # callbacks mientras busca la corrección de pose.
+        self._scan_cb_group = MutuallyExclusiveCallbackGroup()
+
         self.create_subscription(Odometry, '/odom', self._odom_cb, 10)
         self.create_subscription(
-            LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
+            LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data,
+            callback_group=self._scan_cb_group)
         self.create_subscription(
             TransformStamped, '/map_to_odom', self._map_to_odom_cb, 10)
+        self.create_subscription(Bool,   '/slam/reset',    self._slam_reset_cb, 10)
+        self.create_subscription(String, '/slam/load_map', self._load_map_cb,   10)
 
         self.create_timer(0.1, self._broadcast_tf)
         self.create_timer(1.0, self._publish_map)
@@ -145,15 +185,13 @@ class SlamNode(Node):
         self._map_odom_y   = 0.0
         self._map_odom_yaw = 0.0
 
+        mode = 'LOCALIZATION-ONLY' if self._localization_only else 'MAPPING'
         self.get_logger().info(
-            'slam_node ready — '
+            f'slam_node ready [{mode}] — '
             f'{self._grid_map.width_pixels}×{self._grid_map.height_pixels} px '
             f'@ {self._grid_map.resolution:.3f} m/px, '
             f'size=({self._grid_map.width_meters:.2f}, {self._grid_map.height_meters:.2f}) m, '
             f'origin=({self._grid_map.origin_x:.2f}, {self._grid_map.origin_y:.2f}), '
-            f'lidar=({self._grid_map.lidar_x:.3f}, {self._grid_map.lidar_y:.3f}, '
-            f'{math.degrees(self._grid_map.lidar_yaw):.1f}deg), '
-            f'l_occ={self._grid_map.l_occ:+.2f} l_free={self._grid_map.l_free:+.2f}, '
             f'scan_matching={self._scan_matcher.enabled}, '
             f'publish_map_odom_tf={self._publish_map_odom_tf}, '
             f'scan_match_updates_map_odom={self._scan_match_updates_map_odom}')
@@ -194,6 +232,20 @@ class SlamNode(Node):
         self.declare_parameter('scan_match_min_score',  15.0)
         self.declare_parameter('scan_match_cov_xy',     0.04)
         self.declare_parameter('scan_match_cov_theta',  0.03)
+        # Fase 3: covarianza adaptativa según score del matcher.
+        # Cuando el score es bajo (match marginal), se infla la covarianza
+        # para que el EKF le dé menos peso. Cuando el score es alto (match
+        # limpio), la covarianza baja al valor base → mayor influencia.
+        # cov_scale = (scan_match_min_score / score).clamp(1/max_scale, 1.0)
+        # Con max_scale=4.0: score=min_score → cov×4, score=4×min → cov×1.
+        self.declare_parameter('scan_match_cov_scale_by_score', True)
+        self.declare_parameter('scan_match_max_cov_scale',      4.0)
+
+        # localization_only: carga el mapa PNG y hace scan matching contra él
+        # para alimentar al EKF con /scan_match/pose, pero NO integra nuevos
+        # scans (no modifica el mapa). Usar con use_map:=true.
+        self.declare_parameter('localization_only',     False)
+        self.declare_parameter('localization_map_path', '')
 
         # scan_match_updates_map_odom:
         #   True  → el scan matcher puede actualizar la corrección map→odom interna.
@@ -205,6 +257,28 @@ class SlamNode(Node):
         # En real_robot.launch.py con aruco:=true, publish_map_odom_tf se pone en false
         # automáticamente, y se recomienda pasar scan_match_updates_map_odom:=false también.
         self.declare_parameter('scan_match_updates_map_odom', True)
+
+    def _load_map_cb(self, msg: String) -> None:
+        path = msg.data.strip()
+        if not path or not os.path.isfile(path):
+            self.get_logger().warn(f'load_map: file not found: {path}')
+            return
+        try:
+            self._grid_map.load_from_png(path)
+            self._localization_only = True
+            self.get_logger().info(f'Static map loaded: {path}')
+            self._publish_map()
+        except Exception as exc:
+            self.get_logger().error(f'load_map error: {exc}')
+
+    def _slam_reset_cb(self, msg: Bool) -> None:
+        if not msg.data:
+            return
+        self._grid_map.reset()
+        self._map_odom_x   = 0.0
+        self._map_odom_y   = 0.0
+        self._map_odom_yaw = 0.0
+        self.get_logger().info('SLAM map reset via /slam/reset')
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._odom_buffer.add(msg)
@@ -272,6 +346,10 @@ class SlamNode(Node):
         if scan_matched:
             self._publish_scan_match(map_pose, scan.header.stamp)
 
+        # localization_only: no modificar el mapa, solo usar scan matching para EKF.
+        if self._localization_only:
+            return
+
         if not self._keyframes.should_integrate(map_pose):
             return
 
@@ -281,6 +359,23 @@ class SlamNode(Node):
                 throttle_duration_sec=2.0)
 
     def _publish_scan_match(self, map_pose: Pose2D, stamp) -> None:
+        # Fase 3: escalar covarianza inversamente al score del matcher.
+        # score alto (match limpio)  → cov_scale cercano a 1 → más influencia en EKF
+        # score bajo (match marginal) → cov_scale cercano a max_scale → menos influencia
+        if self._scan_match_cov_by_score:
+            score = max(self._scan_matcher.last_score, self._scan_match_min_score)
+            # cov_scale = min_score / score → 1.0 cuando score == min_score
+            #                               → < 1.0 cuando score > min_score (mejor match)
+            # Invertimos para que mejor score = cov más pequeña:
+            raw_scale = self._scan_match_min_score / score
+            # Clamp: [1/max_scale, 1.0] — nunca reduce más allá de lo configurado
+            cov_scale = max(1.0 / self._scan_match_max_cov_scale, min(raw_scale, 1.0))
+        else:
+            cov_scale = 1.0
+
+        cov_xy    = self._scan_match_cov_xy    * cov_scale
+        cov_theta = self._scan_match_cov_theta * cov_scale
+
         msg = PoseWithCovarianceStamped()
         msg.header.stamp    = stamp
         msg.header.frame_id = self._map_frame
@@ -289,11 +384,15 @@ class SlamNode(Node):
         msg.pose.pose.orientation.z = math.sin(map_pose.yaw / 2.0)
         msg.pose.pose.orientation.w = math.cos(map_pose.yaw / 2.0)
         cov = [0.0] * 36
-        cov[0]  = self._scan_match_cov_xy
-        cov[7]  = self._scan_match_cov_xy
-        cov[35] = self._scan_match_cov_theta
+        cov[0]  = cov_xy
+        cov[7]  = cov_xy
+        cov[35] = cov_theta
         msg.pose.covariance = cov
         self._pub_scan_match.publish(msg)
+        self.get_logger().debug(
+            f'scan_match pub: score={self._scan_matcher.last_score:.1f} '
+            f'cov_scale={cov_scale:.3f} '
+            f'cov_xy={cov_xy:.4f} cov_th={cov_theta:.4f}')
 
     def _odom_to_map_pose(self, odom_pose: Pose2D) -> Pose2D:
         """Aplica la corrección map→odom almacenada para obtener la pose en frame map.
@@ -354,14 +453,31 @@ class SlamNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = SlamNode()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        _save_map_on_exit(node)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+
+def _save_map_on_exit(node: SlamNode) -> None:
+    if node._localization_only:
+        return   # mapa pre-cargado, no sobreescribir
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'slam_map_{timestamp}.png'
+    save_dir = os.environ.get('SLAM_MAP_DIR', os.getcwd())
+    path = os.path.join(save_dir, filename)
+    try:
+        node._grid_map.to_png(path)
+        node.get_logger().info(f'Map saved to: {path}')
+    except Exception as e:
+        node.get_logger().error(f'Failed to save map: {e}')
 
 
 if __name__ == '__main__':

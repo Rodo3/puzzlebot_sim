@@ -47,8 +47,8 @@ class ArucoMapOdom(Node):
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('publish_rate_hz', 20.0)
         self.declare_parameter('correction_alpha', 0.35)
-        self.declare_parameter('max_correction_step_m', 0.35)
-        self.declare_parameter('max_correction_step_yaw', 0.70)
+        self.declare_parameter('max_correction_step_m', 0.20) #.15
+        self.declare_parameter('max_correction_step_yaw', 0.70) 
         self.declare_parameter('max_odom_age', 0.30)
         self.declare_parameter('map_min_x', 0.0)
         self.declare_parameter('map_max_x', 3.76)
