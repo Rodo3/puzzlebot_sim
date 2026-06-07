@@ -34,7 +34,7 @@ from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
-_CLASS_NAMES = {0: "Pepsi", 1: "Amazon", 2: "Walmart"}
+_CLASS_NAMES = {0: "Popsi", 1: "Emezon", 2: "Wolmar"}
 _COLORS      = {0: (0, 0, 220), 1: (220, 140, 0), 2: (0, 180, 0)}
 _WINDOW      = "YOLO — Puzzlebot"
 
