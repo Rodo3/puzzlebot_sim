@@ -154,6 +154,10 @@ class QRReaderNode(Node):
         # válido. Poner fallback_random_client=False para volver a 'UNKNOWN'.
         self.declare_parameter('fallback_random_client', True)
         self.declare_parameter('valid_clients', ['Walmart', 'Pepsi', 'Amazon'])
+        # Escalas de detección multi-escala. ×1.0 cubre el caso de cerca; las
+        # mayores amplían la imagen para detectar QR lejanos (más CPU por frame
+        # solo cuando ×1 falla). Reducir a [1.0] para máximo rendimiento.
+        self.declare_parameter('detection_scales', [1.0, 1.5, 2.0])
 
         image_topic     = self.get_parameter('image_topic').value
         calib_file      = self.get_parameter('camera_info_file').value
@@ -177,6 +181,8 @@ class QRReaderNode(Node):
                             [0.0, 0.0,   1.0]], dtype=np.float64)
         self._D          = np.zeros((5, 1), dtype=np.float64)
         self._calibrated = False
+        self._undist_map1 = None   # mapas de remap precalculados (lazy, 1ª imagen)
+        self._undist_map2 = None
         self._load_calibration(calib_file)
 
         # ── Extrínseca base_link → camera_link ───────────────────────────────
@@ -204,6 +210,12 @@ class QRReaderNode(Node):
         self._last_client      = ''   # último texto QR decodificado con éxito
         self._client_is_real   = False  # True si _last_client vino de decodificar (no random)
         self._bridge           = CvBridge()
+        # CLAHE: realce de contraste local para mejorar la detección a distancia
+        # y con iluminación pobre.
+        self._clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        # Escalas para la detección multi-escala (×1 = caso normal de cerca;
+        # las mayores recuperan QR lejanos). Ajustable por parámetro.
+        self._det_scales = list(self.get_parameter('detection_scales').value)
         # QRCodeDetectorAruco (OpenCV ≥ 4.7) decodifica QR a distancia/ángulo
         # mucho mejor que el QRCodeDetector clásico. Si no está, caemos al clásico.
         if hasattr(cv2, 'QRCodeDetectorAruco'):
@@ -287,21 +299,94 @@ class QRReaderNode(Node):
 
     # ── Decodificación robusta ──────────────────────────────────────────────────
 
+    def _detect_multiscale(self, gray: np.ndarray):
+        """Detecta el QR probando varias escalas; devuelve esquinas (4×2) en
+        coordenadas del frame ORIGINAL, o None.
+
+        El QR lejano ocupa pocos píxeles y detect() lo pierde en resolución
+        nativa. Probamos primero ×1 (rápido, caso normal de cerca) y, si falla,
+        ampliamos la imagen (×1.5, ×2) para que el patrón sea más grande y el
+        detector lo encuentre; luego dividimos las esquinas por la escala para
+        devolverlas en píxeles del frame original (solvePnP sigue correcto).
+        """
+        for scale in self._det_scales:
+            if scale == 1.0:
+                img = gray
+            else:
+                img = cv2.resize(gray, None, fx=scale, fy=scale,
+                                 interpolation=cv2.INTER_CUBIC)
+            try:
+                found, pts = self._detector.detect(img)
+            except cv2.error:
+                found, pts = False, None
+            if found and pts is not None:
+                pts2d = pts.reshape(-1, 2).astype(np.float32)
+                if len(pts2d) >= self._min_pts:
+                    return pts2d / scale if scale != 1.0 else pts2d
+        return None
+
+    def _warp_frontal(self, gray: np.ndarray, points: np.ndarray,
+                      out_size: int = 240) -> np.ndarray | None:
+        """Rectifica (frontaliza) el QR usando sus 4 esquinas.
+
+        Un QR visto en ÁNGULO aparece como un cuadrilátero deformado; el decoder
+        de OpenCV falla cuando la perspectiva es fuerte. Con un warp de homografía
+        llevamos las 4 esquinas a un cuadrado de frente, eliminando la inclinación
+        antes de decodificar. Es el ataque principal al problema de ángulo y es
+        barato (una homografía sobre un parche pequeño).
+        """
+        if points is None or len(points) < 4:
+            return None
+        src = points[:4].astype(np.float32)
+        # Las esquinas vienen en orden TL, TR, BR, BL (convención OpenCV).
+        dst = np.array([[0, 0],
+                        [out_size - 1, 0],
+                        [out_size - 1, out_size - 1],
+                        [0, out_size - 1]], dtype=np.float32)
+        try:
+            H = cv2.getPerspectiveTransform(src, dst)
+            warped = cv2.warpPerspective(gray, H, (out_size, out_size))
+        except cv2.error:
+            return None
+        # Pequeño borde quiet-zone: el QR necesita margen blanco alrededor.
+        return cv2.copyMakeBorder(warped, 12, 12, 12, 12,
+                                  cv2.BORDER_CONSTANT, value=255)
+
     def _decode_robust(self, gray: np.ndarray, points: np.ndarray) -> str:
         """Intenta decodificar el texto del QR con varias estrategias.
 
-        El decode() directo falla seguido a distancia/ángulo. Aquí probamos, en
-        orden: (1) decode con las esquinas; (2) recortar un ROI alrededor del QR
-        y reintentar; (3) escalar el ROI ×2 y ×3; (4) binarización Otsu del ROI.
+        El decode() directo falla seguido a distancia/ángulo. Estrategia
+        equilibrada (solo se ejecuta lo extra si el decode directo falla, así no
+        carga CPU en el caso normal):
+          1. decode directo con las esquinas.
+          2. WARP frontal (homografía con las 4 esquinas) → ataca el ángulo.
+             Se prueba el warp tal cual y binarizado Otsu.
+          3. ROI escalado ×2 y ×3 (para QR pequeños/lejanos).
+          4. Otsu del ROI escalado.
         Devuelve el texto si alguna funciona, o '' si todas fallan.
         """
-        # 1. decode directo con las esquinas detectadas
+        # 1. decode directo con las esquinas detectadas.
+        # decode() exige las esquinas con shape (1, 4, 2) float32 (no (4, 2)).
         try:
-            data, _ = self._detector.decode(gray, points)
+            pts_decode = points.reshape(1, -1, 2).astype(np.float32)
+            data, _ = self._detector.decode(gray, pts_decode)
             if data:
                 return data.strip()
         except cv2.error:
             pass
+
+        # 2. WARP frontal — frontaliza el QR inclinado y reintenta
+        warped = self._warp_frontal(gray, points)
+        if warped is not None:
+            for img in (warped,
+                        cv2.threshold(warped, 0, 255,
+                                      cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]):
+                try:
+                    data, _, _ = self._detector.detectAndDecode(img)
+                    if data:
+                        return data.strip()
+                except cv2.error:
+                    pass
 
         # ROI alrededor del QR (con margen), recortado a los límites de la imagen
         h, w = gray.shape[:2]
@@ -314,10 +399,10 @@ class QRReaderNode(Node):
             return ''
         roi = gray[y0:y1, x0:x1]
 
-        # 2-3. ROI tal cual y escalado ×2, ×3 (detectAndDecode redetecta en el ROI)
-        for scale in (1.0, 2.0, 3.0):
-            img = roi if scale == 1.0 else cv2.resize(
-                roi, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        # 3. ROI escalado ×2, ×3 (detectAndDecode redetecta en el ROI)
+        for scale in (2.0, 3.0):
+            img = cv2.resize(roi, None, fx=scale, fy=scale,
+                             interpolation=cv2.INTER_CUBIC)
             try:
                 data, _, _ = self._detector.detectAndDecode(img)
                 if data:
@@ -354,38 +439,43 @@ class QRReaderNode(Node):
         except Exception:
             return
 
-        # Undistort si tenemos calibración (mejora la precisión de solvePnP)
+        # Undistort si tenemos calibración (mejora la precisión de solvePnP).
+        # Usamos mapas precalculados (initUndistortRectifyMap) en vez de
+        # cv2.undistort por frame: el undistort recalcula los mapas cada vez y es
+        # caro en la Jetson; con remap los mapas se generan una sola vez.
         if self._calibrated:
-            frame = cv2.undistort(frame, self._K, self._D)
+            if self._undist_map1 is None:
+                h, w = frame.shape[:2]
+                self._undist_map1, self._undist_map2 = cv2.initUndistortRectifyMap(
+                    self._K, self._D, None, self._K, (w, h), cv2.CV_16SC2)
+            frame = cv2.remap(frame, self._undist_map1, self._undist_map2,
+                              cv2.INTER_LINEAR)
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # ── Detección + decodificación en dos pasos ────────────────────────────
-        # detectAndDecode() exige detectar Y decodificar el texto en una sola
-        # llamada; el QRCodeDetector de OpenCV suele DETECTAR el QR (encuentra
-        # las esquinas) pero FALLAR al decodificar el texto a distancia/ángulo,
-        # devolviendo data='' → se perdía el frame entero. Separamos los pasos:
+        # Realce de contraste adaptativo (CLAHE): el QR lejano suele tener poco
+        # contraste / iluminación pobre y detect() lo pierde. CLAHE iguala el
+        # contraste local y mejora bastante la detección a distancia. Barato.
+        gray = self._clahe.apply(gray)
+
+        # ── Detección multi-escala ──────────────────────────────────────────────
+        # detect() corre sobre el frame completo, donde un QR LEJANO ocupa pocos
+        # píxeles y no se detecta. _detect_multiscale reintenta sobre el frame
+        # ampliado y devuelve las esquinas YA en coordenadas del frame original
+        # (para que solvePnP siga siendo correcto). Separamos detect/decode:
         #   1. detect()  → esquinas (robusto)
         #   2. decode()  → texto (puede fallar; si falla seguimos con la pose)
-        try:
-            found, points = self._detector.detect(gray)
-        except cv2.error:
-            found, points = False, None
-
-        if not found or points is None:
+        points_2d = self._detect_multiscale(gray)
+        if points_2d is None or len(points_2d) < self._min_pts:
             self.get_logger().info(
                 'QR no detectado en este frame', throttle_duration_sec=2.0)
-            return
-
-        points_2d = points.reshape(-1, 2).astype(np.float32)
-        if len(points_2d) < self._min_pts:
             return
 
         # Intenta decodificar el texto; si no se puede, NO descarta la detección
         # (la pose es válida). Fallback: último cliente conocido, o uno aleatorio
         # de valid_clients (fijo durante toda la sesión) para que la misión siga
         # con un cliente válido en vez de 'UNKNOWN'.
-        client = self._decode_robust(gray, points)
+        client = self._decode_robust(gray, points_2d)
         if client:
             # Texto REAL leído del QR.
             if client != self._last_client:

@@ -613,6 +613,13 @@ def generate_launch_description():
         executable='qr_reader_node',
         name='qr_reader_node',
         output='screen',
+        parameters=[{
+            'image_topic':      '/camera/image/compressed',
+            'camera_info_file': calib_yaml,
+            'extrinsics_file':  extrinsics_yaml,
+            'qr_real_size_m':   0.09,   # QR real del pallet: 9×9 cm
+            'publish_debug':    True,
+        }],
         condition=IfCondition(dash_en),
     )
 
