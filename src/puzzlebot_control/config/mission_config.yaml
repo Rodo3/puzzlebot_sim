@@ -93,7 +93,7 @@ mission_manager_node:
     sweep_step_m: 0.50       # separación entre puntos del barrido lineal
     sweep_wp_tol: 0.20       # tolerancia de llegada a cada punto del barrido (m)
     sweep_speed:  0.10       # velocidad lineal durante el barrido (m/s)
-    navigation_arrival_tolerance: 0.25  # handoff A*→barrido; debe ser >= goal_tolerance
+    navigation_arrival_tolerance: 0.40  # handoff A*→barrido; debe ser >= goal_tolerance
     min_pickup_sweep_passes_before_detection: 1  # mock QR se acepta tras 1 pasada completa
     min_dock_sweep_passes_before_detection:   1  # mock YOLO se acepta tras 1 pasada completa
 
@@ -104,7 +104,7 @@ mission_manager_node:
 
     # ── Toma del pallet (maniobra hardcodeada — sin sensor físico todavía) ──────
     # PICK_MANEUVER ordena subir horquillas durante pick_lift_time; VERIFY_PICK
-    # espera /fork/status == True (limit switch futuro; hoy lo da el driver/mock).
+    # espera /fork/status == True (limit switch futuro; hoy lo da el drivesca en el log:r/mock).
     pick_lift_time: 2.0
 
     # ── Detección de logo del tráiler (YOLO → /detections) ──────────────────────
@@ -123,5 +123,8 @@ mission_manager_node:
     logo_search_timeout: 60.0   # s barriendo docks sin logo → FAIL_TRAILER_NOT_FOUND
 
     # ── Recuperación (giro en sitio buscando referencia) ────────────────────────
-    recovery_rotate_speed: 0.3
+    # Velocidad angular baja para dar tiempo a la cámara a detectar el QR/ArUco
+    # mientras el robot gira en sitio (a 0.3 rad/s el QR cruzaba el cuadro
+    # demasiado rápido para el detector).
+    recovery_rotate_speed: 0.15
     recovery_rotate_time:  8.0

@@ -29,7 +29,7 @@
 # Actualizar map_path (y map_resolution/origin si cambia el mapa) cuando haya un mapa nuevo.
 map_server_node:
   ros__parameters:
-    map_path:        '/home/jesus/Documents/puzzlebot_sim/slam_map_20260529_235356.png'
+    map_path:        '/home/valeriaacerda/puzzlebot_sim/slam_map_20260529_235356.png'
     map_resolution:   0.05
     map_origin_x:   -0.25
     map_origin_y:   -0.25
@@ -41,13 +41,13 @@ map_server_node:
 # Solo se leen los campos relevantes; el resto viene de slam_params.yaml.
 slam_node:
   ros__parameters:
-    localization_map_path: '/home/jesus/Documents/puzzlebot_sim/slam_map_20260529_235356.png'
+    localization_map_path: '/home/valeriaacerda/puzzlebot_sim/slam_map_20260529_235356.png'
     scan_match_min_score:  15.0
 
 mcl:
   ros__parameters:
     # ── Ruta al mapa PNG (rellenar tras la sesión 1) ──────────────────────────
-    map_path:        '/home/jesus/Documents/puzzlebot_sim/slam_map_20260529_235356.png'
+    map_path:        '/home/valeriaacerda/puzzlebot_sim/slam_map_20260529_235356.png'
 
     # ── Geometría del mapa (debe coincidir con slam_params.yaml) ─────────────
     map_resolution:   0.05     # metros por píxel

@@ -153,6 +153,7 @@ class State(enum.Enum):
     PICK_MANEUVER          = 'PICK_MANEUVER'
     VERIFY_PICK            = 'VERIFY_PICK'
     NAVIGATE_TO_EXPEDITION = 'NAVIGATE_TO_EXPEDITION'
+    NAVIGATE_TO_TRAILER    = 'NAVIGATE_TO_TRAILER'   # directo al waypoint del cliente (sin YOLO)
     SEARCH_TRAILER_LOGO    = 'SEARCH_TRAILER_LOGO'
     MATCH_TRAILER_CLIENT   = 'MATCH_TRAILER_CLIENT'
     ALIGN_TO_DOCK          = 'ALIGN_TO_DOCK'
@@ -215,6 +216,14 @@ class MissionManagerNode(Node):
         self.declare_parameter('approach_distance',      0.40)
         self.declare_parameter('align_angle_thresh',     0.08)
         self.declare_parameter('align_dist_thresh',      0.05)
+        # Alineación + pick como MOCK: cuando True, al detectar el QR el robot
+        # NO ejecuta la alineación fina real (control sobre /qr/pose, que aún no
+        # converge de forma fiable). En su lugar se detiene, espera mock_align_time
+        # segundos simulando que se alinea, fija el cliente del QR y pasa directo a
+        # PICK_MANEUVER. Permite validar el resto de la misión (pick → expedición →
+        # docks) sin la alineación real. Poner False cuando la alineación esté lista.
+        self.declare_parameter('mock_alignment',         True)
+        self.declare_parameter('mock_align_time',        2.0)
         # Tolerancia de centrado del logo en la imagen para ALIGN_TO_DOCK:
         # |bbox_cx - 0.5| por debajo de esto se considera centrado (fracción del ancho)
         self.declare_parameter('dock_center_thresh',     0.05)
@@ -231,8 +240,14 @@ class MissionManagerNode(Node):
         self.declare_parameter('base_frame',             'base_footprint')
         self.declare_parameter('qr_search_timeout',      60.0)
         self.declare_parameter('logo_search_timeout',    60.0)
-        self.declare_parameter('recovery_rotate_speed',  0.3)
+        self.declare_parameter('recovery_rotate_speed',  0.15)
         self.declare_parameter('recovery_rotate_time',   8.0)
+        # Barrido de cámara en RECOVER_QR_VIEW: el robot se orienta hacia la pared
+        # norte (donde está el ArUco 1 / la zona de conveyors) y gira MUY despacio
+        # en su propio eje un rango angular, buscando el QR, sin desplazarse.
+        self.declare_parameter('recover_north_yaw',      1.5708)   # +Y (Norte)
+        self.declare_parameter('recover_scan_speed',     0.08)     # rad/s, giro lento
+        self.declare_parameter('recover_scan_range',     0.7)      # rad a cada lado del norte
 
         # Bounding boxes de barrido
         self.declare_parameter('conveyor_x_min',    0.60)
@@ -262,6 +277,26 @@ class MissionManagerNode(Node):
         self.declare_parameter('conveyor_aruco_ref_id',    1)
         self.declare_parameter('conveyor_aruco_wall_clearance', 0.45)
         self.declare_parameter('conveyor_aruco_y_offset',  0.05)
+        # Fracción del tramo ArUco start→end que recorre el barrido
+        # (0.45 = casi la mitad: explora más franja de conveyors buscando el QR).
+        self.declare_parameter('conveyor_sweep_fraction',  0.45)
+
+        # ── Tráiler por waypoint directo (en vez de barrido + YOLO) ─────────────
+        # Como ya conocemos el punto medio de cada cliente, vamos DIRECTO al
+        # waypoint del cliente del QR. YOLO/detections queda solo para debug en
+        # terminal; NO se usa para llegar al camión. Poner False para volver al
+        # barrido de docks con YOLO (SEARCH_TRAILER_LOGO → MATCH → ALIGN_TO_DOCK).
+        self.declare_parameter('direct_trailer_waypoint', True)
+        # Tabla cliente → posición X del camión (metros, origen esquina inf. izq.).
+        # Los camiones están sobre la PARED SUR (Y≈0), distribuidos en X.
+        # Listas paralelas porque ROS 2 no admite dict como parámetro.
+        # Valores en cm dados por el usuario /100: Walmart 2.11, Amazon 2.6225, Pepsi 3.1355.
+        self.declare_parameter('trailer_clients', ['Walmart', 'Amazon', 'Pepsi'])
+        self.declare_parameter('trailer_xs',      [2.11, 2.6225, 3.1355])
+        # Y del waypoint frente al camión (margen a la pared sur donde está el camión).
+        self.declare_parameter('trailer_dock_y',  0.40)
+        # yaw con que el robot mira al camión (-1.57 = mira -Y/Sur, hacia la pared sur).
+        self.declare_parameter('trailer_dock_yaw', -1.5708)
 
         # Punto de expedición
         self.declare_parameter('expedition_x',   0.30)
@@ -280,6 +315,8 @@ class MissionManagerNode(Node):
         self._loc_timeout           = p('localization_timeout').value
         self._map_frame             = p('map_frame').value
         self._base_frame            = p('base_frame').value
+        self._mock_alignment        = p('mock_alignment').value
+        self._mock_align_time       = p('mock_align_time').value
 
         # Mapa de alias (en minúsculas) QR → clase YOLO, descartando entradas vacías.
         _af = [s.strip().lower() for s in p('client_alias_from').value if s.strip()]
@@ -302,6 +339,9 @@ class MissionManagerNode(Node):
         self._logo_search_timeout   = p('logo_search_timeout').value
         self._recovery_rot_speed    = p('recovery_rotate_speed').value
         self._recovery_rot_time     = p('recovery_rotate_time').value
+        self._recover_north_yaw     = p('recover_north_yaw').value
+        self._recover_scan_speed    = p('recover_scan_speed').value
+        self._recover_scan_range    = p('recover_scan_range').value
         self._sweep_step            = p('sweep_step_m').value
         self._sweep_wp_tol          = p('sweep_wp_tol').value
         self._sweep_speed           = p('sweep_speed').value
@@ -314,6 +354,19 @@ class MissionManagerNode(Node):
         self._conv_aruco_ref_id     = int(p('conveyor_aruco_ref_id').value)
         self._conv_wall_clearance   = p('conveyor_aruco_wall_clearance').value
         self._conv_y_offset         = p('conveyor_aruco_y_offset').value
+        self._conv_sweep_fraction   = p('conveyor_sweep_fraction').value
+
+        # Tráiler directo por waypoint (cliente → X del camión; camiones en pared sur Y≈0)
+        self._direct_trailer        = p('direct_trailer_waypoint').value
+        self._trailer_dock_y        = p('trailer_dock_y').value
+        self._trailer_dock_yaw      = p('trailer_dock_yaw').value
+        _tc = [str(s).strip().lower() for s in p('trailer_clients').value]
+        _tx = [float(v) for v in p('trailer_xs').value]
+        self._trailer_x_by_client   = dict(zip(_tc, _tx))
+        if self._direct_trailer:
+            self.get_logger().info(
+                f'Tráiler DIRECTO por waypoint (sin YOLO). '
+                f'y={self._trailer_dock_y} m, clientes→X: {self._trailer_x_by_client}')
 
         # Bounding boxes
         self._bbox = {
@@ -354,6 +407,9 @@ class MissionManagerNode(Node):
         self._dock_sweep_idx:    int  = 0
         self._pickup_sweep_passes: int = 0
         self._dock_sweep_passes:   int = 0
+        # Último goal publicado en /goal_pose, para no re-publicar el mismo
+        # waypoint de barrido en cada tick (ver _send_sweep_goal).
+        self._last_goal_key: tuple | None = None
 
         # Dock donde se encontró el logo (para ALIGN_TO_DOCK)
         self._matched_dock_pose: dict | None = None
@@ -572,27 +628,32 @@ class MissionManagerNode(Node):
         north_sign = 1.0 if ry >= base_y else -1.0
         y = base_y + north_sign * y_offset
 
-        dx = ex - sx
-        yaw = math.atan2(ey - sy, dx)
-        distance = max(abs(dx), 1e-6)
-        n_segments = max(1, int(math.ceil(distance / self._sweep_step)))
+        # Barrido = UN solo tramo: entrada (cerca del ArUco start, p.ej. 2) →
+        # destino (cerca del ArUco end, p.ej. 0). El robot cruza la franja de
+        # conveyors en línea recta vía A* y la cámara detecta el QR en el camino;
+        # al detectarlo, EXPLORE_PICKUP_AREA interrumpe y pasa a APPROACH_PALLET.
+        #
+        # Antes se generaban ~7 puntos intermedios separados por sweep_step. Eso
+        # hacía que el robot se atascara entre las tolerancias de waypoint al
+        # llegar a la zona (nav_arrival_tol vs sweep_wp_tol). Con solo dos puntos
+        # el tránsito es continuo y robusto.
+        # El destino no llega hasta el extremo opuesto (ex): recorre solo una
+        # fracción del tramo (conveyor_sweep_fraction, default 0.5 = la mitad).
+        # Así el barrido es más corto y el robot no cruza toda la pista.
+        frac = max(0.05, min(1.0, float(self._conv_sweep_fraction)))
+        dest_x = sx + (ex - sx) * frac
 
-        wps = []
-        for i in range(n_segments + 1):
-            t = i / n_segments
-            x = sx + t * dx
-            wps.append({
-                'name': f'conveyor_aruco_{i}',
-                'x': round(x, 3),
-                'y': round(y, 3),
-                'yaw': yaw,
-            })
+        yaw = math.atan2(ey - sy, ex - sx)
+        wps = [
+            {'name': 'conveyor_entry', 'x': round(sx, 3),     'y': round(y, 3), 'yaw': yaw},
+            {'name': 'conveyor_far',   'x': round(dest_x, 3), 'y': round(y, 3), 'yaw': yaw},
+        ]
 
         self.get_logger().info(
             f'Barrido "conveyor" por ArUcos '
             f'{self._conv_aruco_start_id}→{self._conv_aruco_end_id}: '
-            f'{len(wps)} puntos, y={y:.2f}, yaw={yaw:.2f}, '
-            f'clearance={clearance:.2f} m')
+            f'entrada=({sx:.2f},{y:.2f}) → destino=({dest_x:.2f},{y:.2f}) '
+            f'(fracción={frac:.2f}), yaw={yaw:.2f}, clearance={clearance:.2f} m')
         return wps
 
     # ── Callbacks de tópicos ──────────────────────────────────────────────────
@@ -755,8 +816,25 @@ class MissionManagerNode(Node):
         msg = _pose_stamped(wp['x'], wp['y'], wp.get('yaw', 0.0))
         msg.header.stamp = self.get_clock().now().to_msg()
         self._pub_goal.publish(msg)
+        # Recuerda el último goal enviado para que los barridos no re-publiquen
+        # el mismo waypoint cada tick (evita resetear el path_planner a 10 Hz).
+        self._last_goal_key = (round(wp['x'], 3), round(wp['y'], 3))
         self.get_logger().info(
             f'Goal → {wp.get("name","?")}  x={wp["x"]:.2f} y={wp["y"]:.2f}')
+
+    def _send_sweep_goal(self, wp: dict):
+        """Publica el waypoint del barrido como /goal_pose UNA sola vez.
+
+        El barrido (pickup y docks) ya NO conduce directo por /cmd_vel_in:
+        delega en el stack de navegación (path_planner → steering →
+        obstacle_avoidance), que es el único dueño de /cmd_vel_in. Así se evita
+        la contención en /cmd_vel_in que dejaba al robot inmóvil (el steering
+        publicaba cero por 'goal reached' mientras el FSM mandaba velocidad de
+        barrido). Solo re-publica si el waypoint cambió respecto al último goal.
+        """
+        key = (round(wp['x'], 3), round(wp['y'], 3))
+        if key != getattr(self, '_last_goal_key', None):
+            self._send_goal(wp)
 
     def _send_fork(self, up: bool):
         msg = Bool()
@@ -817,6 +895,8 @@ class MissionManagerNode(Node):
             self._step_verify_pick()
         elif s == State.NAVIGATE_TO_EXPEDITION:
             self._step_navigate_to_expedition()
+        elif s == State.NAVIGATE_TO_TRAILER:
+            self._step_navigate_to_trailer()
         elif s == State.SEARCH_TRAILER_LOGO:
             self._step_search_trailer_logo()
         elif s == State.MATCH_TRAILER_CLIENT:
@@ -927,9 +1007,15 @@ class MissionManagerNode(Node):
         if dist < arrival_tol:
             self._stop()
             self._sweep_wp_idx = 0
+            # Reenvía el goal del primer wp del barrido: el robot pudo "llegar"
+            # a la zona dentro de nav_arrival_tol (0.25) pero seguir fuera de
+            # sweep_wp_tol (0.20) respecto a sweep_wps[0]; sin reenviar el goal,
+            # EXPLORE_PICKUP_AREA se quedaría inmóvil esperando un goal que nadie
+            # vuelve a publicar (_last_goal_key ya apunta a ese wp).
+            self._last_goal_key = None
             self._search_start = time.monotonic()
             self.get_logger().info(
-                f'Zona alcanzada — iniciando barrido lineal '
+                f'Zona alcanzada — iniciando barrido '
                 f'({len(self._sweep_wps)} puntos, dist={dist:.3f} m)')
             self._transition(State.EXPLORE_PICKUP_AREA)
         else:
@@ -939,18 +1025,14 @@ class MissionManagerNode(Node):
                 throttle_duration_sec=2.0)
 
     def _step_explore_pickup_area(self):
-        # QR detectado → para inmediatamente y pasa a acercarse
+        # QR detectado DURANTE el barrido → para de inmediato y pasa a acercarse.
+        # No esperamos a completar el barrido: el objetivo del barrido es
+        # justamente encontrar el QR, así que en cuanto aparece lo tomamos.
         if self._qr_detected and self._qr_pose is not None:
-            if self._pickup_sweep_passes >= self._min_pickup_passes:
-                self._stop()
-                self.get_logger().info(
-                    f'QR aceptado tras {self._pickup_sweep_passes} pasada(s) de barrido')
-                self._transition(State.APPROACH_PALLET)
-                return
-            self.get_logger().info(
-                f'QR visible, pero esperando barrido completo '
-                f'({self._pickup_sweep_passes}/{self._min_pickup_passes})',
-                throttle_duration_sec=2.0)
+            self._stop()
+            self.get_logger().info('QR detectado durante el barrido → APPROACH_PALLET')
+            self._transition(State.APPROACH_PALLET)
+            return
 
         elapsed = time.monotonic() - self._search_start
         if elapsed > self._qr_search_timeout:
@@ -963,31 +1045,35 @@ class MissionManagerNode(Node):
         pose = self._robot_pose_map()
         if pose is None:
             return
-        rx, ry, current_yaw = pose
+        rx, ry, _ = pose
 
         wp = self._sweep_wps[self._sweep_wp_idx]
         dist_to_wp = math.hypot(wp['x'] - rx, wp['y'] - ry)
 
-        if dist_to_wp < self._sweep_wp_tol:
+        # Tolerancia de avance del barrido: usamos la MISMA que NAVIGATE_TO_ZONE
+        # (nav_arrival_tol, 0.25) y no la chica sweep_wp_tol (0.20). El steering
+        # declara "goal reached" a ~0.19 m y deja de moverse; si el FSM exigiera
+        # < 0.20 m podría quedarse en una zona muerta (steering quieto, FSM sin
+        # avanzar) y nunca pasar al siguiente waypoint. Tomamos el mayor de las dos.
+        arrival_tol = max(self._sweep_wp_tol, self._nav_arrival_tol)
+        if dist_to_wp < arrival_tol:
             next_idx = self._sweep_wp_idx + 1
             if next_idx >= len(self._sweep_wps):
+                # Barrido completo sin haber detectado el QR (la detección se
+                # maneja al inicio del estado). Reintenta hasta min_pickup_passes
+                # barridos completos; si tras todos no aparece → recovery.
                 self._stop()
                 self._pickup_sweep_passes += 1
                 self.get_logger().info(
-                    f'Barrido pickup completo '
-                    f'({self._pickup_sweep_passes}/{self._min_pickup_passes})')
-
-                if self._qr_detected and self._qr_pose is not None:
-                    self.get_logger().info(
-                        f'QR aceptado tras {self._pickup_sweep_passes} pasada(s)')
-                    self._transition(State.APPROACH_PALLET)
-                    return
+                    f'Barrido pickup completo sin QR '
+                    f'({self._pickup_sweep_passes}/{self._min_pickup_passes} intentos)')
 
                 if self._pickup_sweep_passes < self._min_pickup_passes:
                     self._sweep_wp_idx = 0
+                    self._last_goal_key = None   # fuerza reenvío del goal del wp 0
                     return
 
-                self.get_logger().warn('Barrido completo sin QR — RECOVER_QR_VIEW')
+                self.get_logger().warn('Barrido agotado sin QR — RECOVER_QR_VIEW')
                 self._transition(State.RECOVER_QR_VIEW)
                 return
             self._sweep_wp_idx = next_idx
@@ -995,31 +1081,33 @@ class MissionManagerNode(Node):
                 f'Barrido [{self._sweep_wp_idx}/{len(self._sweep_wps)-1}] '
                 f'→ ({self._sweep_wps[self._sweep_wp_idx]["x"]:.2f}, '
                 f'{self._sweep_wps[self._sweep_wp_idx]["y"]:.2f})')
-            return  # siguiente tick calcula velocidad con wp ya actualizado
+            # El siguiente tick publica el goal del wp ya actualizado.
+            return
 
-        # ── Barrido lineal directo ────────────────────────────────────────────
-        # El robot diferencial siempre avanza en su propio eje X (forward).
-        # Para movernos en el mapa usamos pure pursuit simple: calculamos el
-        # ángulo hacia el waypoint en frame mapa, lo comparamos con el yaw
-        # actual, y combinamos avance + corrección angular.
-        #
-        # Esto funciona para ambos casos (barrido en X y en Y del mapa) sin
-        # necesidad de distinguir ejes: el robot siempre mira hacia el siguiente
-        # punto y avanza recto.
-
-        desired_yaw = math.atan2(wp['y'] - ry, wp['x'] - rx)
-        angle_err   = math.atan2(
-            math.sin(desired_yaw - current_yaw),
-            math.cos(desired_yaw - current_yaw))
-
-        # Velocidad lineal: se frena si el ángulo es grande (gira antes de avanzar)
-        angle_factor = max(0.0, 1.0 - abs(angle_err) / (math.pi / 4))
-        v   = self._sweep_speed * angle_factor
-        ang = max(-0.5, min(0.5, angle_err * 2.0))
-
-        self._send_vel(v, ang)
+        # ── Barrido vía /goal_pose ─────────────────────────────────────────────
+        # En vez de conducir directo por /cmd_vel_in (que competía con el steering
+        # controller y dejaba al robot inmóvil), delegamos cada waypoint al stack
+        # de navegación. _send_sweep_goal publica el goal solo una vez por wp.
+        self._send_sweep_goal(wp)
 
     def _step_approach_pallet(self):
+        # ── MOCK de alineación + acercamiento ──────────────────────────────────
+        # La alineación fina real (sobre /qr/pose) aún no converge de forma
+        # fiable, así que en modo mock simplemente nos detenemos, fijamos el
+        # cliente leído del QR y pasamos directo a la maniobra de pick tras
+        # mock_align_time segundos. Esto permite validar el resto de la misión.
+        if self._mock_alignment:
+            self._stop()
+            if not self._active_client:
+                self._active_client = self._qr_client or 'UNKNOWN'
+                self.get_logger().info(
+                    f'[MOCK align] Pallet detectado — cliente "{self._active_client}". '
+                    f'Simulando alineación {self._mock_align_time:.1f}s…')
+            if self._time_in_state() >= self._mock_align_time:
+                self.get_logger().info('[MOCK align] Alineado → PICK_MANEUVER')
+                self._transition(State.PICK_MANEUVER)
+            return
+
         # /qr/pose está en frame base_footprint (relativo al robot).
         # La distancia al QR es directamente la norma del vector de posición.
         if self._qr_pose is None:
@@ -1108,7 +1196,9 @@ class MissionManagerNode(Node):
         # Cuando exista limit switch físico, este estado funciona sin cambios.
         if self._fork_up:
             self.get_logger().info('VERIFY_PICK: horquillas arriba ✓')
-            self._active_client = self._qr_client or 'UNKNOWN'
+            # Conserva el cliente ya fijado (p.ej. en el mock de APPROACH_PALLET);
+            # solo cae a qr_client/UNKNOWN si aún no se había establecido.
+            self._active_client = self._active_client or self._qr_client or 'UNKNOWN'
             self.get_logger().info(f'Cliente del pallet: "{self._active_client}"')
             self._send_goal(self._expedition_wp)
             self._transition(State.NAVIGATE_TO_EXPEDITION)
@@ -1128,35 +1218,79 @@ class MissionManagerNode(Node):
         dist = math.hypot(rx - wp['x'], ry - wp['y'])
         arrival_tol = max(0.30, self._nav_arrival_tol)
         if dist < arrival_tol:
-            self._search_start     = time.monotonic()
-            self._dock_sweep_idx   = 0
-            self._dock_sweep_passes = 0
-            self._logo_confirm_buf = 0
-            self.get_logger().info(
-                f'Expedición alcanzada — iniciando barrido de docks '
-                f'(dist={dist:.3f} m)')
-            self._transition(State.SEARCH_TRAILER_LOGO)
+            self.get_logger().info(f'Expedición alcanzada (dist={dist:.3f} m)')
+            if self._direct_trailer:
+                # Va DIRECTO al waypoint del cliente (sin barrido ni YOLO).
+                self._send_goal(self._trailer_waypoint_for_client())
+                self._transition(State.NAVIGATE_TO_TRAILER)
+            else:
+                self._search_start     = time.monotonic()
+                self._dock_sweep_idx   = 0
+                self._dock_sweep_passes = 0
+                self._logo_confirm_buf = 0
+                self.get_logger().info('Iniciando barrido de docks (YOLO)')
+                self._transition(State.SEARCH_TRAILER_LOGO)
         else:
             self.get_logger().info(
                 f'NAVIGATE_TO_EXPEDITION esperando llegada: dist={dist:.3f} m '
                 f'tol={arrival_tol:.3f} m',
                 throttle_duration_sec=2.0)
 
+    def _trailer_waypoint_for_client(self) -> dict:
+        """Waypoint del camión según el cliente activo (del QR).
+
+        Los camiones están sobre la pared sur (y≈0), distribuidos en X; el
+        waypoint se coloca a trailer_dock_y de la pared, con la X del cliente.
+        Si el cliente no está en la tabla, usa la X media disponible como respaldo.
+        """
+        key = (self._active_client or '').strip().lower()
+        x = self._trailer_x_by_client.get(key)
+        if x is None:
+            xs = list(self._trailer_x_by_client.values()) or [2.6]
+            x = sum(xs) / len(xs)
+            self.get_logger().warn(
+                f'Cliente "{self._active_client}" sin waypoint definido — '
+                f'usando X media {x:.2f} m')
+        wp = {'name': f'trailer_{key or "?"}',
+              'x': x, 'y': self._trailer_dock_y, 'yaw': self._trailer_dock_yaw}
+        self.get_logger().info(
+            f'Waypoint del camión "{self._active_client}": '
+            f'({wp["x"]:.2f}, {wp["y"]:.2f})')
+        return wp
+
+    def _step_navigate_to_trailer(self):
+        # Navega DIRECTO al waypoint del camión del cliente (sin YOLO).
+        # Al llegar, entra al tráiler (ENTER_TRAILER → DROP_PALLET → EXIT_TRAILER).
+        pose = self._robot_pose_map()
+        if pose is None:
+            return
+        rx, ry, _ = pose
+        wp = self._trailer_waypoint_for_client()
+        dist = math.hypot(rx - wp['x'], ry - wp['y'])
+        arrival_tol = max(0.30, self._nav_arrival_tol)
+        if dist < arrival_tol:
+            self._stop()
+            self._maneuver_start = time.monotonic()
+            self.get_logger().info(
+                f'Camión "{self._active_client}" alcanzado (dist={dist:.3f} m) '
+                f'→ ENTER_TRAILER')
+            self._transition(State.ENTER_TRAILER)
+        else:
+            self.get_logger().info(
+                f'NAVIGATE_TO_TRAILER esperando llegada: dist={dist:.3f} m '
+                f'tol={arrival_tol:.3f} m',
+                throttle_duration_sec=2.0)
+
     def _step_search_trailer_logo(self):
-        # La detección tiene MÁXIMA prioridad — se evalúa antes que cualquier
-        # lógica de movimiento para no perder un logo en el tick de llegada a wp.
+        # Logo detectado DURANTE el barrido → pasa a confirmar de inmediato.
+        # La detección tiene MÁXIMA prioridad y se evalúa antes que el
+        # movimiento, para no perder un logo en el tick de llegada a un wp.
         best_score, _, _ = self._best_logo_detection()
         if best_score >= self._logo_conf_thresh:
-            if self._dock_sweep_passes >= self._min_dock_passes:
-                self._stop()
-                self.get_logger().info(
-                    f'Logo aceptado tras {self._dock_sweep_passes} pasada(s) de dock')
-                self._transition(State.MATCH_TRAILER_CLIENT)
-                return
-            self.get_logger().info(
-                f'Logo visible, pero esperando barrido dock completo '
-                f'({self._dock_sweep_passes}/{self._min_dock_passes})',
-                throttle_duration_sec=2.0)
+            self._stop()
+            self.get_logger().info('Logo detectado durante el barrido → MATCH_TRAILER_CLIENT')
+            self._transition(State.MATCH_TRAILER_CLIENT)
+            return
 
         elapsed = time.monotonic() - self._search_start
         if elapsed > self._logo_search_timeout:
@@ -1169,31 +1303,32 @@ class MissionManagerNode(Node):
         pose = self._robot_pose_map()
         if pose is None:
             return
-        rx, ry, current_yaw = pose
+        rx, ry, _ = pose
 
         wp = self._dock_sweep_wps[self._dock_sweep_idx]
         dist_to_wp = math.hypot(wp['x'] - rx, wp['y'] - ry)
 
-        if dist_to_wp < self._sweep_wp_tol:
+        # Misma tolerancia que el barrido de pickup: evita la zona muerta entre
+        # el "goal reached" del steering (~0.19 m) y el sweep_wp_tol chico.
+        arrival_tol = max(self._sweep_wp_tol, self._nav_arrival_tol)
+        if dist_to_wp < arrival_tol:
             next_idx = self._dock_sweep_idx + 1
             if next_idx >= len(self._dock_sweep_wps):
+                # Barrido completo sin logo (la detección se maneja al inicio del
+                # estado). Reintenta hasta min_dock_passes barridos; si tras todos
+                # no aparece → recovery.
                 self._stop()
                 self._dock_sweep_passes += 1
                 self.get_logger().info(
-                    f'Barrido dock completo '
-                    f'({self._dock_sweep_passes}/{self._min_dock_passes})')
-
-                if best_score >= self._logo_conf_thresh:
-                    self.get_logger().info(
-                        f'Logo aceptado tras {self._dock_sweep_passes} pasada(s)')
-                    self._transition(State.MATCH_TRAILER_CLIENT)
-                    return
+                    f'Barrido dock completo sin logo '
+                    f'({self._dock_sweep_passes}/{self._min_dock_passes} intentos)')
 
                 if self._dock_sweep_passes < self._min_dock_passes:
                     self._dock_sweep_idx = 0
+                    self._last_goal_key = None   # fuerza reenvío del goal del wp 0
                     return
 
-                self.get_logger().warn('Barrido dock completo sin logo — RECOVER_LOGO_VIEW')
+                self.get_logger().warn('Barrido dock agotado sin logo — RECOVER_LOGO_VIEW')
                 self._transition(State.RECOVER_LOGO_VIEW)
                 return
             self._dock_sweep_idx = next_idx
@@ -1201,17 +1336,13 @@ class MissionManagerNode(Node):
                 f'Barrido dock [{self._dock_sweep_idx}/{len(self._dock_sweep_wps)-1}] '
                 f'→ ({self._dock_sweep_wps[self._dock_sweep_idx]["x"]:.2f}, '
                 f'{self._dock_sweep_wps[self._dock_sweep_idx]["y"]:.2f})')
-            return  # siguiente tick calcula velocidad con wp actualizado
+            # El siguiente tick publica el goal del wp ya actualizado.
+            return
 
-        # Pure-pursuit hacia el waypoint actual
-        desired_yaw = math.atan2(wp['y'] - ry, wp['x'] - rx)
-        angle_err   = math.atan2(
-            math.sin(desired_yaw - current_yaw),
-            math.cos(desired_yaw - current_yaw))
-        angle_factor = max(0.0, 1.0 - abs(angle_err) / (math.pi / 4))
-        v   = self._sweep_speed * angle_factor
-        ang = max(-0.5, min(0.5, angle_err * 2.0))
-        self._send_vel(v, ang)
+        # ── Barrido de docks vía /goal_pose ────────────────────────────────────
+        # Igual que el barrido de pickup: delegamos en el stack de navegación
+        # para no competir con el steering controller en /cmd_vel_in.
+        self._send_sweep_goal(wp)
 
     def _step_match_trailer_client(self):
         # Acumula logo_confirm_count detecciones DISTINTAS (no el mismo frame repetido).
@@ -1356,20 +1487,62 @@ class MissionManagerNode(Node):
     # ── Recovery states ───────────────────────────────────────────────────────
 
     def _step_recover_qr_view(self):
-        # Gira en sitio buscando el QR. Si lo encuentra → APPROACH_PALLET.
-        # Si agota el tiempo → reinicia el barrido lineal desde el inicio.
-        self._send_vel(0.0, self._recovery_rot_speed * 0.8)
+        # Barrido de CÁMARA al terminar el waypoint sin QR: el robot NO se
+        # desplaza, solo gira muy despacio sobre su propio eje mirando hacia la
+        # pared norte (ArUco 1 / zona de conveyors) para buscar el QR.
+        #
+        #   1. Si ya ve el QR → APPROACH_PALLET.
+        #   2. Si aún no mira al norte → gira hasta orientarse a recover_north_yaw.
+        #   3. Una vez orientado, hace un barrido angular lento ±recover_scan_range
+        #      alrededor del norte buscando el QR.
+        #   4. Si tras recovery_rotate_time no aparece → vuelve a la zona inicial
+        #      y reinicia el barrido lineal desde el principio.
         if self._qr_detected and self._qr_pose is not None:
             self._stop()
+            self.get_logger().info('QR detectado en barrido de cámara → APPROACH_PALLET')
             self._transition(State.APPROACH_PALLET)
             return
+
+        # Timeout global del recovery → volver a la zona inicial y reintentar.
         if self._time_in_state() > self._recovery_rot_time:
             self._stop()
             self._sweep_wp_idx = 0
+            self._last_goal_key = None   # fuerza reenvío del goal del wp 0
             self._search_start = time.monotonic()
-            # El barrido es lineal; no mandamos goal al A*.
-            # EXPLORE_PICKUP_AREA calculará velocidad directa hacia sweep_wps[0].
+            self.get_logger().warn(
+                'Barrido de cámara sin QR — volviendo a la zona inicial')
             self._transition(State.EXPLORE_PICKUP_AREA)
+            return
+
+        pose = self._robot_pose_map()
+        if pose is None:
+            return
+        _, _, current_yaw = pose
+
+        # Error angular respecto al norte (donde está el ArUco 1 / conveyors).
+        err_to_north = math.atan2(
+            math.sin(self._recover_north_yaw - current_yaw),
+            math.cos(self._recover_north_yaw - current_yaw))
+
+        # Fase 1: orientarse al norte si todavía está lejos.
+        if abs(err_to_north) > self._recover_scan_range:
+            ang = max(-self._recover_scan_speed * 2.0,
+                      min(self._recover_scan_speed * 2.0, err_to_north))
+            self._send_vel(0.0, ang)
+            return
+
+        # Fase 2: barrido angular lento de cámara dentro del rango alrededor del
+        # norte. Oscila despacio (triángulo en el tiempo) buscando el QR.
+        period = max(0.1, 4.0 * self._recover_scan_range / self._recover_scan_speed)
+        phase  = (self._time_in_state() % period) / period   # 0..1
+        # dirección: primera mitad gira +, segunda mitad gira − (oscila)
+        direction = 1.0 if phase < 0.5 else -1.0
+        # No salirse del rango: si ya pasó el borde, invierte hacia el norte.
+        if err_to_north > self._recover_scan_range * 0.95:
+            direction = -1.0
+        elif err_to_north < -self._recover_scan_range * 0.95:
+            direction = 1.0
+        self._send_vel(0.0, direction * self._recover_scan_speed)
 
     def _step_recover_logo_view(self):
         # Gira en sitio buscando el logo. Si lo detecta → SEARCH_TRAILER_LOGO
@@ -1383,6 +1556,7 @@ class MissionManagerNode(Node):
         if self._time_in_state() > self._recovery_rot_time:
             self._stop()
             self._dock_sweep_idx = 0
+            self._last_goal_key  = None   # fuerza reenvío del goal del wp 0
             self._search_start   = time.monotonic()
             self._transition(State.SEARCH_TRAILER_LOGO)
 

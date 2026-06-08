@@ -56,6 +56,7 @@ PARÁMETROS:
 
 import math
 import os
+import random
 import time
 
 import cv2
@@ -142,9 +143,17 @@ class QRReaderNode(Node):
         self.declare_parameter('extrinsics_file',   '')
         self.declare_parameter('qr_real_size_m',    0.15)
         self.declare_parameter('publish_debug',     False)
-        self.declare_parameter('max_processing_hz', 10.0)
+        self.declare_parameter('max_processing_hz', 20.0)
         self.declare_parameter('lost_timeout_sec',  0.5)
         self.declare_parameter('min_points',        4)
+        # Distancia máxima (m) a la que se acepta una detección de QR.
+        self.declare_parameter('max_detection_distance', 8.0)
+        # Cuando el QR se detecta pero NO se decodifica el texto, en vez de
+        # publicar 'UNKNOWN' (que rompe el match con YOLO), se asigna un cliente
+        # aleatorio de esta lista — así la misión puede seguir con un cliente
+        # válido. Poner fallback_random_client=False para volver a 'UNKNOWN'.
+        self.declare_parameter('fallback_random_client', True)
+        self.declare_parameter('valid_clients', ['Walmart', 'Pepsi', 'Amazon'])
 
         image_topic     = self.get_parameter('image_topic').value
         calib_file      = self.get_parameter('camera_info_file').value
@@ -154,6 +163,9 @@ class QRReaderNode(Node):
         max_hz          = self.get_parameter('max_processing_hz').value
         self._lost_to   = self.get_parameter('lost_timeout_sec').value
         self._min_pts   = self.get_parameter('min_points').value
+        self._fallback_random = self.get_parameter('fallback_random_client').value
+        self._valid_clients   = list(self.get_parameter('valid_clients').value)
+        self._max_det_dist    = self.get_parameter('max_detection_distance').value
 
         self._min_period = 1.0 / max(max_hz, 0.1)
         self._last_proc  = 0.0
@@ -189,8 +201,17 @@ class QRReaderNode(Node):
 
         # ── Estado ────────────────────────────────────────────────────────────
         self._last_detection_t = 0.0
+        self._last_client      = ''   # último texto QR decodificado con éxito
+        self._client_is_real   = False  # True si _last_client vino de decodificar (no random)
         self._bridge           = CvBridge()
-        self._detector         = cv2.QRCodeDetector()
+        # QRCodeDetectorAruco (OpenCV ≥ 4.7) decodifica QR a distancia/ángulo
+        # mucho mejor que el QRCodeDetector clásico. Si no está, caemos al clásico.
+        if hasattr(cv2, 'QRCodeDetectorAruco'):
+            self._detector = cv2.QRCodeDetectorAruco()
+            self.get_logger().info('Detector QR: QRCodeDetectorAruco (mejor decodificación)')
+        else:
+            self._detector = cv2.QRCodeDetector()
+            self.get_logger().info('Detector QR: QRCodeDetector (clásico)')
 
         # ── Suscripciones y publicadores ──────────────────────────────────────
         self.create_subscription(
@@ -264,6 +285,58 @@ class QRReaderNode(Node):
         except Exception as ex:
             self.get_logger().warn(f'Error cargando extrínseca: {ex}')
 
+    # ── Decodificación robusta ──────────────────────────────────────────────────
+
+    def _decode_robust(self, gray: np.ndarray, points: np.ndarray) -> str:
+        """Intenta decodificar el texto del QR con varias estrategias.
+
+        El decode() directo falla seguido a distancia/ángulo. Aquí probamos, en
+        orden: (1) decode con las esquinas; (2) recortar un ROI alrededor del QR
+        y reintentar; (3) escalar el ROI ×2 y ×3; (4) binarización Otsu del ROI.
+        Devuelve el texto si alguna funciona, o '' si todas fallan.
+        """
+        # 1. decode directo con las esquinas detectadas
+        try:
+            data, _ = self._detector.decode(gray, points)
+            if data:
+                return data.strip()
+        except cv2.error:
+            pass
+
+        # ROI alrededor del QR (con margen), recortado a los límites de la imagen
+        h, w = gray.shape[:2]
+        xs = points[:, 0]
+        ys = points[:, 1]
+        m = 20  # margen en píxeles
+        x0 = max(0, int(xs.min()) - m); x1 = min(w, int(xs.max()) + m)
+        y0 = max(0, int(ys.min()) - m); y1 = min(h, int(ys.max()) + m)
+        if x1 - x0 < 10 or y1 - y0 < 10:
+            return ''
+        roi = gray[y0:y1, x0:x1]
+
+        # 2-3. ROI tal cual y escalado ×2, ×3 (detectAndDecode redetecta en el ROI)
+        for scale in (1.0, 2.0, 3.0):
+            img = roi if scale == 1.0 else cv2.resize(
+                roi, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            try:
+                data, _, _ = self._detector.detectAndDecode(img)
+                if data:
+                    return data.strip()
+            except cv2.error:
+                pass
+
+        # 4. Binarización Otsu del ROI escalado
+        try:
+            big = cv2.resize(roi, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+            _, binimg = cv2.threshold(big, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            data, _, _ = self._detector.detectAndDecode(binimg)
+            if data:
+                return data.strip()
+        except cv2.error:
+            pass
+
+        return ''
+
     # ── Callback de imagen ────────────────────────────────────────────────────
 
     def _image_cb(self, msg: CompressedImage):
@@ -287,17 +360,51 @@ class QRReaderNode(Node):
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Detección QR: devuelve texto, 4 esquinas en píxeles, binario
-        data, points, _ = self._detector.detectAndDecode(gray)
+        # ── Detección + decodificación en dos pasos ────────────────────────────
+        # detectAndDecode() exige detectar Y decodificar el texto en una sola
+        # llamada; el QRCodeDetector de OpenCV suele DETECTAR el QR (encuentra
+        # las esquinas) pero FALLAR al decodificar el texto a distancia/ángulo,
+        # devolviendo data='' → se perdía el frame entero. Separamos los pasos:
+        #   1. detect()  → esquinas (robusto)
+        #   2. decode()  → texto (puede fallar; si falla seguimos con la pose)
+        try:
+            found, points = self._detector.detect(gray)
+        except cv2.error:
+            found, points = False, None
 
-        if points is None or not data:
+        if not found or points is None:
+            self.get_logger().info(
+                'QR no detectado en este frame', throttle_duration_sec=2.0)
             return
 
         points_2d = points.reshape(-1, 2).astype(np.float32)
         if len(points_2d) < self._min_pts:
             return
 
-        client = data.strip()
+        # Intenta decodificar el texto; si no se puede, NO descarta la detección
+        # (la pose es válida). Fallback: último cliente conocido, o uno aleatorio
+        # de valid_clients (fijo durante toda la sesión) para que la misión siga
+        # con un cliente válido en vez de 'UNKNOWN'.
+        client = self._decode_robust(gray, points)
+        if client:
+            # Texto REAL leído del QR.
+            if client != self._last_client:
+                self.get_logger().info(f'✅ QR REAL decodificado: "{client}"')
+            self._last_client = client
+            self._client_is_real = True
+        else:
+            if not self._last_client and self._fallback_random and self._valid_clients:
+                # Asigna un cliente aleatorio UNA vez y lo fija (estable entre frames)
+                self._last_client = random.choice(self._valid_clients)
+                self._client_is_real = False
+                self.get_logger().warn(
+                    f'⚠️ QR detectado pero SIN decodificar texto — cliente '
+                    f'ALEATORIO "{self._last_client}" (NO es el real del QR)')
+            client = self._last_client or 'UNKNOWN'
+            tag = 'REAL' if getattr(self, '_client_is_real', False) else 'ALEATORIO'
+            self.get_logger().info(
+                f'QR detectado → cliente="{client}" ({tag})',
+                throttle_duration_sec=2.0)
 
         # ── solvePnP ──────────────────────────────────────────────────────────
         # Resuelve T_camera_optical_qr a partir de las 4 correspondencias:
@@ -315,11 +422,12 @@ class QRReaderNode(Node):
                                    throttle_duration_sec=1.0)
             return
 
-        # Sanity check: el QR no puede estar a menos de 5 cm ni a más de 5 m
+        # Sanity check: el QR no puede estar a menos de 5 cm ni a más de max_detection_distance
         dist_cam = float(np.linalg.norm(tvec))
-        if dist_cam < 0.05 or dist_cam > 5.0:
+        if dist_cam < 0.05 or dist_cam > self._max_det_dist:
             self.get_logger().warn(
-                f'solvePnP: dist={dist_cam:.3f} m fuera de rango — descartando',
+                f'solvePnP: dist={dist_cam:.3f} m fuera de rango '
+                f'[0.05, {self._max_det_dist:.1f}] — descartando',
                 throttle_duration_sec=1.0)
             return
 

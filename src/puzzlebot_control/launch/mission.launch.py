@@ -64,6 +64,8 @@ def generate_launch_description():
     default_waypoints = os.path.join(bringup_pkg, 'config', 'waypoints.yaml')
     default_aruco_map = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
     default_mission   = os.path.join(control_pkg, 'config', 'mission_config.yaml')
+    default_calib     = os.path.join(bringup_pkg, 'config', 'camera_calibration.yaml')
+    default_extr      = os.path.join(bringup_pkg, 'config', 'camera_extrinsics.yaml')
 
     arg_mission_number = DeclareLaunchArgument(
         'mission_number', default_value='1',
@@ -80,6 +82,21 @@ def generate_launch_description():
     arg_mock_qr = DeclareLaunchArgument(
         'mock_qr', default_value='false',
         description='Lanzar el mock de QR/alignment en vez de qr_reader_node real')
+    arg_qr_image_topic = DeclareLaunchArgument(
+        'qr_image_topic', default_value='/camera/image/compressed',
+        description='Tópico de imagen comprimida para el qr_reader_node')
+    arg_qr_calib = DeclareLaunchArgument(
+        'qr_camera_info_file', default_value=default_calib,
+        description='YAML de calibración (K, D) para solvePnP del QR')
+    arg_qr_extr = DeclareLaunchArgument(
+        'qr_extrinsics_file', default_value=default_extr,
+        description='YAML de extrínseca cámara→robot para la pose del QR')
+    arg_qr_debug = DeclareLaunchArgument(
+        'qr_publish_debug', default_value='true',
+        description='Publicar /qr/debug_image con overlay de detección')
+    arg_qr_hz = DeclareLaunchArgument(
+        'qr_max_hz', default_value='20.0',
+        description='Frecuencia máxima de procesamiento del qr_reader_node (Hz)')
     arg_mock_yolo = DeclareLaunchArgument(
         'mock_yolo', default_value='false',
         description='Lanzar el mock de logos (publica /detections del cliente del '
@@ -105,6 +122,11 @@ def generate_launch_description():
     mission_config = LaunchConfiguration('mission_config')
     mock_fork      = LaunchConfiguration('mock_fork')
     mock_qr        = LaunchConfiguration('mock_qr')
+    qr_image_topic = LaunchConfiguration('qr_image_topic')
+    qr_calib_file  = LaunchConfiguration('qr_camera_info_file')
+    qr_extr_file   = LaunchConfiguration('qr_extrinsics_file')
+    qr_pub_debug   = LaunchConfiguration('qr_publish_debug')
+    qr_max_hz      = LaunchConfiguration('qr_max_hz')
     mock_yolo      = LaunchConfiguration('mock_yolo')
     fork_lift_time = LaunchConfiguration('fork_lift_time')
     voice_thresh   = LaunchConfiguration('voice_threshold')
@@ -147,7 +169,14 @@ def generate_launch_description():
         executable='qr_reader_node',
         name='qr_reader_node',
         output='screen',
-        parameters=[{'use_sim_time': use_sim_time}],
+        parameters=[{
+            'use_sim_time':     use_sim_time,
+            'image_topic':      qr_image_topic,
+            'camera_info_file': qr_calib_file,
+            'extrinsics_file':  qr_extr_file,
+            'publish_debug':    qr_pub_debug,
+            'max_processing_hz': qr_max_hz,
+        }],
         condition=UnlessCondition(mock_qr),
     )
 
@@ -217,6 +246,11 @@ def generate_launch_description():
         arg_mission_cfg,
         arg_mock_fork,
         arg_mock_qr,
+        arg_qr_image_topic,
+        arg_qr_calib,
+        arg_qr_extr,
+        arg_qr_debug,
+        arg_qr_hz,
         arg_mock_yolo,
         arg_fork_lift_time,
         arg_voice_threshold,
