@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'puzzlebot_control'
@@ -10,6 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -19,7 +23,12 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'state_machine_node = puzzlebot_control.state_machine_node:main',
+            'mission_manager_node = puzzlebot_control.mission_manager_node:main',
+            'fork_publisher_node  = puzzlebot_control.fork_publisher_node:main',
+            'fork_mock_node       = puzzlebot_control.fork_mock_node:main',
+            'qr_mock_node         = puzzlebot_control.qr_mock_node:main',
+            'yolo_mock_node       = puzzlebot_control.yolo_mock_node:main',
+            'voice_fsm_router_node = puzzlebot_control.voice_fsm_router_node:main',
         ],
     },
 )

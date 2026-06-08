@@ -116,20 +116,30 @@ class _SingleHMM:
         sequences: List[np.ndarray],
         n_iter: int,
         rng: np.random.Generator,
+        snapshot_callback=None,
     ) -> None:
         """Train on a list of observation sequences (each is a 1-D int array).
 
         Step 1 — count-based initialisation (linear segmentation).
         Step 2 — Baum-Welch refinement for n_iter iterations (optional; set
                  n_iter=0 to skip).
+
+        snapshot_callback: optional callable(stage, log_A, log_B).
+            Fired at 'initial' (after count init), 'mid' (after n_iter//2
+            iterations), and 'final' (after all iterations). Receives copies
+            of the current log-space arrays. Default None = no overhead.
         """
         self._init_params_from_counts(sequences)
+
+        if snapshot_callback is not None:
+            snapshot_callback('initial', self.log_A.copy(), self.log_B.copy())
 
         if n_iter == 0:
             self._is_fitted = True
             return
 
         S, M = self.n_states, self.n_symbols
+        _mid_at = max(0, n_iter // 2 - 1) if snapshot_callback is not None else -1
 
         for iteration in range(n_iter):
             # Accumulators for the new parameter estimates
@@ -203,6 +213,12 @@ class _SingleHMM:
                     self.log_B[i] = self.log_B[i]
                 else:
                     self.log_B[i] = new_log_B[i] - row_sum
+
+            if snapshot_callback is not None and iteration == _mid_at:
+                snapshot_callback('mid', self.log_A.copy(), self.log_B.copy())
+
+        if snapshot_callback is not None:
+            snapshot_callback('final', self.log_A.copy(), self.log_B.copy())
 
         self._is_fitted = True
 
@@ -309,6 +325,7 @@ class HiddenMarkovModelClassifier:
     def fit(
         self,
         sequences_by_class: Dict[str, List[np.ndarray]],
+        snapshots_for: Optional[List[str]] = None,
     ) -> 'HiddenMarkovModelClassifier':
         """Train the classifier.
 
@@ -342,10 +359,23 @@ class HiddenMarkovModelClassifier:
             ]
 
         # --- 3. Train one HMM per class ---
+        self._snapshots_: Dict[str, Dict] = {}
+        _snap_set = set(snapshots_for) if snapshots_for else set()
+
         for label in self.labels_:
             n_st = cfg.n_states_per_class.get(label, cfg.n_states) if cfg.n_states_per_class else cfg.n_states
             hmm = _SingleHMM(n_st, cfg.n_symbols, cfg.log_zero)
-            hmm.fit(quantized[label], cfg.n_iter, np.random.default_rng(cfg.random_state))
+            if label in _snap_set:
+                snaps: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+                def _snap_cb(stage, lA, lB, _s=snaps):
+                    _s[stage] = (np.exp(lA.copy()), np.exp(lB.copy()))
+                self._snapshots_[label] = snaps
+                hmm.fit(quantized[label], cfg.n_iter,
+                        np.random.default_rng(cfg.random_state),
+                        snapshot_callback=_snap_cb)
+            else:
+                hmm.fit(quantized[label], cfg.n_iter,
+                        np.random.default_rng(cfg.random_state))
             self.hmms_[label] = hmm
 
         self.is_fitted_ = True
@@ -452,20 +482,29 @@ def _kmeans_codebook(
     max_iter: int,
     tol: float,
     rng: np.random.Generator,
+    chunk_size: int = 1024,
 ) -> np.ndarray:
-    """K-Means from scratch — returns centroids (n_clusters, d)."""
+    """K-Means from scratch — returns centroids (n_clusters, d).
+
+    Distances are computed in row-chunks to avoid the (N, K, d) broadcast
+    that exhausts RAM when N and K are both large.
+    """
     n_points = data.shape[0]
     n_clusters = min(n_clusters, n_points)
     indices = rng.choice(n_points, size=n_clusters, replace=False)
     centroids = data[indices].copy()
 
-    for _ in range(max_iter):
-        # Assignment
-        diff = data[:, np.newaxis, :] - centroids[np.newaxis, :, :]   # (N, K, d)
-        sq_dist = (diff ** 2).sum(axis=2)                              # (N, K)
-        assignments = np.argmin(sq_dist, axis=1)                       # (N,)
+    assignments = np.empty(n_points, dtype=np.int32)
 
-        # Update
+    for _ in range(max_iter):
+        # Chunked assignment — peak RAM = chunk_size × K × d × 8 bytes
+        for start in range(0, n_points, chunk_size):
+            end = min(start + chunk_size, n_points)
+            diff = data[start:end, np.newaxis, :] - centroids[np.newaxis, :, :]
+            sq_dist = (diff ** 2).sum(axis=2)
+            assignments[start:end] = np.argmin(sq_dist, axis=1)
+
+        # Update centroids
         new_centroids = np.empty_like(centroids)
         for k in range(n_clusters):
             mask = assignments == k

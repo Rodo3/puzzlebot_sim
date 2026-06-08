@@ -727,6 +727,16 @@ def generate_launch_description():
         condition=IfCondition(web_bridge_en),
     )
 
+    # ── Mission launcher (activo cuando web_bridge:=true) ─────────────────
+    # Escucha /mission_start del dashboard y lanza los launch files de misión.
+    mission_launcher = Node(
+        package='puzzlebot_control',
+        executable='mission_launcher_node',
+        name='mission_launcher_node',
+        output='screen',
+        condition=IfCondition(web_bridge_en),
+    )
+
     return LaunchDescription([
         set_resource_path,
         # Argumentos
@@ -780,4 +790,6 @@ def generate_launch_description():
         scan_restamper,
         # Web dashboard bridge (web_bridge:=true)
         web_bridge,
+        # Mission launcher (web_bridge:=true)
+        mission_launcher,
     ])

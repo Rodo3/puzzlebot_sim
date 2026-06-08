@@ -1,6 +1,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/float32.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/utils.h>
@@ -37,8 +39,10 @@
  *   /scan_match/pose (geometry_msgs/PoseWithCovarianceStamped) — corrección de SLAM
  *
  * TOPICS PUBLICADOS:
- *   /odom            (nav_msgs/Odometry) — pose filtrada del robot
- *   TF odom→base_footprint               — necesario para TF tree
+ *   /odom                    (nav_msgs/Odometry)  — pose filtrada del robot
+ *   /localization/status     (std_msgs/String)    — "INITIALIZING" | "OK" | "LOST"
+ *   /localization/covariance (std_msgs/Float32)   — trace(P_xy) actual en m²
+ *   TF odom→base_footprint                        — necesario para TF tree
  *
  * PARÁMETROS CLAVE:
  *   init_from_aruco      [true]  — espera el primer ArUco para inicializar
@@ -129,6 +133,9 @@ public:
     // Valor por defecto 3.5 ≈ 3.5σ: conservador, rechaza saltos grandes sin
     // bloquear correcciones pequeñas válidas.
     declare_parameter("scan_match_mahal_gate", 3.5);
+    // Umbral de trace(P_xy) para publicar estado "LOST" en /localization/status.
+    // Por encima de este valor la localización se considera perdida.
+    declare_parameter("loc_lost_thresh", 0.80);
 
     double ic = get_parameter("initial_covariance").as_double();
     x_  = {get_parameter("initial_x").as_double(),
@@ -160,6 +167,7 @@ public:
     sm_low_cov_thresh_   = get_parameter("scan_match_low_cov_thresh").as_double();
     sm_high_cov_thresh_  = get_parameter("scan_match_high_cov_thresh").as_double();
     sm_mahal_gate_       = get_parameter("scan_match_mahal_gate").as_double();
+    loc_lost_thresh_     = get_parameter("loc_lost_thresh").as_double();
 
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom_raw", 10,
@@ -173,8 +181,15 @@ public:
       "/scan_match/pose", 10,
       std::bind(&KalmanFilterNode::scan_match_cb, this, std::placeholders::_1));
 
-    pub_odom_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    pub_odom_   = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    pub_loc_status_ = create_publisher<std_msgs::msg::String>("/localization/status", 10);
+    pub_loc_cov_    = create_publisher<std_msgs::msg::Float32>("/localization/covariance", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+
+    // Publica estado inicial antes de que llegue el primer ArUco
+    status_timer_ = create_wall_timer(
+      std::chrono::milliseconds(200),
+      std::bind(&KalmanFilterNode::publish_status, this));
 
     last_time_ = now();
     if (init_from_aruco_) {
@@ -358,6 +373,25 @@ private:
     publish();
   }
 
+  void publish_status()
+  {
+    double trace_p = P_[0] + P_[4];
+
+    std_msgs::msg::String status_msg;
+    if (!initialized_) {
+      status_msg.data = "INITIALIZING";
+    } else if (trace_p > loc_lost_thresh_) {
+      status_msg.data = "LOST";
+    } else {
+      status_msg.data = "OK";
+    }
+    pub_loc_status_->publish(status_msg);
+
+    std_msgs::msg::Float32 cov_msg;
+    cov_msg.data = static_cast<float>(trace_p);
+    pub_loc_cov_->publish(cov_msg);
+  }
+
   void publish()
   {
     tf2::Quaternion q;
@@ -391,6 +425,9 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_aruco_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_scan_match_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_loc_status_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr pub_loc_cov_;
+  rclcpp::TimerBase::SharedPtr status_timer_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
   std::array<double, 3> x_;
@@ -406,6 +443,7 @@ private:
   double sm_low_cov_thresh_;
   double sm_high_cov_thresh_;
   double sm_mahal_gate_;
+  double loc_lost_thresh_;
 };
 
 int main(int argc, char ** argv)

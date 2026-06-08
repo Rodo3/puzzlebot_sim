@@ -90,6 +90,11 @@ private:
   {
     path_         = msg->poses;
     goal_reached_ = false;
+    // Path con waypoints → habrá control activo: permite frenar de nuevo cuando
+    // este path se agote. Path vacío → no rearmar (deja el tópico cedido).
+    if (!path_.empty()) {
+      idle_braked_ = false;
+    }
 
     // Al recibir ruta nueva, empezar desde el waypoint más cercano al robot.
     // Esto evita que el controlador intente ir hacia puntos detrás del robot
@@ -119,7 +124,11 @@ private:
     geometry_msgs::msg::Twist cmd;
 
     if (!have_pose_ || path_.empty() || goal_reached_) {
-      pub_cmd_->publish(cmd);  // zero velocity
+      // Sin path activo: publica UN cero para frenar y luego cede el tópico.
+      if (!idle_braked_) {
+        pub_cmd_->publish(cmd);  // zero velocity (frenado único)
+        idle_braked_ = true;
+      }
       return;
     }
 
@@ -128,10 +137,14 @@ private:
     double dist_to_goal = std::hypot(goal.x - robot_x_, goal.y - robot_y_);
     if (dist_to_goal < goal_tol_) {
       goal_reached_ = true;
+      idle_braked_  = true;  // ya frenamos aquí; no spamear ceros en idle
       RCLCPP_INFO(get_logger(), "Goal reached (dist=%.3f m)", dist_to_goal);
       pub_cmd_->publish(cmd);
       return;
     }
+
+    // Hay control activo → rearmar el frenado de idle para el próximo periodo sin path
+    idle_braked_ = false;
 
     // Advance path_idx_ past points already within lookahead
     while (path_idx_ < static_cast<int>(path_.size()) - 1) {
@@ -193,6 +206,11 @@ private:
   int    path_idx_{0};
   bool   goal_reached_{false};
   bool   have_pose_{false};
+  // Cuando no hay path activo publicamos UN solo cero (para frenar) y luego
+  // callamos, cediendo /cmd_vel_in a otros publicadores (p.ej. el barrido del
+  // mission_manager_node). Si siguiéramos publicando ceros en cada tick,
+  // pisaríamos esos comandos. Se rearma al recibir un path nuevo.
+  bool   idle_braked_{false};
 
   double robot_x_{0.0}, robot_y_{0.0}, robot_th_{0.0};
   double lookahead_, max_v_, max_w_, goal_tol_;

@@ -68,7 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help='Append delta-delta coefficients (requires --delta).')
     parser.add_argument('--syllable-states', action='store_true', default=False,
                         help='Use per-command n_states based on syllable count '
-                             '(alto=3, avanzar=4, derecha=4, inicio=4, izquierda=5, retroceder=6).')
+                             '(alto=3, avanzar=4, derecha=4, inicio=4, izquierda=5, retroceder=6, '
+                             'subir=3, bajar=3, tomar=3, soltar=3).')
     parser.add_argument('--librosa',     action='store_true', default=False,
                         help='Use librosa for feature extraction instead of manual MFCC.')
     parser.add_argument('--include-zcr', action='store_true', default=False,
@@ -107,9 +108,10 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     SYLLABLE_STATES = {
-        'alto': 3, 'avanzar': 4, 'derecha': 4,
+        'alto': 4, 'avanzar': 6, 'derecha': 6,
         'inicio': 4, 'izquierda': 5, 'retroceder': 6,
-    }
+        'subir': 6, 'bajar': 5, 'tomar': 6, 'soltar': 5,
+    }  # gridsearch óptimo: n_symbols=64, acc=87.19%
     n_states_per_class = SYLLABLE_STATES if args.syllable_states else {}
 
     mfcc_cfg    = MFCCConfig(sample_rate=args.sample_rate,

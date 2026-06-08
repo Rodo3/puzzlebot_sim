@@ -103,7 +103,7 @@ def generate_launch_description():
         _default_map_png = _maps[-1] if _maps else ''
 
     # ── Argumentos del launch ─────────────────────────────────────────────
-    arg_slam        = DeclareLaunchArgument('slam',        default_value='true',
+    arg_slam        = DeclareLaunchArgument('slam',        default_value='false',
                           description='Enable slam_node (mapeo). Usa slam:=false con mcl:=true.')
     #####################################################################################################
     arg_mcl         = DeclareLaunchArgument('mcl',         default_value='false',
@@ -144,12 +144,25 @@ def generate_launch_description():
                           description='LaserScan angular offset in radians; pi flips front/back')
     #####################################################################################################
     
-    arg_navigation = DeclareLaunchArgument('navigation', default_value='false',
+    arg_navigation = DeclareLaunchArgument('navigation', default_value='true',
                           description='Navegación autónoma A* + steering_controller + obstacle_avoidance. '
                                       'Requiere /map disponible. Enviar /goal_pose por RViz (G → 2D Nav Goal).')
     #####################################################################################################
+
+    arg_dashboard_features = DeclareLaunchArgument('dashboard_features', default_value='false',
+                          description='Lanza la capa de misión: mission_manager_node (FSM + '
+                                      'montacargas), qr_reader_node y waypoint_navigator_node. '
+                                      'El YOLO de logos corre standalone en la Jetson (ver launch_yolo). '
+                                      'El bridge (ros2 run puzzlebot_web_bridge bridge_node) se corre aparte.')
+    #####################################################################################################
+
+    arg_launch_yolo = DeclareLaunchArgument('launch_yolo', default_value='false',
+                          description='Lanzar yolo_node del workspace (publica /detections). Por '
+                                      'defecto FALSE: el detector ONNX corre standalone en la Jetson. '
+                                      'Activar solo si no hay YOLO externo, para no duplicar /detections.')
+    #####################################################################################################
     
-    arg_use_map    = DeclareLaunchArgument('use_map', default_value='false',
+    arg_use_map    = DeclareLaunchArgument('use_map', default_value='true',
                           description='Carga mapa PNG estático: activa map_server_node (/map) y '
                                       'aruco_map_odom (map→odom). Combinar con slam:=false mcl:=false '
                                       'kalman:=true aruco:=true para localización EKF sobre mapa conocido.')
@@ -167,6 +180,8 @@ def generate_launch_description():
     kalman_en    = LaunchConfiguration('kalman')
     avoidance_en = LaunchConfiguration('avoidance')
     nav_en       = LaunchConfiguration('navigation')
+    dash_en      = LaunchConfiguration('dashboard_features')
+    launch_yolo  = LaunchConfiguration('launch_yolo')
     aruco_en     = LaunchConfiguration('aruco')
     viewer_en    = LaunchConfiguration('viewer')
     rviz_en      = LaunchConfiguration('rviz')
@@ -552,6 +567,68 @@ def generate_launch_description():
         condition=IfCondition(nav_en),
     )
 
+    # ── Capa de misión (dashboard_features:=true) ─────────────────────────
+    # Nodos de la FSM logística + percepción de misión + montacargas.
+    #   mission_manager_node  : FSM logística completa. Consume /mission_state_in
+    #                           (START/PAUSE/RESET), /localization/status, /qr/*,
+    #                           /detections, /fork/status; publica /mission_state,
+    #                           /goal_pose, /cmd_vel_in, /fork/command.
+    #   qr_reader_node        : QR del pallet → /qr/detected, /qr/client, /qr/pose.
+    #   yolo_node (perception): logos del tráiler → /detections (Detection2DArray).
+    #   waypoint_navigator_node : traduce /navigate_to_waypoint (nombre) → /goal_pose.
+    # La cámara la publica la Jetson (jetson_sensors.launch.py) en
+    # /camera/image/compressed — topic por defecto de los detectores.
+    #
+    # NOTA: el control de voz (WAIT_FOR_VOICE_START / GLOBAL_VOICE_STOP) y los
+    # mocks (lifter / QR) viven en puzzlebot_control/mission.launch.py, que se
+    # lanza por separado durante las pruebas por etapas.
+    waypoints_cfg = os.path.join(bringup_pkg, 'config', 'waypoints.yaml')
+    aruco_map_cfg = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
+    control_pkg   = get_package_share_directory('puzzlebot_control')
+    mission_cfg   = os.path.join(control_pkg, 'config', 'mission_config.yaml')
+
+    state_machine = Node(
+        package='puzzlebot_control',
+        executable='mission_manager_node',
+        name='mission_manager_node',
+        output='screen',
+        parameters=[mission_cfg, {
+            'waypoints_file': waypoints_cfg,
+            'aruco_map_file': aruco_map_cfg,
+        }],
+        condition=IfCondition(dash_en),
+    )
+
+    waypoint_navigator = Node(
+        package='puzzlebot_planning',
+        executable='waypoint_navigator_node',
+        name='waypoint_navigator_node',
+        output='screen',
+        parameters=[{'waypoints_file': waypoints_cfg, 'frame_id': 'map'}],
+        condition=IfCondition(dash_en),
+    )
+
+    qr_detector = Node(
+        package='puzzlebot_perception',
+        executable='qr_reader_node',
+        name='qr_reader_node',
+        output='screen',
+        condition=IfCondition(dash_en),
+    )
+
+    # yolo_node del workspace: solo si dashboard_features Y launch_yolo. Por
+    # defecto NO se lanza — el detector ONNX corre standalone en la Jetson y ya
+    # publica /detections; lanzar dos nodos en ese tópico los duplicaría.
+    logo_detector = Node(
+        package='puzzlebot_perception',
+        executable='yolo_node',
+        name='yolo_node',
+        output='screen',
+        parameters=[{'show_window': False}],  # PC del robot suele ser headless
+        condition=IfCondition(PythonExpression(
+            ["'", dash_en, "' == 'true' and '", launch_yolo, "' == 'true'"])),
+    )
+
     return LaunchDescription([
         # Argumentos
         arg_slam,
@@ -561,6 +638,8 @@ def generate_launch_description():
         arg_initial_map,
         arg_avoidance,
         arg_navigation,
+        arg_dashboard_features,
+        arg_launch_yolo,
         arg_aruco,
         arg_viewer,
         arg_rviz,
@@ -589,6 +668,11 @@ def generate_launch_description():
         obstacle_avoidance,
         # Navegación autónoma A* completa (navigation:=true)
         navigation_stack,
+        # Features del web dashboard (dashboard_features:=true)
+        state_machine,
+        waypoint_navigator,
+        qr_detector,
+        logo_detector,
         # Visualización — archivo RViz según modo
         rviz_slam,   # mcl:=false → puzzlebot_rviz.rviz (Fixed Frame: odom)
         rviz_mcl,    # mcl:=true  → mcl_rviz.rviz       (Fixed Frame: map, TRANSIENT_LOCAL)

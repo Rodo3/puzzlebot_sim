@@ -32,8 +32,8 @@ bug_navigation_node:
 steering_controller_node:
   ros__parameters:
     lookahead_distance:  0.30  # metres — más corto = sigue curvas más cerradas
-    max_linear_vel:      0.14  # m/s — más lento = más tiempo para girar
-    max_angular_vel:     0.8   # rad/s — más angular para girar rápido
+    max_linear_vel:      0.10  # m/s — lento (da tiempo a leer QR) pero por encima del umbral de arranque del motor
+    max_angular_vel:     0.20   # rad/s — más angular para girar rápido
     goal_tolerance:      0.20  # metres
     control_frequency:   20.0  # Hz
 
