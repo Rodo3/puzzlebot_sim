@@ -24,15 +24,13 @@ export default function ModePanel({
       <div className="mode-buttons">
         <button
           className={`btn-mode ${mode === 'mapping' ? 'btn-mode-active' : ''}`}
-          onClick={handleMapping}
-          disabled={!connected}
-          title="Resetea el mapa SLAM e inicia mapeo"
+          disabled={true}
+          title="Bloqueado — solo visualización"
         >Iniciar Mapeo</button>
         <button
           className={`btn-mode ${mode === 'navigation' ? 'btn-mode-active' : ''}`}
-          onClick={() => onModeChange('navigation')}
-          disabled={!connected}
-          title="Activa click-to-goal en el mapa"
+          disabled={true}
+          title="Bloqueado — solo visualización"
         >Navegar</button>
       </div>
 
@@ -58,7 +56,7 @@ export default function ModePanel({
             className="map-select"
             value={selectedMap}
             onChange={e => setSelectedMap(e.target.value)}
-            disabled={!connected}
+            disabled={true}
           >
             <option value="">-- seleccionar mapa --</option>
             {(availableMaps ?? []).map(m => (
@@ -67,9 +65,8 @@ export default function ModePanel({
           </select>
           <button
             className="btn-sm"
-            onClick={() => onCommand({ type: 'list_maps' })}
-            disabled={!connected}
-            title="Refrescar lista de mapas"
+            disabled={true}
+            title="Bloqueado — solo visualización"
           >Refrescar</button>
         </div>
 
@@ -77,24 +74,9 @@ export default function ModePanel({
           <button
             className="btn-sm btn-sm-accent"
             style={{ flex: 1 }}
-            onClick={() => {
-              if (!selectedMap || loading) return;
-              setLoading(true);
-              onCommand({ type: 'load_map', filename: selectedMap });
-              // Re-enable after 3s regardless of response
-              clearTimeout(loadTimerRef.current);
-              loadTimerRef.current = setTimeout(() => setLoading(false), 3000);
-            }}
-            disabled={!connected || !selectedMap || loading}
-          >{loading ? 'Cargando…' : 'Cargar mapa'}</button>
-          {mapSource === 'static' && (
-            <button
-              className="btn-sm btn-sm-green"
-              style={{ flex: 1 }}
-              onClick={() => onCommand({ type: 'use_slam_map' })}
-              disabled={!connected}
-            >SLAM live</button>
-          )}
+            disabled={true}
+            title="Bloqueado — solo visualización"
+          >Cargar mapa</button>
         </div>
       </div>
     </div>

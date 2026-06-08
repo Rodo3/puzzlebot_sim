@@ -74,21 +74,22 @@ export default function TeleopPanel({ connected, onCommand }) {
   }, [connected, onCommand, clearInterval_]); // eslint-disable-line
 
   // ── Robot-mode d-pad button props (held = continuous cmd_vel) ──────────────
-  const robotBtn = (dir) => ({
+  // BLOQUEADO — solo visualización
+  const robotBtn = (_dir) => ({
     className: 'dpad-btn',
-    disabled: !connected,
-    onPointerDown: (e) => { e.preventDefault(); press(dir); },
+    disabled: true,
   });
 
   // ── Elevator-mode button props (single click → forklift command) ───────────
-  const sendElevator = (action) => onCommand({ type: 'elevator', action });
+  // BLOQUEADO — solo visualización
+  const sendElevator = (_action) => {};
 
   const isElevator = teleMode === 'elevator';
 
   return (
     <div className="panel teleop-panel">
       <div className="teleop-header">
-        <h3 style={{ margin: 0 }}>Teleop</h3>
+        <h3 style={{ margin: 0 }}>Teleop <span style={{ fontSize: '0.7em', opacity: 0.6 }}>🔒</span></h3>
         <div className="teleop-toggle">
           <button
             className={teleMode === 'robot' ? 'toggle-active' : ''}
@@ -121,10 +122,8 @@ export default function TeleopPanel({ connected, onCommand }) {
           )}
           <button
             className={`dpad-btn dpad-stop${!isElevator ? ' dpad-emergency' : ''}`}
-            disabled={!connected}
-            title={isElevator ? 'Parar elevador' : 'Parada de emergencia — cancela misión y movimiento'}
-            onClick={isElevator ? () => sendElevator('stop') : undefined}
-            onPointerDown={isElevator ? undefined : (e) => { e.preventDefault(); clearInterval_(); emergencyStop(); }}
+            disabled={true}
+            title="Bloqueado — solo visualización"
           >■</button>
           {isElevator ? (
             <button className="dpad-btn" disabled>→</button>

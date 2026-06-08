@@ -39,7 +39,7 @@ from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, LaserScan
-from std_msgs.msg import Bool, Float32, String
+from std_msgs.msg import Bool, Float32, Int32MultiArray, String
 from vision_msgs.msg import Detection2DArray
 
 from .rate_limiter import RateLimiter
@@ -175,8 +175,8 @@ class BridgeNode(Node):
         self._pub_nav_cancel = self.create_publisher(Bool, '/navigation/cancel', 10)
         self._pub_emergency_stop = self.create_publisher(Bool, '/emergency_stop', _latched_qos)
         self._pub_load_map   = self.create_publisher(String, '/slam/load_map', 10)
-        # Mission control: dashboard → state_machine_node ("1" / "2" / "stop")
-        self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_start'], 10)
+        # Mission control: dashboard → mission_manager_node (START_M1 / START_M2 / ABORT / PAUSE / CONTINUE / RESET)
+        self._pub_mission    = self.create_publisher(String, DEFAULT_TOPICS['mission_state_in'], 10)
         # Forklift/montacargas: dashboard → forklift controller ("up" / "down")
         self._pub_forklift   = self.create_publisher(String, '/forklift/command', 10)
 
@@ -324,6 +324,18 @@ class BridgeNode(Node):
         self.create_subscription(
             Detection2DArray, DEFAULT_TOPICS['logo_detection'], self._logo_detection_cb, 10)
 
+        # mission_manager_node monitoring topics (event-driven).
+        self.create_subscription(
+            String, DEFAULT_TOPICS['localization_status'], self._localization_status_cb, 10)
+        self.create_subscription(
+            String, DEFAULT_TOPICS['mission_client'], self._mission_client_cb, 10)
+        self.create_subscription(
+            Bool, DEFAULT_TOPICS['fork_status'], self._fork_status_cb, 10)
+
+        # Perception monitoring topics (event-driven).
+        self.create_subscription(
+            Int32MultiArray, DEFAULT_TOPICS['aruco_ids'], self._aruco_ids_cb, 10)
+
         self.get_logger().info(f'puzzlebot_web_bridge ready — WebSocket at ws://{host}:{port}/ws')
 
     # ------------------------------------------------------------------ #
@@ -414,7 +426,7 @@ class BridgeNode(Node):
             self._pub_emergency_stop.publish(Bool(data=True))
         self._pub_nav_cancel.publish(Bool(data=True))
         self._pub_nav_wp.publish(String(data='stop'))
-        self._pub_mission.publish(String(data='stop'))
+        self._pub_mission.publish(String(data='ABORT'))
         self._publish_zero_cmd()
         for delay in (0.05, 0.10, 0.20, 0.35, 0.50):
             timer = threading.Timer(delay, self._publish_zero_cmd)
@@ -510,6 +522,34 @@ class BridgeNode(Node):
             'type':       'logo_detection',
             'detections': detections,
             'timestamp':  self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _localization_status_cb(self, msg: String):
+        self._ws.broadcast_sync({
+            'type':      'localization_status',
+            'status':    msg.data,
+            'timestamp': self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _mission_client_cb(self, msg: String):
+        self._ws.broadcast_sync({
+            'type':      'mission_client',
+            'client':    msg.data,
+            'timestamp': self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _fork_status_cb(self, msg: Bool):
+        self._ws.broadcast_sync({
+            'type':      'fork_status',
+            'up':        msg.data,
+            'timestamp': self.get_clock().now().nanoseconds / 1e9,
+        })
+
+    def _aruco_ids_cb(self, msg: Int32MultiArray):
+        self._ws.broadcast_sync({
+            'type':      'aruco_ids',
+            'ids':       list(msg.data),
+            'timestamp': self.get_clock().now().nanoseconds / 1e9,
         })
 
     # ------------------------------------------------------------------ #
@@ -723,9 +763,12 @@ class BridgeNode(Node):
 
             elif msg_type == 'mission_start':
                 mission = str(data.get('mission', '')).strip()
-                if mission in ('1', '2'):
-                    self._pub_mission.publish(String(data=mission))
-                    self.get_logger().info(f'mission_start → {mission}')
+                if mission == '1':
+                    self._pub_mission.publish(String(data='START_M1'))
+                    self.get_logger().info('mission_start → START_M1')
+                elif mission == '2':
+                    self._pub_mission.publish(String(data='START_M2'))
+                    self.get_logger().info('mission_start → START_M2')
                 else:
                     self.get_logger().warn(f'mission_start: invalid mission {mission!r}')
 

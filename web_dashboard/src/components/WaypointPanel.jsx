@@ -59,20 +59,20 @@ export default function WaypointPanel({ connected, mode, onGoalPose, onCommand, 
       <div className="waypoint-actions">
         <button
           className="btn-waypoint"
-          onClick={sendWaypoint}
-          disabled={disabled || !selected}
+          disabled={true}
+          title="Bloqueado — solo visualización"
         >Ir al Waypoint</button>
       </div>
       <div className="emergency-actions">
         <button
           className="btn-emergency"
-          onClick={emergencyStop}
-          disabled={!connected}
+          disabled={true}
+          title="Bloqueado — solo visualización"
         >Emergencia</button>
         <button
           className="btn-clear-emergency"
-          onClick={clearEmergencyStop}
-          disabled={!connected}
+          disabled={true}
+          title="Bloqueado — solo visualización"
         >Liberar emergencia</button>
       </div>
     </div>

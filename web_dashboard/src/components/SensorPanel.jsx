@@ -63,9 +63,8 @@ export default function SensorPanel({ onCommand, status = {} }) {
               </div>
               <button
                 className={`sensor-btn sensor-btn-${s}`}
-                onClick={() => handleLaunch(id)}
-                disabled={s === 'starting'}
-                title={`${s === 'online' ? 'Detener' : 'Inicializar'} ${label}`}
+                disabled={true}
+                title="Bloqueado — solo visualización"
               >
                 {BTN_LABEL[s] ?? 'Iniciar'}
               </button>

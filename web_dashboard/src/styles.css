@@ -1539,8 +1539,154 @@ hr {
   min-width: 52px;
   text-align: center;
 }
-.sensor-btn:hover               { background: var(--surface-2); color: var(--text); }
-.sensor-btn-starting            { color: var(--warn);   border-color: rgba(250,204,21,0.4);  cursor: default; }
-.sensor-btn-online              { color: var(--green);  border-color: rgba(74,222,128,0.4);  cursor: default; }
+.sensor-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.sensor-btn:disabled            { opacity: 0.4; cursor: not-allowed; }
+.sensor-btn-starting            { color: var(--warn);   border-color: rgba(250,204,21,0.4); }
+.sensor-btn-online              { color: var(--green);  border-color: rgba(74,222,128,0.4); }
 .sensor-btn-error               { color: var(--err);    border-color: rgba(248,113,113,0.4); }
+.sensor-btn-error:hover:not(:disabled) { background: var(--err-dim); }
+
+/* ── MissionPanel info row ─────────────────────────────── */
+.mission-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+  align-items: center;
+}
+.loc-badge {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid;
+}
+.loc-badge-ok   { color: var(--green);  border-color: rgba(74,222,128,0.4);  background: rgba(74,222,128,0.08); }
+.loc-badge-lost { color: var(--err);    border-color: rgba(248,113,113,0.4); background: rgba(248,113,113,0.08); }
+.loc-badge-init { color: var(--warn);   border-color: rgba(250,204,21,0.4);  background: rgba(250,204,21,0.08); }
+
+.mission-client-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(168,85,247,0.4);
+  background: rgba(168,85,247,0.08);
+  color: var(--purple);
+}
+.fork-badge {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid;
+}
+.fork-up   { color: var(--green); border-color: rgba(74,222,128,0.4); background: rgba(74,222,128,0.08); }
+.fork-down { color: var(--muted); border-color: var(--border); background: var(--surface-2); }
+.locked-badge {
+  font-size: 9px;
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-left: auto;
+}
+
+/* ── DetectionPanel ────────────────────────────────────── */
+.detection-panel {
+  padding: 10px 12px;
+}
+.det-section {
+  margin-bottom: 10px;
+}
+.det-section:last-child { margin-bottom: 0; }
+.det-section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.det-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.det-count {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  margin-left: 2px;
+}
+.det-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.det-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.det-class-badge {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid;
+  min-width: 56px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.det-empty {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  padding: 2px 0 2px 11px;
+}
+.det-qr { flex-wrap: wrap; gap: 4px; }
+.det-qr-data {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #22d3ee;
+  background: rgba(34,211,238,0.08);
+  border: 1px solid rgba(34,211,238,0.25);
+  border-radius: 6px;
+  padding: 2px 8px;
+  word-break: break-all;
+}
+.det-qr-area {
+  font-size: 9px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.det-aruco-ids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.det-aruco-badge {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: rgba(251,146,60,0.12);
+  border: 1px solid rgba(251,146,60,0.4);
+  color: #fb923c;
+}
 .sensor-btn-error:hover         { background: var(--err-dim); }

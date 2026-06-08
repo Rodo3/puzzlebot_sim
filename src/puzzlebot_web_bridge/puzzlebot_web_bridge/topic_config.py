@@ -18,15 +18,21 @@ DEFAULT_TOPICS = {
     'voice_status':           '/voice/status',
     'voice_ranked_predictions': '/voice/ranked_predictions',
     'voice_inference_time':   '/voice/inference_time_ms',
-    'mission_state':          '/mission_state',       # state_machine_node FSM state (event)
+    'mission_state':          '/mission_state',       # mission_manager_node FSM state (event)
     'qr_detections':          '/qr/detections',       # qr_node JSON detections (event)
-    'logo_detection':         '/detections',              # yolo_node Detection2DArray (event)
+    'logo_detection':         '/detections',          # yolo_node Detection2DArray (event)
+    # Inbound — mission_manager_node monitoring
+    'localization_status':    '/localization/status', # String: OK | LOST | INITIALIZING
+    'mission_client':         '/mission_client',      # String: cliente activo del QR
+    'fork_status':            '/fork/status',         # Bool: True=horquillas arriba, False=abajo
+    # Inbound — perception
+    'aruco_ids':              '/aruco/detected_ids',  # Int32MultiArray: IDs de markers detectados
     # Outbound (WebSocket → ROS) — control topics
     'cmd_vel_out':            '/cmd_vel',          # teleop; override in Gazebo to /model/puzzlebot/cmd_vel
     'goal_pose':              '/goal_pose',
     'navigate_to_waypoint':   '/navigate_to_waypoint',
     'slam_reset':             '/slam/reset',
-    'mission_start':          '/mission_start',       # dashboard → state_machine_node ("1"/"2"/"stop")
+    'mission_state_in':       '/mission_state_in',    # dashboard → mission_manager_node (START_M1/START_M2/ABORT/PAUSE/CONTINUE/RESET)
 }
 
 # Maximum publish rate to WebSocket clients (Hz).

@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 
-// Colores por clase de logo (coinciden con el detector ONNX).
-const LOGO_COLORS = { Pepsi: '#f87171', Amazon: '#fbbf24', Walmart: '#4ade80' };
+// Colores por clase de logo — nombres exactos del modelo entrenado.
+const LOGO_COLORS = { Pepsi: '#f87171', Amazon: '#fbbf24', Walmart: '#4ade80',
+                      Popsi: '#f87171', Emezon: '#fbbf24', Wolmar: '#4ade80' };
 const QR_COLOR    = '#22d3ee';
 
 export default function CameraPanel({ cameraData, qrDetections = [], logoDetections = [] }) {
@@ -46,16 +47,17 @@ export default function CameraPanel({ cameraData, qrDetections = [], logoDetecti
     }
 
     // ── Logos: caja + clase/confianza ──
+    // Bridge serializa como {cx, cy, w, h} normalizados (0-1) desde Detection2DArray.
     for (const d of logoDetections) {
       const b = d.bbox;
       if (!b) continue;
       const color = LOGO_COLORS[d.class_name] || '#a78bfa';
-      const x = b.x1 * sx, y = b.y1 * sy;
-      const w = (b.x2 - b.x1) * sx, h = (b.y2 - b.y1) * sy;
+      const bw = b.w * cw, bh = b.h * ch;
+      const bx = b.cx * cw - bw / 2, by = b.cy * ch - bh / 2;
       ctx.strokeStyle = color;
       ctx.fillStyle   = color;
-      ctx.strokeRect(x, y, w, h);
-      ctx.fillText(`${d.class_name} ${(d.confidence ?? 0).toFixed(2)}`, x, Math.max(12, y - 3));
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.fillText(`${d.class_name} ${(d.confidence ?? 0).toFixed(2)}`, bx, Math.max(12, by - 3));
     }
   }, [overlay, qrDetections, logoDetections]);
 

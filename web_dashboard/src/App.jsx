@@ -13,6 +13,7 @@ import MissionPanel      from './components/MissionPanel.jsx';
 import MetricsPanel      from './components/MetricsPanel.jsx';
 import TeamPanel         from './components/TeamPanel.jsx';
 import SensorPanel       from './components/SensorPanel.jsx';
+import DetectionPanel    from './components/DetectionPanel.jsx';
 
 function normalizeWsUrl(value) {
   if (!value) return null;
@@ -121,6 +122,14 @@ export default function App() {
   const [arucoEvents,    setArucoEvents]    = useState([]);
   const [scanMatchHist,  setScanMatchHist]  = useState([]);
   const [sensorStatus,   setSensorStatus]   = useState({});
+
+  // ── mission_manager_node monitoring ─────────────────────────────────────────
+  const [localizationStatus, setLocalizationStatus] = useState(null);
+  const [missionClient,      setMissionClient]      = useState('');
+  const [forkStatus,         setForkStatus]         = useState(null);
+
+  // ── Perception ───────────────────────────────────────────────────────────────
+  const [arucoIds,           setArucoIds]           = useState([]);
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const clientRef         = useRef(null);
@@ -311,6 +320,22 @@ export default function App() {
         if (msg.sensor) {
           setSensorStatus(prev => ({ ...prev, [msg.sensor]: msg.status ?? 'idle' }));
         }
+        break;
+
+      case 'localization_status':
+        setLocalizationStatus(msg.status ?? null);
+        break;
+
+      case 'mission_client':
+        setMissionClient(msg.client ?? '');
+        break;
+
+      case 'fork_status':
+        setForkStatus(msg.up ?? null);
+        break;
+
+      case 'aruco_ids':
+        setArucoIds(msg.ids ?? []);
         break;
 
       case 'aruco_pose': {
@@ -520,6 +545,9 @@ export default function App() {
                 connected={connected}
                 onCommand={sendCommand}
                 onSwitchToNav={() => handleModeChange('navigation')}
+                localizationStatus={localizationStatus}
+                missionClient={missionClient}
+                forkStatus={forkStatus}
               />
             </div>
 
@@ -560,7 +588,7 @@ export default function App() {
               trajectory={trajectory}
               mode={mode}
               goalMarker={goalMarker}
-              onGoalPose={handleGoalPose}
+              onGoalPose={null}
             />
           </div>
 
@@ -579,6 +607,13 @@ export default function App() {
             <div className="col-right-scroll">
               <div className="section-lidar">
                 <LidarView scanData={scanData} />
+              </div>
+              <div className="section-detections">
+                <DetectionPanel
+                  logoDetections={logoDetections}
+                  qrDetections={qrDetections}
+                  arucoIds={arucoIds}
+                />
               </div>
               <div className="section-teleop">
                 <TeleopPanel connected={connected} onCommand={sendCommand} />
