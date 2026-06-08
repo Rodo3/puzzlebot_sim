@@ -62,6 +62,7 @@ def generate_launch_description():
     control_pkg = get_package_share_directory('puzzlebot_control')
 
     default_waypoints = os.path.join(bringup_pkg, 'config', 'waypoints.yaml')
+    default_aruco_map = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
     default_mission   = os.path.join(control_pkg, 'config', 'mission_config.yaml')
 
     arg_mission_number = DeclareLaunchArgument(
@@ -69,6 +70,8 @@ def generate_launch_description():
         description='1=conveyor (Misión 1), 2=rack (Misión 2)')
     arg_waypoints = DeclareLaunchArgument(
         'waypoints_file', default_value=default_waypoints)
+    arg_aruco_map = DeclareLaunchArgument(
+        'aruco_map_file', default_value=default_aruco_map)
     arg_mission_cfg = DeclareLaunchArgument(
         'mission_config', default_value=default_mission)
     arg_mock_fork = DeclareLaunchArgument(
@@ -98,6 +101,7 @@ def generate_launch_description():
 
     mission_number = LaunchConfiguration('mission_number')
     waypoints_file = LaunchConfiguration('waypoints_file')
+    aruco_map_file = LaunchConfiguration('aruco_map_file')
     mission_config = LaunchConfiguration('mission_config')
     mock_fork      = LaunchConfiguration('mock_fork')
     mock_qr        = LaunchConfiguration('mock_qr')
@@ -118,6 +122,7 @@ def generate_launch_description():
             'use_sim_time':   use_sim_time,
             'mission_number': mission_number,
             'waypoints_file': waypoints_file,
+            'aruco_map_file': aruco_map_file,
         }],
     )
 
@@ -208,6 +213,7 @@ def generate_launch_description():
     return LaunchDescription([
         arg_mission_number,
         arg_waypoints,
+        arg_aruco_map,
         arg_mission_cfg,
         arg_mock_fork,
         arg_mock_qr,

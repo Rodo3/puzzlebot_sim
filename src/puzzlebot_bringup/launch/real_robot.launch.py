@@ -583,6 +583,7 @@ def generate_launch_description():
     # mocks (lifter / QR) viven en puzzlebot_control/mission.launch.py, que se
     # lanza por separado durante las pruebas por etapas.
     waypoints_cfg = os.path.join(bringup_pkg, 'config', 'waypoints.yaml')
+    aruco_map_cfg = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
     control_pkg   = get_package_share_directory('puzzlebot_control')
     mission_cfg   = os.path.join(control_pkg, 'config', 'mission_config.yaml')
 
@@ -591,7 +592,10 @@ def generate_launch_description():
         executable='mission_manager_node',
         name='mission_manager_node',
         output='screen',
-        parameters=[mission_cfg, {'waypoints_file': waypoints_cfg}],
+        parameters=[mission_cfg, {
+            'waypoints_file': waypoints_cfg,
+            'aruco_map_file': aruco_map_cfg,
+        }],
         condition=IfCondition(dash_en),
     )
 

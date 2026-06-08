@@ -134,6 +134,7 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, String
+from tf2_ros import Buffer, TransformException, TransformListener
 from vision_msgs.msg import Detection2DArray
 
 
@@ -186,6 +187,10 @@ def _pose_stamped(x: float, y: float, yaw: float, frame: str = 'map') -> PoseSta
 
 def _yaw_from_odom(odom: Odometry) -> float:
     q = odom.pose.pose.orientation
+    return _yaw_from_quat(q)
+
+
+def _yaw_from_quat(q) -> float:
     siny = 2.0 * (q.w * q.z + q.x * q.y)
     cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
     return math.atan2(siny, cosy)
@@ -221,6 +226,9 @@ class MissionManagerNode(Node):
         self.declare_parameter('exit_backward_time',     3.0)
         self.declare_parameter('pick_lift_time',         2.0)
         self.declare_parameter('waypoints_file',         '')
+        self.declare_parameter('aruco_map_file',         '')
+        self.declare_parameter('map_frame',              'map')
+        self.declare_parameter('base_frame',             'base_footprint')
         self.declare_parameter('qr_search_timeout',      60.0)
         self.declare_parameter('logo_search_timeout',    60.0)
         self.declare_parameter('recovery_rotate_speed',  0.3)
@@ -245,10 +253,19 @@ class MissionManagerNode(Node):
         self.declare_parameter('sweep_step_m',      0.50)
         self.declare_parameter('sweep_wp_tol',      0.20)
         self.declare_parameter('sweep_speed',       0.10)   # m/s durante el barrido
+        self.declare_parameter('navigation_arrival_tolerance', 0.25)
+        self.declare_parameter('min_pickup_sweep_passes_before_detection', 1)
+        self.declare_parameter('min_dock_sweep_passes_before_detection',   1)
+        self.declare_parameter('conveyor_use_aruco_sweep', True)
+        self.declare_parameter('conveyor_aruco_start_id',  2)
+        self.declare_parameter('conveyor_aruco_end_id',    0)
+        self.declare_parameter('conveyor_aruco_ref_id',    1)
+        self.declare_parameter('conveyor_aruco_wall_clearance', 0.45)
+        self.declare_parameter('conveyor_aruco_y_offset',  0.05)
 
         # Punto de expedición
-        self.declare_parameter('expedition_x',   1.88)
-        self.declare_parameter('expedition_y',   1.80)
+        self.declare_parameter('expedition_x',   0.30)
+        self.declare_parameter('expedition_y',   3.00)
         self.declare_parameter('expedition_yaw', 1.57)
 
         # Alias QR → clase de YOLO. El texto del QR (p.ej. "Wolmar") puede no
@@ -261,6 +278,8 @@ class MissionManagerNode(Node):
         p = self.get_parameter
         self._mission_number        = p('mission_number').value
         self._loc_timeout           = p('localization_timeout').value
+        self._map_frame             = p('map_frame').value
+        self._base_frame            = p('base_frame').value
 
         # Mapa de alias (en minúsculas) QR → clase YOLO, descartando entradas vacías.
         _af = [s.strip().lower() for s in p('client_alias_from').value if s.strip()]
@@ -286,6 +305,15 @@ class MissionManagerNode(Node):
         self._sweep_step            = p('sweep_step_m').value
         self._sweep_wp_tol          = p('sweep_wp_tol').value
         self._sweep_speed           = p('sweep_speed').value
+        self._nav_arrival_tol       = p('navigation_arrival_tolerance').value
+        self._min_pickup_passes     = int(p('min_pickup_sweep_passes_before_detection').value)
+        self._min_dock_passes       = int(p('min_dock_sweep_passes_before_detection').value)
+        self._conv_aruco_enabled    = p('conveyor_use_aruco_sweep').value
+        self._conv_aruco_start_id   = int(p('conveyor_aruco_start_id').value)
+        self._conv_aruco_end_id     = int(p('conveyor_aruco_end_id').value)
+        self._conv_aruco_ref_id     = int(p('conveyor_aruco_ref_id').value)
+        self._conv_wall_clearance   = p('conveyor_aruco_wall_clearance').value
+        self._conv_y_offset         = p('conveyor_aruco_y_offset').value
 
         # Bounding boxes
         self._bbox = {
@@ -316,12 +344,16 @@ class MissionManagerNode(Node):
 
         # ── Waypoints ─────────────────────────────────────────────────────────
         self._wps: dict = self._load_waypoints(p('waypoints_file').value)
+        self._aruco_markers: dict = self._load_aruco_markers(
+            p('aruco_map_file').value)
 
         # Trayectorias de barrido generadas en SELECT_MISSION
         self._sweep_wps:     list = []   # lista de (x, y, yaw) para el barrido actual
         self._sweep_wp_idx:  int  = 0
         self._dock_sweep_wps:    list = []
         self._dock_sweep_idx:    int  = 0
+        self._pickup_sweep_passes: int = 0
+        self._dock_sweep_passes:   int = 0
 
         # Dock donde se encontró el logo (para ALIGN_TO_DOCK)
         self._matched_dock_pose: dict | None = None
@@ -354,6 +386,11 @@ class MissionManagerNode(Node):
         # Timestamps para timeouts dentro de estados
         self._search_start:   float = 0.0
         self._maneuver_start: float = 0.0
+
+        # TF map→base_footprint: la FSM manda goals en frame map, así que las
+        # condiciones de llegada y barrido deben usar la misma pose que A*/RViz.
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
 
         # ── Suscripciones ─────────────────────────────────────────────────────
         self.create_subscription(String,          '/localization/status', self._loc_cb,     10)
@@ -407,6 +444,24 @@ class MissionManagerNode(Node):
         self.get_logger().info(f'Waypoints cargados: {list(wps.keys())}')
         return wps
 
+    def _load_aruco_markers(self, path: str) -> dict:
+        if not path or not os.path.isfile(path):
+            self.get_logger().warn(
+                f'aruco_map_file no encontrado: {path!r} — '
+                'barrido conveyor usará bounding box')
+            return {}
+        with open(path, 'r') as f:
+            data = yaml.safe_load(f) or {}
+        raw_markers = data.get('aruco_markers', {})
+        markers = {}
+        for marker_id, marker in raw_markers.items():
+            try:
+                markers[int(marker_id)] = marker
+            except (TypeError, ValueError):
+                continue
+        self.get_logger().info(f'ArUcos cargados para misión: {sorted(markers.keys())}')
+        return markers
+
     def _get_waypoints_by_prefix(self, prefix: str) -> list:
         result = [
             {'name': k, **v}
@@ -438,6 +493,11 @@ class MissionManagerNode(Node):
         yaw  = bb['yaw']
         wps  = []
 
+        if zone == 'conveyor' and self._conv_aruco_enabled:
+            aruco_wps = self._generate_conveyor_aruco_sweep()
+            if aruco_wps:
+                return aruco_wps
+
         if zone in ('conveyor', 'dock'):
             # Y fija en el borde interior de la zona (robot mira hacia la pared/tráiler)
             y_fixed = bb['y_min'] + 0.15
@@ -466,6 +526,75 @@ class MissionManagerNode(Node):
             f'step={step} m')
         return wps
 
+    def _generate_conveyor_aruco_sweep(self) -> list:
+        """
+        Barrido de Misión 1 basado en ArUcos:
+        empieza cerca del marker 2, cruza la pista y termina cerca del marker 0.
+        El marker 1 se usa como referencia del lado norte para desplazar la
+        pasada ligeramente hacia la zona de conveyors.
+        """
+        required = (
+            self._conv_aruco_start_id,
+            self._conv_aruco_end_id,
+            self._conv_aruco_ref_id,
+        )
+        if not all(mid in self._aruco_markers for mid in required):
+            self.get_logger().warn(
+                f'No están los ArUcos {required} en aruco_map_file — '
+                'usando barrido conveyor por bounding box')
+            return []
+
+        start = self._aruco_markers[self._conv_aruco_start_id]
+        end   = self._aruco_markers[self._conv_aruco_end_id]
+        ref   = self._aruco_markers[self._conv_aruco_ref_id]
+
+        sx = float(start['x'])
+        sy = float(start['y'])
+        ex = float(end['x'])
+        ey = float(end['y'])
+        ry = float(ref['y'])
+
+        clearance = max(0.0, float(self._conv_wall_clearance))
+        y_offset = float(self._conv_y_offset)
+
+        # Acercar los extremos hacia dentro de la pista para no pegarse a pared.
+        if sx > ex:
+            sx -= clearance
+            ex += clearance
+        else:
+            sx += clearance
+            ex -= clearance
+
+        # La línea 2→0 define la franja alta; el ArUco 1 indica hacia qué lado
+        # está el norte/conveyor. El offset deja al robot mirando/pasando un poco
+        # más cerca de la zona de QR sin llegar hasta la pared.
+        base_y = (sy + ey) * 0.5
+        north_sign = 1.0 if ry >= base_y else -1.0
+        y = base_y + north_sign * y_offset
+
+        dx = ex - sx
+        yaw = math.atan2(ey - sy, dx)
+        distance = max(abs(dx), 1e-6)
+        n_segments = max(1, int(math.ceil(distance / self._sweep_step)))
+
+        wps = []
+        for i in range(n_segments + 1):
+            t = i / n_segments
+            x = sx + t * dx
+            wps.append({
+                'name': f'conveyor_aruco_{i}',
+                'x': round(x, 3),
+                'y': round(y, 3),
+                'yaw': yaw,
+            })
+
+        self.get_logger().info(
+            f'Barrido "conveyor" por ArUcos '
+            f'{self._conv_aruco_start_id}→{self._conv_aruco_end_id}: '
+            f'{len(wps)} puntos, y={y:.2f}, yaw={yaw:.2f}, '
+            f'clearance={clearance:.2f} m')
+        return wps
+
     # ── Callbacks de tópicos ──────────────────────────────────────────────────
 
     def _loc_cb(self, msg: String):
@@ -492,6 +621,22 @@ class MissionManagerNode(Node):
 
     def _odom_cb(self, msg: Odometry):
         self._odom = msg
+
+    def _robot_pose_map(self) -> tuple[float, float, float] | None:
+        try:
+            tf = self._tf_buffer.lookup_transform(
+                self._map_frame,
+                self._base_frame,
+                rclpy.time.Time())
+        except TransformException as ex:
+            self.get_logger().warn(
+                f'No hay TF {self._map_frame}→{self._base_frame}: {ex}',
+                throttle_duration_sec=2.0)
+            return None
+
+        t = tf.transform.translation
+        q = tf.transform.rotation
+        return t.x, t.y, _yaw_from_quat(q)
 
     def _fork_cb(self, msg: Bool):
         self._fork_up = msg.data
@@ -749,6 +894,8 @@ class MissionManagerNode(Node):
         self._sweep_wp_idx   = 0
         self._dock_sweep_wps = self._generate_sweep('dock')
         self._dock_sweep_idx = 0
+        self._pickup_sweep_passes = 0
+        self._dock_sweep_passes   = 0
 
         self._active_client    = ''
         self._qr_client        = ''
@@ -766,33 +913,44 @@ class MissionManagerNode(Node):
 
     def _step_navigate_to_zone(self):
         # Usa A* para llegar al punto de entrada de la zona de barrido.
-        # Una vez ahí, el robot se alinea con el yaw correcto y pasa al barrido.
-        if self._odom is None:
+        # Una vez ahí, pasa el control al barrido directo. No exigimos yaw aquí:
+        # el steering_controller puede declarar "goal reached" sin orientar el
+        # robot al yaw del PoseStamped, y si la FSM intenta girar antes del
+        # handoff puede competir con los comandos cero del stack de navegación.
+        pose = self._robot_pose_map()
+        if pose is None:
             return
+        rx, ry, _ = pose
         entry = self._sweep_wps[0]
-        if _dist(self._odom, entry['x'], entry['y']) < self._sweep_wp_tol:
-            # Alinea el yaw antes de iniciar el barrido lineal
-            target_yaw  = entry['yaw']
-            current_yaw = _yaw_from_odom(self._odom)
-            err = math.atan2(math.sin(target_yaw - current_yaw),
-                             math.cos(target_yaw - current_yaw))
-            if abs(err) > self._align_angle_thresh:
-                self._send_vel(0.0, max(-0.4, min(0.4, err * 1.5)))
-                return
+        dist = math.hypot(rx - entry['x'], ry - entry['y'])
+        arrival_tol = max(self._sweep_wp_tol, self._nav_arrival_tol)
+        if dist < arrival_tol:
             self._stop()
             self._sweep_wp_idx = 0
             self._search_start = time.monotonic()
             self.get_logger().info(
                 f'Zona alcanzada — iniciando barrido lineal '
-                f'({len(self._sweep_wps)} puntos)')
+                f'({len(self._sweep_wps)} puntos, dist={dist:.3f} m)')
             self._transition(State.EXPLORE_PICKUP_AREA)
+        else:
+            self.get_logger().info(
+                f'NAVIGATE_TO_ZONE esperando llegada: dist={dist:.3f} m '
+                f'tol={arrival_tol:.3f} m',
+                throttle_duration_sec=2.0)
 
     def _step_explore_pickup_area(self):
         # QR detectado → para inmediatamente y pasa a acercarse
         if self._qr_detected and self._qr_pose is not None:
-            self._stop()
-            self._transition(State.APPROACH_PALLET)
-            return
+            if self._pickup_sweep_passes >= self._min_pickup_passes:
+                self._stop()
+                self.get_logger().info(
+                    f'QR aceptado tras {self._pickup_sweep_passes} pasada(s) de barrido')
+                self._transition(State.APPROACH_PALLET)
+                return
+            self.get_logger().info(
+                f'QR visible, pero esperando barrido completo '
+                f'({self._pickup_sweep_passes}/{self._min_pickup_passes})',
+                throttle_duration_sec=2.0)
 
         elapsed = time.monotonic() - self._search_start
         if elapsed > self._qr_search_timeout:
@@ -802,18 +960,33 @@ class MissionManagerNode(Node):
             self._transition(State.FAIL_QR_NOT_FOUND)
             return
 
-        if self._odom is None:
+        pose = self._robot_pose_map()
+        if pose is None:
             return
+        rx, ry, current_yaw = pose
 
         wp = self._sweep_wps[self._sweep_wp_idx]
-        rx = self._odom.pose.pose.position.x
-        ry = self._odom.pose.pose.position.y
         dist_to_wp = math.hypot(wp['x'] - rx, wp['y'] - ry)
 
         if dist_to_wp < self._sweep_wp_tol:
             next_idx = self._sweep_wp_idx + 1
             if next_idx >= len(self._sweep_wps):
                 self._stop()
+                self._pickup_sweep_passes += 1
+                self.get_logger().info(
+                    f'Barrido pickup completo '
+                    f'({self._pickup_sweep_passes}/{self._min_pickup_passes})')
+
+                if self._qr_detected and self._qr_pose is not None:
+                    self.get_logger().info(
+                        f'QR aceptado tras {self._pickup_sweep_passes} pasada(s)')
+                    self._transition(State.APPROACH_PALLET)
+                    return
+
+                if self._pickup_sweep_passes < self._min_pickup_passes:
+                    self._sweep_wp_idx = 0
+                    return
+
                 self.get_logger().warn('Barrido completo sin QR — RECOVER_QR_VIEW')
                 self._transition(State.RECOVER_QR_VIEW)
                 return
@@ -835,7 +1008,6 @@ class MissionManagerNode(Node):
         # punto y avanza recto.
 
         desired_yaw = math.atan2(wp['y'] - ry, wp['x'] - rx)
-        current_yaw = _yaw_from_odom(self._odom)
         angle_err   = math.atan2(
             math.sin(desired_yaw - current_yaw),
             math.cos(desired_yaw - current_yaw))
@@ -948,23 +1120,43 @@ class MissionManagerNode(Node):
     def _step_navigate_to_expedition(self):
         # Usa A* para llegar al punto intermedio de expedición.
         # Una vez ahí, el barrido de docks es lineal (sin A*).
-        if self._odom is None:
+        pose = self._robot_pose_map()
+        if pose is None:
             return
+        rx, ry, _ = pose
         wp = self._expedition_wp
-        if _dist(self._odom, wp['x'], wp['y']) < 0.30:
+        dist = math.hypot(rx - wp['x'], ry - wp['y'])
+        arrival_tol = max(0.30, self._nav_arrival_tol)
+        if dist < arrival_tol:
             self._search_start     = time.monotonic()
             self._dock_sweep_idx   = 0
+            self._dock_sweep_passes = 0
             self._logo_confirm_buf = 0
+            self.get_logger().info(
+                f'Expedición alcanzada — iniciando barrido de docks '
+                f'(dist={dist:.3f} m)')
             self._transition(State.SEARCH_TRAILER_LOGO)
+        else:
+            self.get_logger().info(
+                f'NAVIGATE_TO_EXPEDITION esperando llegada: dist={dist:.3f} m '
+                f'tol={arrival_tol:.3f} m',
+                throttle_duration_sec=2.0)
 
     def _step_search_trailer_logo(self):
         # La detección tiene MÁXIMA prioridad — se evalúa antes que cualquier
         # lógica de movimiento para no perder un logo en el tick de llegada a wp.
         best_score, _, _ = self._best_logo_detection()
         if best_score >= self._logo_conf_thresh:
-            self._stop()
-            self._transition(State.MATCH_TRAILER_CLIENT)
-            return
+            if self._dock_sweep_passes >= self._min_dock_passes:
+                self._stop()
+                self.get_logger().info(
+                    f'Logo aceptado tras {self._dock_sweep_passes} pasada(s) de dock')
+                self._transition(State.MATCH_TRAILER_CLIENT)
+                return
+            self.get_logger().info(
+                f'Logo visible, pero esperando barrido dock completo '
+                f'({self._dock_sweep_passes}/{self._min_dock_passes})',
+                throttle_duration_sec=2.0)
 
         elapsed = time.monotonic() - self._search_start
         if elapsed > self._logo_search_timeout:
@@ -974,18 +1166,33 @@ class MissionManagerNode(Node):
             self._transition(State.FAIL_TRAILER_NOT_FOUND)
             return
 
-        if self._odom is None:
+        pose = self._robot_pose_map()
+        if pose is None:
             return
+        rx, ry, current_yaw = pose
 
         wp = self._dock_sweep_wps[self._dock_sweep_idx]
-        rx = self._odom.pose.pose.position.x
-        ry = self._odom.pose.pose.position.y
         dist_to_wp = math.hypot(wp['x'] - rx, wp['y'] - ry)
 
         if dist_to_wp < self._sweep_wp_tol:
             next_idx = self._dock_sweep_idx + 1
             if next_idx >= len(self._dock_sweep_wps):
                 self._stop()
+                self._dock_sweep_passes += 1
+                self.get_logger().info(
+                    f'Barrido dock completo '
+                    f'({self._dock_sweep_passes}/{self._min_dock_passes})')
+
+                if best_score >= self._logo_conf_thresh:
+                    self.get_logger().info(
+                        f'Logo aceptado tras {self._dock_sweep_passes} pasada(s)')
+                    self._transition(State.MATCH_TRAILER_CLIENT)
+                    return
+
+                if self._dock_sweep_passes < self._min_dock_passes:
+                    self._dock_sweep_idx = 0
+                    return
+
                 self.get_logger().warn('Barrido dock completo sin logo — RECOVER_LOGO_VIEW')
                 self._transition(State.RECOVER_LOGO_VIEW)
                 return
@@ -998,7 +1205,6 @@ class MissionManagerNode(Node):
 
         # Pure-pursuit hacia el waypoint actual
         desired_yaw = math.atan2(wp['y'] - ry, wp['x'] - rx)
-        current_yaw = _yaw_from_odom(self._odom)
         angle_err   = math.atan2(
             math.sin(desired_yaw - current_yaw),
             math.cos(desired_yaw - current_yaw))
@@ -1080,8 +1286,10 @@ class MissionManagerNode(Node):
         #   2. RESPALDO POR YAW: si el logo ya no es visible (p.ej. el robot se
         #      acercó tanto que el logo salió del cuadro), caemos al yaw del dock
         #      del bbox como antes.
-        if self._matched_dock_pose is None or self._odom is None:
+        pose = self._robot_pose_map()
+        if self._matched_dock_pose is None or pose is None:
             return
+        _, _, current_yaw = pose
 
         # ¿Hay una detección de logo fresca para centrar por visión?
         logo_fresh = (time.monotonic() - self._last_det_time) < 0.5
@@ -1102,7 +1310,6 @@ class MissionManagerNode(Node):
         # ── Respaldo: alinear al yaw del dock ────────────────────────────────
         desired_yaw = self._matched_dock_pose.get('yaw',
                           self._bbox['dock']['yaw'])
-        current_yaw = _yaw_from_odom(self._odom)
         error_angle = math.atan2(
             math.sin(desired_yaw - current_yaw),
             math.cos(desired_yaw - current_yaw))

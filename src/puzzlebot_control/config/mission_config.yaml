@@ -50,6 +50,16 @@ mission_manager_node:
     conveyor_y_min: 3.80     # borde interior: el robot se sitúa aquí (y_min+0.15) y barre en X
     conveyor_y_max: 4.40     # hacia la pared
     conveyor_sweep_yaw: 1.57    # mira +Y (Norte): cámara hacia los conveyors, que están arriba
+    # Barrido basado en ArUcos para Misión 1:
+    # genera una pasada desde el ArUco 2 hacia el ArUco 0, usando el ArUco 1
+    # como referencia del lado norte/conveyor. Si falta aruco_map_file o algún
+    # ID, la FSM cae al barrido por bounding box anterior.
+    conveyor_use_aruco_sweep: true
+    conveyor_aruco_start_id: 2
+    conveyor_aruco_end_id: 0
+    conveyor_aruco_ref_id: 1
+    conveyor_aruco_wall_clearance: 0.45
+    conveyor_aruco_y_offset: 0.05
 
     # ── ZONA PICKUP — Misión 2: racks (zona VERDE, bloque central) ──────────────
     # waypoints.yaml: racks en x ≈ 1.2–2.2 m, y ≈ 2.2–3.5 m; el robot barre en Y.
@@ -75,14 +85,17 @@ mission_manager_node:
 
     # ── ZONA EXPEDICIÓN — punto intermedio antes de buscar tráiler ──────────────
     # Punto libre de obstáculos entre la zona de pickup y los docks.
-    expedition_x: 1.88
-    expedition_y: 1.80
+    expedition_x: 0.30
+    expedition_y: 3.00
     expedition_yaw: 1.57
 
     # ── Barrido (común a pickup y docks) ────────────────────────────────────────
     sweep_step_m: 0.50       # separación entre puntos del barrido lineal
     sweep_wp_tol: 0.20       # tolerancia de llegada a cada punto del barrido (m)
     sweep_speed:  0.10       # velocidad lineal durante el barrido (m/s)
+    navigation_arrival_tolerance: 0.25  # handoff A*→barrido; debe ser >= goal_tolerance
+    min_pickup_sweep_passes_before_detection: 1  # mock QR se acepta tras 1 pasada completa
+    min_dock_sweep_passes_before_detection:   1  # mock YOLO se acepta tras 1 pasada completa
 
     # ── Acercamiento / alineación al pallet (control sobre /qr/pose) ────────────
     approach_distance:  0.40   # distancia frontal objetivo al QR antes de alinear (m)
