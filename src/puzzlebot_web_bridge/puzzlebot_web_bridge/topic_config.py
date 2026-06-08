@@ -19,7 +19,8 @@ DEFAULT_TOPICS = {
     'voice_ranked_predictions': '/voice/ranked_predictions',
     'voice_inference_time':   '/voice/inference_time_ms',
     'mission_state':          '/mission_state',       # mission_manager_node FSM state (event)
-    'qr_detections':          '/qr/detections',       # qr_node JSON detections (event)
+    'qr_detections':          '/qr/client',            # qr_reader_node: cliente detectado (String)
+    'qr_detected':            '/qr/detected',          # qr_reader_node: Bool presencia QR
     'logo_detection':         '/detections',          # yolo_node Detection2DArray (event)
     # Inbound — mission_manager_node monitoring
     'localization_status':    '/localization/status', # String: OK | LOST | INITIALIZING

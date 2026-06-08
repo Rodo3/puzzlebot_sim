@@ -319,8 +319,11 @@ class BridgeNode(Node):
         # Mission state machine → dashboard (event-driven, no rate limit).
         self.create_subscription(
             String, DEFAULT_TOPICS['mission_state'], self._mission_state_cb, 10)
+        self._qr_client_data = ''
         self.create_subscription(
-            String, DEFAULT_TOPICS['qr_detections'], self._qr_detections_cb, 10)
+            String, DEFAULT_TOPICS['qr_detections'], self._qr_client_cb, 10)
+        self.create_subscription(
+            Bool, DEFAULT_TOPICS['qr_detected'], self._qr_detected_cb, 10)
         self.create_subscription(
             Detection2DArray, DEFAULT_TOPICS['logo_detection'], self._logo_detection_cb, 10)
 
@@ -490,17 +493,22 @@ class BridgeNode(Node):
             'timestamp': self.get_clock().now().nanoseconds / 1e9,
         })
 
-    def _qr_detections_cb(self, msg: String):
-        # msg.data is a JSON array of {data, corners, area_px, center}; forward parsed.
-        try:
-            detections = json.loads(msg.data)
-        except (json.JSONDecodeError, TypeError):
-            detections = []
+    def _qr_client_cb(self, msg: String):
+        self._qr_client_data = msg.data
         self._ws.broadcast_sync({
             'type':       'qr_detections',
-            'detections': detections,
+            'detections': [{'data': msg.data}] if msg.data else [],
             'timestamp':  self.get_clock().now().nanoseconds / 1e9,
         })
+
+    def _qr_detected_cb(self, msg: Bool):
+        if not msg.data:
+            self._qr_client_data = ''
+            self._ws.broadcast_sync({
+                'type':       'qr_detections',
+                'detections': [],
+                'timestamp':  self.get_clock().now().nanoseconds / 1e9,
+            })
 
     def _logo_detection_cb(self, msg: Detection2DArray):
         detections = []
