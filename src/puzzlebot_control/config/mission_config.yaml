@@ -50,16 +50,37 @@ mission_manager_node:
     conveyor_y_min: 3.80     # borde interior: el robot se sitúa aquí (y_min+0.15) y barre en X
     conveyor_y_max: 4.40     # hacia la pared
     conveyor_sweep_yaw: 1.57    # mira +Y (Norte): cámara hacia los conveyors, que están arriba
-    # Barrido basado en ArUcos para Misión 1:
-    # genera una pasada desde el ArUco 2 hacia el ArUco 0, usando el ArUco 1
-    # como referencia del lado norte/conveyor. Si falta aruco_map_file o algún
-    # ID, la FSM cae al barrido por bounding box anterior.
+    # Barrido basado en ArUcos para Misión 1 (LEGACY — ignorado con el nuevo flujo):
+    # Misión 1 ya NO usa barrido lineal. Va a la pose fija de observación y
+    # escanea angularmente. Estos parámetros solo se usarían si se vuelve al
+    # flujo antiguo con conveyor_use_aruco_sweep:=true en barrido lineal.
     conveyor_use_aruco_sweep: true
     conveyor_aruco_start_id: 2
     conveyor_aruco_end_id: 0
     conveyor_aruco_ref_id: 1
     conveyor_aruco_wall_clearance: 0.45
     conveyor_aruco_y_offset: 0.05
+
+    # ── MISIÓN 1: pose fija de observación de conveyors ──────────────────────
+    # Coordenada donde el robot se detiene y escanea angularmente buscando el QR.
+    # ArUco 1 está en la pared norte (y=4.86); la pose queda ~0.9 m al sur.
+    conveyor_obs_x: 2.02
+    conveyor_obs_y: 3.95
+    conveyor_obs_yaw: 1.5708     # +Y = Norte = dirección hacia ArUco 1
+
+    # Barrido angular estático (STATIC_CONVEYOR_SCAN)
+    # El robot oscila +-static_scan_range rad alrededor del norte.
+    # linear.x = 0 en todo momento.
+    static_scan_speed:   0.08    # rad/s
+    static_scan_range:   0.70    # rad (~40 grados a cada lado)
+    static_scan_timeout: 30.0    # s sin detectar marcador -> FAIL_MARKER_NOT_FOUND
+
+    # Tolerancia angular para alinear al norte (ORIENT_TO_NORTH_ARUCO_1)
+    orient_north_thresh: 0.15    # rad (~8.6°) — ampliado para tolerar drift de TF
+    orient_timeout: 12.0         # s — timeout si TF no converge, pasa al barrido
+
+    # Tiempo en TRIGGER_MOCKS antes de pasar a APPROACH_PALLET
+    trigger_mocks_wait: 1.0      # s
 
     # ── ZONA PICKUP — Misión 2: racks (zona VERDE, bloque central) ──────────────
     # waypoints.yaml: racks en x ≈ 1.2–2.2 m, y ≈ 2.2–3.5 m; el robot barre en Y.

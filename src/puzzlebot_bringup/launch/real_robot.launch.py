@@ -103,7 +103,7 @@ def generate_launch_description():
         _default_map_png = _maps[-1] if _maps else ''
 
     # ── Argumentos del launch ─────────────────────────────────────────────
-    arg_slam        = DeclareLaunchArgument('slam',        default_value='true',
+    arg_slam        = DeclareLaunchArgument('slam',        default_value='false',
                           description='Enable slam_node (mapeo). Usa slam:=false con mcl:=true.')
     #####################################################################################################
     arg_mcl         = DeclareLaunchArgument('mcl',         default_value='false',
@@ -144,7 +144,7 @@ def generate_launch_description():
                           description='LaserScan angular offset in radians; pi flips front/back')
     #####################################################################################################
     
-    arg_navigation = DeclareLaunchArgument('navigation', default_value='false',
+    arg_navigation = DeclareLaunchArgument('navigation', default_value='true',
                           description='Navegación autónoma A* + steering_controller + obstacle_avoidance. '
                                       'Requiere /map disponible. Enviar /goal_pose por RViz (G → 2D Nav Goal).')
     #####################################################################################################
@@ -162,7 +162,7 @@ def generate_launch_description():
                                       'Activar solo si no hay YOLO externo, para no duplicar /detections.')
     #####################################################################################################
     
-    arg_use_map    = DeclareLaunchArgument('use_map', default_value='false',
+    arg_use_map    = DeclareLaunchArgument('use_map', default_value='true',
                           description='Carga mapa PNG estático: activa map_server_node (/map) y '
                                       'aruco_map_odom (map→odom). Combinar con slam:=false mcl:=false '
                                       'kalman:=true aruco:=true para localización EKF sobre mapa conocido.')

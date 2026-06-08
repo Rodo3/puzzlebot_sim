@@ -54,8 +54,15 @@ from std_msgs.msg import Bool, String
 
 
 # Estados de la FSM durante los cuales el pallet debe estar "visible".
+# Incluye tanto el flujo de Misión 1 (barrido estático) como el de Misión 2
+# (barrido lineal) para que el mock funcione con cualquiera de los dos.
 _PALLET_STATES = {
+    # Misión 1 — flujo observation pose
+    'STATIC_CONVEYOR_SCAN',
+    'TRIGGER_MOCKS',
+    # Misión 2 — barrido lineal (legacy)
     'EXPLORE_PICKUP_AREA',
+    # Compartido por ambas misiones
     'APPROACH_PALLET',
     'ALIGN_TO_PALLET',
     'PRE_PICK_VALIDATION',
@@ -99,14 +106,17 @@ class QrMockNode(Node):
             f'start_dist={self._start_dist}m, converge={self._converge}s, '
             f'reveal_delay={self._reveal}s')
 
+    # Estados que arrancan el cronómetro de revelado (entrada al área de pickup)
+    _REVEAL_TRIGGER_STATES = {'EXPLORE_PICKUP_AREA', 'STATIC_CONVEYOR_SCAN', 'TRIGGER_MOCKS'}
+
     def _on_state(self, msg: String):
         new = msg.data.strip()
         if new == self._fsm_state:
             return
         self._fsm_state = new
-        if new == 'EXPLORE_PICKUP_AREA' and self._explore_since is None and not self._consumed:
+        if new in self._REVEAL_TRIGGER_STATES and self._explore_since is None and not self._consumed:
             self._explore_since = time.monotonic()
-            self.get_logger().info('FSM explorando — revelando pallet pronto…')
+            self.get_logger().info(f'FSM en {new} — revelando pallet pronto…')
         # Si la FSM avanzó más allá de los estados de pallet, marcar consumido.
         if new not in _PALLET_STATES and self._explore_since is not None:
             self._consumed = True
