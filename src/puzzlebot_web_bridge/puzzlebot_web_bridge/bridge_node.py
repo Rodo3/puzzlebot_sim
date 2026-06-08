@@ -387,8 +387,8 @@ class BridgeNode(Node):
             self._stop_all('voice alto')
             return
         elif cmd == 'inicio':
-            self._pub_nav_wp.publish(String(data='inicio'))
-            self.get_logger().info('voice → navigate_to_waypoint: inicio')
+            self._pub_mission.publish(String(data='START'))
+            self.get_logger().info('voice → /mission_state_in: START')
             return
         else:
             self.get_logger().warn(f'voice_exec: unknown command "{cmd}"')
