@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'state_machine_node = puzzlebot_control.state_machine_node:main',
+            'velocity_mux_node = puzzlebot_control.velocity_mux:main',
         ],
     },
 )
