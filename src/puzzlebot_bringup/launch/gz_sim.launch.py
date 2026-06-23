@@ -49,18 +49,20 @@ def generate_launch_description():
         value=ign_resource_path,
     )
 
-    arg_world = DeclareLaunchArgument('world', default_value='flat_plane',
+    arg_world = DeclareLaunchArgument('world', default_value='real_arena',
                                       description="'flat_plane', 'maze', or 'real_arena' (pista física 3.76×4.86 m)")
     arg_gui   = DeclareLaunchArgument('gui',   default_value='true')
     arg_slam  = DeclareLaunchArgument('slam',  default_value='true')
     arg_rviz  = DeclareLaunchArgument('rviz',  default_value='true')
-    arg_mode  = DeclareLaunchArgument('mode',  default_value='mcl',
+    arg_mode  = DeclareLaunchArgument('mode',  default_value='mapping',
                                       description="'mapping' or 'mcl'")
+    
     arg_odom_source = DeclareLaunchArgument(
         'odom_source',
-        default_value='ground_truth',
+        default_value='dead_reckoning',
         description="'ground_truth' or 'dead_reckoning' for mode:=mapping",
     )
+
     # ── Argumentos de odometría Kalman (solo world:=real_arena) ──────────
     # kalman:=true  → odometry_node publica /odom_raw + kalman_filter_node
     #                 produce /odom y TF odom→base_footprint
@@ -68,32 +70,35 @@ def generate_launch_description():
     # kalman:=false → odometry_node publica /odom directamente (default)
     arg_kalman = DeclareLaunchArgument(
         'kalman',
-        default_value='false',
+        default_value='true',
         description='[real_arena] Usa kalman_filter_node entre odom_raw y odom',
     )
+
     # aruco_oracle:=true → aruco_oracle lee ground truth de Gazebo y publica
     #                       /aruco/pose sintético → kalman lo fusiona (Estrategia B)
     # Requiere kalman:=true para tener efecto útil.
     arg_aruco_oracle = DeclareLaunchArgument(
         'aruco_oracle',
-        default_value='false',
+        default_value='true',
         description='[real_arena+kalman] Publica /aruco/pose sintético desde ground truth',
     )
+
     # navigation:=true → lanza navigation.launch.py (A* + steering_controller + obstacle_avoidance)
     # Requiere que SLAM haya construido /map (mode:=mapping o que /map ya esté disponible).
     # Usa 2D Nav Goal en RViz para enviar /goal_pose al planner.
     arg_navigation = DeclareLaunchArgument(
         'navigation',
-        default_value='false',
+        default_value='true',
         description='Lanza navegación autónoma A* + steering_controller + obstacle_avoidance. '
                     'Envía /goal_pose desde RViz (tecla G → 2D Nav Goal).',
     )
-    arg_web_bridge = DeclareLaunchArgument(
-        'web_bridge',
-        default_value='true',
-        description='Lanza puzzlebot_web_bridge (WebSocket dashboard). '
-                    'Deshabilitar con web_bridge:=false si no se usa el dashboard.',
-    )
+
+    # arg_web_bridge = DeclareLaunchArgument(
+    #     'web_bridge',
+    #     default_value='false',
+    #     description='Lanza puzzlebot_web_bridge (WebSocket dashboard). '
+    #                 'Deshabilitar con web_bridge:=false si no se usa el dashboard.',
+    # )
 
     world_name    = LaunchConfiguration('world')
     slam_en       = LaunchConfiguration('slam')
@@ -131,138 +136,6 @@ def generate_launch_description():
     # ── 3. ros_gz_bridge ─────────────────────────────────────────────────
     # Camera topics added: /camera/image_raw and /camera/camera_info
     # Fortress syntax: '[' means Gazebo→ROS only (subscribe from Gazebo)
-
-    bridge_flat = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        name='gz_bridge',
-        arguments=[
-            '/model/puzzlebot/cmd_vel'
-            '@geometry_msgs/msg/Twist@ignition.msgs.Twist',
-            '/model/puzzlebot/odometry'
-            '@nav_msgs/msg/Odometry@ignition.msgs.Odometry',
-            '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock',
-            '/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan',
-            '/world/flat_plane/model/puzzlebot/joint_state'
-            '@sensor_msgs/msg/JointState[ignition.msgs.Model',
-            '/world/flat_plane/dynamic_pose/info'
-            '@geometry_msgs/msg/PoseArray[ignition.msgs.Pose_V',
-            # ── Camera bridge (Gazebo → ROS 2) ──────────────────────────
-            '/camera/image_raw@sensor_msgs/msg/Image[ignition.msgs.Image',
-            '/camera/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo',
-        ],
-        parameters=[{
-            'qos_overrides./model/puzzlebot.subscriber.reliability': 'reliable',
-        }],
-        condition=IfCondition(
-            PythonExpression(["'", world_name, "' == 'flat_plane'"])
-        ),
-        output='screen',
-    )
-
-    bridge_maze = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        name='gz_bridge',
-        arguments=[
-            '/model/puzzlebot/cmd_vel'
-            '@geometry_msgs/msg/Twist@ignition.msgs.Twist',
-            '/model/puzzlebot/odometry'
-            '@nav_msgs/msg/Odometry@ignition.msgs.Odometry',
-            '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock',
-            '/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan',
-            '/world/maze/model/puzzlebot/joint_state'
-            '@sensor_msgs/msg/JointState[ignition.msgs.Model',
-            '/world/maze/dynamic_pose/info'
-            '@geometry_msgs/msg/PoseArray[ignition.msgs.Pose_V',
-            # ── Camera bridge (Gazebo → ROS 2) ──────────────────────────
-            '/camera/image_raw@sensor_msgs/msg/Image[ignition.msgs.Image',
-            '/camera/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo',
-        ],
-        parameters=[{
-            'qos_overrides./model/puzzlebot.subscriber.reliability': 'reliable',
-        }],
-        condition=IfCondition(
-            PythonExpression(["'", world_name, "' == 'maze'"])
-        ),
-        output='screen',
-    )
-
-    joint_relay_flat = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        name='joint_relay',
-        arguments=[
-            '/world/flat_plane/model/puzzlebot/joint_state'
-            '@sensor_msgs/msg/JointState[ignition.msgs.Model',
-        ],
-        remappings=[
-            ('/world/flat_plane/model/puzzlebot/joint_state', '/joint_states'),
-        ],
-        condition=IfCondition(
-            PythonExpression(["'", world_name, "' == 'flat_plane'"])
-        ),
-        output='screen',
-    )
-
-    joint_relay_maze = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        name='joint_relay',
-        arguments=[
-            '/world/maze/model/puzzlebot/joint_state'
-            '@sensor_msgs/msg/JointState[ignition.msgs.Model',
-        ],
-        remappings=[
-            ('/world/maze/model/puzzlebot/joint_state', '/joint_states'),
-        ],
-        condition=IfCondition(
-            PythonExpression(["'", world_name, "' == 'maze'"])
-        ),
-        output='screen',
-    )
-
-    spawn_flat = TimerAction(
-        period=5.0,
-        actions=[ExecuteProcess(
-            cmd=[
-                'ign', 'service',
-                '-s', '/world/flat_plane/create',
-                '--reqtype', 'ignition.msgs.EntityFactory',
-                '--reptype', 'ignition.msgs.Boolean',
-                '--timeout', '5000',
-                '--req',
-                f'sdf_filename: "{sdf_file}", name: "puzzlebot", '
-                f'pose: {{position: {{z: 0.05}}}}',
-            ],
-            additional_env={'IGN_GAZEBO_RESOURCE_PATH': ign_resource_path},
-            output='screen',
-        )],
-        condition=IfCondition(
-            PythonExpression(["'", world_name, "' == 'flat_plane'"])
-        ),
-    )
-
-    spawn_maze = TimerAction(
-        period=5.0,
-        actions=[ExecuteProcess(
-            cmd=[
-                'ign', 'service',
-                '-s', '/world/maze/create',
-                '--reqtype', 'ignition.msgs.EntityFactory',
-                '--reptype', 'ignition.msgs.Boolean',
-                '--timeout', '5000',
-                '--req',
-                f'sdf_filename: "{sdf_file}", name: "puzzlebot", '
-                f'pose: {{position: {{z: 0.05}}}}',
-            ],
-            additional_env={'IGN_GAZEBO_RESOURCE_PATH': ign_resource_path},
-            output='screen',
-        )],
-        condition=IfCondition(
-            PythonExpression(["'", world_name, "' == 'maze'"])
-        ),
-    )
 
     # ── real_arena bridge ────────────────────────────────────────────────
     # Igual que bridge_maze pero con world name 'real_arena'.
@@ -374,7 +247,7 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': True,
             'wheel_radius': 0.05,
-            'wheel_separation': 0.19,   # ← cambiar a 0.172 para simular error real
+            'wheel_separation': 0.172,   # ← cambiar a 0.172 para simular error real
             'odom_topic': '/odom_raw',
             'odom_frame': 'odom',
             'base_frame': 'base_footprint',
@@ -498,90 +371,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    wheel_odom_flat = Node(
-        package='puzzlebot_localization',
-        executable='odometry_node',
-        name='odometry_node',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'wheel_radius': 0.05,
-            'wheel_separation': 0.19,
-            'odom_topic': '/odom',
-            'odom_frame': 'odom',
-            'base_frame': 'base_footprint',
-            'input_source': 'joint_states',
-            'publish_tf': True,
-        }],
-        remappings=[
-            ('/joint_states', '/world/flat_plane/model/puzzlebot/joint_state'),
-        ],
-        condition=IfCondition(PythonExpression([
-            "'", world_name, "' == 'flat_plane' and '", slam_en, "' == 'true' and ",
-            "('", mode, "' != 'mapping' or '", odom_source, "' == 'dead_reckoning')"
-        ])),
-    )
-
-    wheel_odom_maze = Node(
-        package='puzzlebot_localization',
-        executable='odometry_node',
-        name='odometry_node',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'wheel_radius': 0.05,
-            'wheel_separation': 0.19,
-            'odom_topic': '/odom',
-            'odom_frame': 'odom',
-            'base_frame': 'base_footprint',
-            'input_source': 'joint_states',
-            'publish_tf': True,
-        }],
-        remappings=[
-            ('/joint_states', '/world/maze/model/puzzlebot/joint_state'),
-        ],
-        condition=IfCondition(PythonExpression([
-            "'", world_name, "' == 'maze' and '", slam_en, "' == 'true' and ",
-            "('", mode, "' != 'mapping' or '", odom_source, "' == 'dead_reckoning')"
-        ])),
-    )
-
-    ground_truth_flat = Node(
-        package='puzzlebot_localization',
-        executable='ground_truth_odom',
-        name='ground_truth_odom',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'model_name': 'puzzlebot',
-            'odom_frame': 'odom',
-            'base_frame': 'base_footprint',
-            'pose_topic': '/world/flat_plane/dynamic_pose/info',
-        }],
-        condition=IfCondition(PythonExpression([
-            "'", world_name, "' == 'flat_plane' and '", slam_en, "' == 'true' and ",
-            "'", mode, "' == 'mapping' and '", odom_source, "' == 'ground_truth'"
-        ])),
-    )
-
-    ground_truth_maze = Node(
-        package='puzzlebot_localization',
-        executable='ground_truth_odom',
-        name='ground_truth_odom',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'model_name': 'puzzlebot',
-            'odom_frame': 'odom',
-            'base_frame': 'base_footprint',
-            'pose_topic': '/world/maze/dynamic_pose/info',
-        }],
-        condition=IfCondition(PythonExpression([
-            "'", world_name, "' == 'maze' and '", slam_en, "' == 'true' and ",
-            "'", mode, "' == 'mapping' and '", odom_source, "' == 'ground_truth'"
-        ])),
-    )
-
     slam_mapping = Node(
         package='puzzlebot_slam',
         executable='slam_node',
@@ -626,42 +415,11 @@ def generate_launch_description():
     )
 
     kalman_node = Node(
-        package='puzzlebot_perception',
-        executable='kalman_node',
-        name='kalman_node',
+        package='puzzlebot_localization',
+        executable='kalman_filter_node',
+        name='kalman_filter_node',
         parameters=[{'use_sim_time': True}],
         output='screen',
-    )
-
-    rviz_flat_node = TimerAction(
-        period=15.0,
-        actions=[Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            arguments=['-d', rviz_flat],
-            parameters=[{'use_sim_time': True}],
-            output='screen',
-        )],
-        condition=IfCondition(PythonExpression([
-            "'", rviz_en, "' == 'true' and '", world_name, "' == 'flat_plane'"
-        ])),
-    )
-
-    rviz_maze_node = TimerAction(
-        period=15.0,
-        actions=[Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            arguments=['-d', rviz_maze],
-            parameters=[{'use_sim_time': True}],
-            output='screen',
-        )],
-        condition=IfCondition(PythonExpression([
-            "'", rviz_en, "' == 'true' and '",
-            world_name, "' == 'maze' and '", mode, "' == 'mcl'"
-        ])),
     )
 
     rviz_mapping_node = TimerAction(
@@ -687,7 +445,8 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(nav_launch_file),
         launch_arguments={
             'use_sim_time':   'true',
-            'cmd_vel_topic':  '/model/puzzlebot/cmd_vel',  # DiffDrive de Fortress
+            # 'cmd_vel_topic':  '/model/puzzlebot/cmd_vel',  # DiffDrive de Fortress
+            'remapping': 'true',
         }.items(),
         condition=IfCondition(nav_en),
     )
@@ -714,51 +473,41 @@ def generate_launch_description():
     # ── Web dashboard bridge (opcional, web_bridge:=true) ────────────────
     # Expone ws://0.0.0.0:8000/ws para el dashboard React.
     # cmd_vel_out_topic apunta al tópico del DiffDrive de Gazebo para que el teleop funcione.
-    web_bridge = Node(
-        package='puzzlebot_web_bridge',
-        executable='bridge_node',
-        name='puzzlebot_web_bridge',
-        output='screen',
-        parameters=[{
-            'use_sim_time':       True,
-            'cmd_vel_out_topic':  '/model/puzzlebot/cmd_vel',
-            'artifact_dir':       '',
-        }],
-        condition=IfCondition(web_bridge_en),
-    )
+    # web_bridge = Node(
+    #     package='puzzlebot_web_bridge',
+    #     executable='bridge_node',
+    #     name='puzzlebot_web_bridge',
+    #     output='screen',
+    #     parameters=[{
+    #         'use_sim_time':       True,
+    #         'cmd_vel_out_topic':  '/model/puzzlebot/cmd_vel',
+    #         'artifact_dir':       '',
+    #     }],
+    #     condition=IfCondition(web_bridge_en),
+    # )
 
     return LaunchDescription([
         set_resource_path,
         # Argumentos
         arg_world, arg_gui, arg_slam, arg_rviz, arg_mode, arg_odom_source,
-        arg_kalman, arg_aruco_oracle, arg_navigation, arg_web_bridge,
+        arg_kalman, arg_aruco_oracle, arg_navigation,
         gz_sim,
         rsp,
         # Bridges (uno activo según world)
-        bridge_flat,
-        bridge_maze,
         bridge_arena,
         # Joint relays (uno activo según world)
-        joint_relay_flat,
-        joint_relay_maze,
         joint_relay_arena,
         # TF estáticos (siempre activos)
         lidar_tf,
         camera_tf,
         # Spawns del robot (uno activo según world)
-        spawn_flat,
-        spawn_maze,
         spawn_arena,
         # Odometría de ruedas flat/maze (sin Kalman)
-        wheel_odom_flat,
-        wheel_odom_maze,
         # Odometría real_arena — variante directa (kalman:=false)
         wheel_odom_arena_direct,
         # Odometría real_arena — variante raw para Kalman (kalman:=true)
         wheel_odom_arena_raw,
         # Ground truth odom (uno activo según world+mode+odom_source)
-        ground_truth_flat,
-        ground_truth_maze,
         ground_truth_arena,
         # Kalman filter (real_arena + kalman:=true) — Estrategia A y B
         kalman_arena,
@@ -771,13 +520,11 @@ def generate_launch_description():
         aruco_node,
         kalman_node,
         # RViz
-        rviz_flat_node,
-        rviz_maze_node,
         rviz_mapping_node,
         # Navegación autónoma A* (navigation:=true)
         navigation,
         # scan_restamper: adapta /scan → /scan_stamped para nodos de navegación en Gazebo
         scan_restamper,
         # Web dashboard bridge (web_bridge:=true)
-        web_bridge,
+        # web_bridge,
     ])
