@@ -1,6 +1,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <cmath>
 #include <vector>
@@ -62,9 +63,11 @@ public:
       "/odom", 10, std::bind(&SteeringControllerNode::odom_cb, this, std::placeholders::_1));
 
     sub_path_ = create_subscription<nav_msgs::msg::Path>(
-      "/planned_path", 1, std::bind(&SteeringControllerNode::path_cb, this, std::placeholders::_1));
+      "/planned_path", 1, std::bind(&SteeringControllerNode::path_cb, this, std::placeholders::_1)); //se suscribe a planned_path
 
-    pub_cmd_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel_in", 10);
+    pub_cmd_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel_in", 10); //Publica en cmd_vel_in
+
+    pub_goal_reached_ = create_publisher<std_msgs::msg::Bool>("/goal_reached",1);
 
     double hz = get_parameter("control_frequency").as_double();
     timer_ = create_wall_timer(
@@ -118,9 +121,16 @@ private:
   {
     geometry_msgs::msg::Twist cmd;
 
-    if (!have_pose_ || path_.empty() || goal_reached_) {
+    if (!have_pose_ || path_.empty()) {
       pub_cmd_->publish(cmd);  // zero velocity
       return;
+    }
+    if (goal_reached_){
+      std_msgs::msg::Bool msg;
+      msg.data = true;
+      pub_goal_reached_->publish(msg);
+      path_.clear();
+      RCLCPP_INFO(get_logger(), "goal reached clearing poses");
     }
 
     // Check if final goal reached
@@ -187,6 +197,7 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr     sub_path_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr  pub_cmd_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_goal_reached_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   std::vector<geometry_msgs::msg::PoseStamped> path_;

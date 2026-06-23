@@ -44,6 +44,7 @@ from nav_msgs.msg import OccupancyGrid, Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.ndimage import binary_closing, binary_dilation, distance_transform_edt
+from std_msgs.msg import Bool
 
 try:
     import tf2_ros
@@ -243,6 +244,7 @@ class PathPlannerNode(Node):
         self.sub_map_  = self.create_subscription(OccupancyGrid, '/map', self.map_cb, map_qos)
         self.sub_pose_ = self.create_subscription(
             PoseWithCovarianceStamped, '/initialpose', self.pose_cb, 10)
+        self.goal_reached = self.create_subscription(Bool, '/goal_reached', self.goal_reached_cb,1)
         self.sub_goal_ = self.create_subscription(PoseStamped, '/goal_pose', self.goal_cb, 10)
         self.pub_path_ = self.create_publisher(Path, '/planned_path', 1)
 
@@ -261,7 +263,14 @@ class PathPlannerNode(Node):
         self.map_ = msg
         if self.replan_on_new_map and self.goal_msg_ is not None:
             self._update_robot_pose_from_tf()
+            self.get_logger().info(f'Having a path')
+
             self._plan(self.goal_msg_)
+        
+    def goal_reached_cb(self, msg: Bool):
+        if msg.data:
+            self.goal_msg_ = None
+            self.get_logger().info(f'Clearing last path')
 
     def pose_cb(self, msg: PoseWithCovarianceStamped):
         self.robot_x_ = msg.pose.pose.position.x
