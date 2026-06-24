@@ -1,0 +1,10 @@
+# Zonas de rack del almacén — layout REAL medido.
+# Coords del usuario (igual que aruco_map.yaml): x=Este [0..3.65], y=Norte
+# [0..4.85], origen en la esquina SW. Cada zona es un RECTÁNGULO esquina (x,y)
+# + tamaño (w,h) en metros, que se rellena con una rejilla nx×ny de racks.
+# El world (almacen_racks.world) se regenera con: scripts/gen_warehouse.py
+rack_height: 0.20
+zones:
+  - {name: C1, x: 1.192, y: 2.519, w: 0.159, h: 1.069, nx: 2, ny: 3}
+  - {name: C2, x: 2.319, y: 2.501, w: 0.147, h: 1.075, nx: 2, ny: 3}
+  - {name: B,  x: 1.350, y: 1.444, w: 1.075, h: 0.176, nx: 3, ny: 2}

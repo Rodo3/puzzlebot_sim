@@ -29,6 +29,7 @@ def generate_launch_description():
     world_flat   = os.path.join(desc_pkg, 'worlds', 'flat_plane.sdf')
     world_maze   = os.path.join(desc_pkg, 'worlds', 'maze.sdf')
     world_arena  = os.path.join(desc_pkg, 'worlds', 'real_arena.sdf')
+    world_almacen = os.path.join(desc_pkg, 'worlds', 'almacen_racks.sdf')
     rviz_flat    = os.path.join(desc_pkg, 'rviz',   'puzzlebot_rviz.rviz')
     rviz_maze    = os.path.join(desc_pkg, 'rviz',   'mcl_rviz.rviz')
     rviz_mapping = os.path.join(desc_pkg, 'rviz',   'mapping_rviz.rviz')
@@ -50,7 +51,7 @@ def generate_launch_description():
     )
 
     arg_world = DeclareLaunchArgument('world', default_value='real_arena',
-                                      description="'flat_plane', 'maze', or 'real_arena' (pista física 3.76×4.86 m)")
+                                      description="'flat_plane', 'maze', 'real_arena' (pista física 3.76×4.86 m), o 'almacen' (almacén con racks y ArUcos)")
     arg_gui   = DeclareLaunchArgument('gui',   default_value='true')
     arg_slam  = DeclareLaunchArgument('slam',  default_value='true')
     arg_rviz  = DeclareLaunchArgument('rviz',  default_value='true')
@@ -120,7 +121,9 @@ def generate_launch_description():
                 world_name,
                 "' == 'maze' else ('" + world_arena + "' if '",
                 world_name,
-                "' == 'real_arena' else '" + world_flat + "'))"
+                "' == 'real_arena' else ('" + world_almacen + "' if '",
+                world_name,
+                "' == 'almacen' else '" + world_flat + "')))"
             ]),
             'gz_version': '6',
         }.items(),
