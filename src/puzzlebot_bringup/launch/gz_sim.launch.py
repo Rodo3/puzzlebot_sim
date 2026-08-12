@@ -187,6 +187,53 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ── almacén bridge ───────────────────────────────────────────────────
+    # Igual que bridge_arena pero con world name 'almacen_racks'.
+    # Activo solo cuando world:=almacen.
+    bridge_almacen = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='gz_bridge',
+        arguments=[
+            '/model/puzzlebot/cmd_vel'
+            '@geometry_msgs/msg/Twist@ignition.msgs.Twist',
+            '/model/puzzlebot/odometry'
+            '@nav_msgs/msg/Odometry@ignition.msgs.Odometry',
+            '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock',
+            '/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan',
+            '/world/almacen_racks/model/puzzlebot/joint_state'
+            '@sensor_msgs/msg/JointState[ignition.msgs.Model',
+            '/world/almacen_racks/dynamic_pose/info'
+            '@geometry_msgs/msg/PoseArray[ignition.msgs.Pose_V',
+            '/camera/image_raw@sensor_msgs/msg/Image[ignition.msgs.Image',
+            '/camera/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo',
+        ],
+        parameters=[{
+            'qos_overrides./model/puzzlebot.subscriber.reliability': 'reliable',
+        }],
+        condition=IfCondition(
+            PythonExpression(["'", world_name, "' == 'almacen'"])
+        ),
+        output='screen',
+    )
+
+    joint_relay_almacen = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='joint_relay',
+        arguments=[
+            '/world/almacen_racks/model/puzzlebot/joint_state'
+            '@sensor_msgs/msg/JointState[ignition.msgs.Model',
+        ],
+        remappings=[
+            ('/world/almacen_racks/model/puzzlebot/joint_state', '/joint_states'),
+        ],
+        condition=IfCondition(
+            PythonExpression(["'", world_name, "' == 'almacen'"])
+        ),
+        output='screen',
+    )
+
     # Robot spawn: esquina SW de la pista, 30 cm del borde, mirando al norte (yaw=π/2).
     # Coincide con la pose inicial configurada en kalman_params.yaml.
     spawn_arena = TimerAction(
@@ -208,6 +255,31 @@ def generate_launch_description():
         )],
         condition=IfCondition(
             PythonExpression(["'", world_name, "' == 'real_arena'"])
+        ),
+    )
+
+    # Robot spawn: almacén, frente al marker ID 21 (pared sur, x=0.79, y=0.035),
+    # a 70 cm del marker, mirando al sur (yaw=-π/2) para que la cámara lo vea
+    # de inmediato al arrancar — cumple el criterio de spawn en lugar conocido.
+    spawn_almacen = TimerAction(
+        period=5.0,
+        actions=[ExecuteProcess(
+            cmd=[
+                'ign', 'service',
+                '-s', '/world/almacen_racks/create',
+                '--reqtype', 'ignition.msgs.EntityFactory',
+                '--reptype', 'ignition.msgs.Boolean',
+                '--timeout', '5000',
+                '--req',
+                f'sdf_filename: "{sdf_file}", name: "puzzlebot", '
+                f'pose: {{position: {{x: 0.79, y: 0.70, z: 0.10}}, '
+                f'orientation: {{z: -0.7071068, w: 0.7071068}}}}',
+            ],
+            additional_env={'IGN_GAZEBO_RESOURCE_PATH': ign_resource_path},
+            output='screen',
+        )],
+        condition=IfCondition(
+            PythonExpression(["'", world_name, "' == 'almacen'"])
         ),
     )
 
@@ -285,6 +357,73 @@ def generate_launch_description():
         ])),
     )
 
+    # ── Odometría de ruedas — almacén, variante A: publicación directa a /odom ──
+    wheel_odom_almacen_direct = Node(
+        package='puzzlebot_localization',
+        executable='odometry_node',
+        name='odometry_node',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'wheel_radius': 0.05,
+            'wheel_separation': 0.19,
+            'odom_topic': '/odom',
+            'odom_frame': 'odom',
+            'base_frame': 'base_footprint',
+            'input_source': 'joint_states',
+            'publish_tf': True,
+        }],
+        remappings=[('/joint_states', '/world/almacen_racks/model/puzzlebot/joint_state')],
+        condition=IfCondition(PythonExpression([
+            "'", world_name, "' == 'almacen' and '", slam_en, "' == 'true' and ",
+            "('", mode, "' != 'mapping' or '", odom_source, "' == 'dead_reckoning') and ",
+            "'", kalman_en, "' == 'false'",
+        ])),
+    )
+
+    # ── Odometría de ruedas — almacén, variante B: alimenta /odom_raw al Kalman ──
+    wheel_odom_almacen_raw = Node(
+        package='puzzlebot_localization',
+        executable='odometry_node',
+        name='odometry_node',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'wheel_radius': 0.05,
+            'wheel_separation': 0.172,
+            'odom_topic': '/odom_raw',
+            'odom_frame': 'odom',
+            'base_frame': 'base_footprint',
+            'input_source': 'joint_states',
+            'publish_tf': False,
+        }],
+        remappings=[('/joint_states', '/world/almacen_racks/model/puzzlebot/joint_state')],
+        condition=IfCondition(PythonExpression([
+            "'", world_name, "' == 'almacen' and '", slam_en, "' == 'true' and ",
+            "('", mode, "' != 'mapping' or '", odom_source, "' == 'dead_reckoning') and ",
+            "'", kalman_en, "' == 'true'",
+        ])),
+    )
+
+    # ── Ground truth odom para almacén (referencia perfecta) ────────────────
+    ground_truth_almacen = Node(
+        package='puzzlebot_localization',
+        executable='ground_truth_odom',
+        name='ground_truth_odom',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'model_name': 'puzzlebot',
+            'odom_frame': 'odom',
+            'base_frame': 'base_footprint',
+            'pose_topic': '/world/almacen_racks/dynamic_pose/info',
+        }],
+        condition=IfCondition(PythonExpression([
+            "'", world_name, "' == 'almacen' and '", slam_en, "' == 'true' and ",
+            "'", mode, "' == 'mapping' and '", odom_source, "' == 'ground_truth'",
+        ])),
+    )
+
     # ── Kalman filter — Estrategia A y B ─────────────────────────────────────
     # Activo cuando world:=real_arena AND kalman:=true.
     #
@@ -346,9 +485,72 @@ def generate_launch_description():
             'sigma_yaw':           0.015,
             'publish_rate_hz':     10.0,
             'detection_prob':      1.0,
+            # Hint de spawn — coincide con spawn_arena (0.30, 0.30).
+            'robot_spawn_x':       0.30,
+            'robot_spawn_y':       0.30,
         }],
         condition=IfCondition(PythonExpression([
             "'", world_name, "' == 'real_arena' and '",
+            kalman_en, "' == 'true' and '", oracle_en, "' == 'true'",
+        ])),
+    )
+
+    # ── Kalman filter — almacén ──────────────────────────────────────────────
+    # Activo cuando world:=almacen AND kalman:=true.
+    # Pose inicial: coincide con spawn_almacen (0.79, 0.70, -π/2 = mirando sur,
+    # de frente al marker ID 21).
+    #
+    # init_from_aruco: true siempre que kalman:=true, sin importar aruco_oracle.
+    # aruco_node (visión real por cámara) corre incondicionalmente y publica
+    # /aruco/pose — es la fuente por defecto. aruco_oracle:=true la reemplaza
+    # por ground-truth sintético (debug del EKF sin depender de detección real).
+    # En ambos casos el EKF debe esperar la primera detección, no arrancar en
+    # una pose fija — así se comporta igual que el robot real.
+    _kalman_init_from_aruco_almacen = True
+    kalman_almacen = Node(
+        package='puzzlebot_localization',
+        executable='kalman_filter_node',
+        name='kalman_filter_node',
+        output='screen',
+        parameters=[kalman_cfg, {
+            'use_sim_time': True,
+            'initial_x':     0.79,
+            'initial_y':     0.70,
+            'initial_theta': -1.5708,   # -π/2 — mirando sur, igual que spawn_almacen
+            'init_from_aruco': _kalman_init_from_aruco_almacen,
+        }],
+        condition=IfCondition(PythonExpression([
+            "'", world_name, "' == 'almacen' and '", kalman_en, "' == 'true' and ",
+            "('", mode, "' != 'mapping' or '", odom_source, "' == 'dead_reckoning')",
+        ])),
+    )
+
+    # ── ArUco Oracle — almacén ───────────────────────────────────────────────
+    # Activo cuando world:=almacen AND kalman:=true AND aruco_oracle:=true.
+    aruco_oracle_almacen = Node(
+        package='puzzlebot_localization',
+        executable='aruco_oracle',
+        name='aruco_oracle',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'pose_topic':          '/world/almacen_racks/dynamic_pose/info',
+            'aruco_map_file':      aruco_map_yaml,
+            'max_detection_dist':  3.0,
+            'max_incidence_deg':   75.0,
+            'sigma_lateral':       0.015,
+            'sigma_depth_base':    0.020,
+            'sigma_yaw':           0.015,
+            'publish_rate_hz':     10.0,
+            'detection_prob':      1.0,
+            # Hint de spawn — coincide con spawn_almacen (0.79, 0.70).
+            # El robot no es poses[0] en el almacén; el oracle lo identifica
+            # por cercanía a este punto en el primer frame.
+            'robot_spawn_x':       0.79,
+            'robot_spawn_y':       0.70,
+        }],
+        condition=IfCondition(PythonExpression([
+            "'", world_name, "' == 'almacen' and '",
             kalman_en, "' == 'true' and '", oracle_en, "' == 'true'",
         ])),
     )
@@ -409,20 +611,37 @@ def generate_launch_description():
     )
 
     # ── Perception nodes ─────────────────────────────────────────────────
+    # Visión real por cámara. Publica /aruco/pose — mismo topic que
+    # aruco_oracle_almacen. NO deben correr juntos en almacén (doble
+    # publisher → EKF recibe mezcla caótica de detección real + sintética):
+    # activo salvo cuando world:=almacen Y el oracle sintético está encendido.
     aruco_node = Node(
         package='puzzlebot_perception',
         executable='aruco_node',
         name='aruco_node',
-        parameters=[{'use_sim_time': True}],
+        parameters=[{
+            'use_sim_time':   True,
+            'marker_map_file': aruco_map_yaml,
+            'marker_length':   0.09,
+        }],
         output='screen',
+        condition=IfCondition(PythonExpression([
+            "not ('", world_name, "' == 'almacen' and '", oracle_en, "' == 'true')"
+        ])),
     )
 
+    # Fallback genérico — solo para worlds sin variante propia (flat_plane, maze).
+    # real_arena y almacen ya tienen su kalman_arena/kalman_almacen dedicado;
+    # este NO debe correr en paralelo con esos o se duplica la TF odom→base_footprint.
     kalman_node = Node(
         package='puzzlebot_localization',
         executable='kalman_filter_node',
         name='kalman_filter_node',
         parameters=[{'use_sim_time': True}],
         output='screen',
+        condition=IfCondition(PythonExpression([
+            "'", world_name, "' != 'real_arena' and '", world_name, "' != 'almacen'"
+        ])),
     )
 
     rviz_mapping_node = TimerAction(
@@ -498,13 +717,16 @@ def generate_launch_description():
         rsp,
         # Bridges (uno activo según world)
         bridge_arena,
+        bridge_almacen,
         # Joint relays (uno activo según world)
         joint_relay_arena,
+        joint_relay_almacen,
         # TF estáticos (siempre activos)
         lidar_tf,
         camera_tf,
         # Spawns del robot (uno activo según world)
         spawn_arena,
+        spawn_almacen,
         # Odometría de ruedas flat/maze (sin Kalman)
         # Odometría real_arena — variante directa (kalman:=false)
         wheel_odom_arena_direct,
@@ -516,6 +738,12 @@ def generate_launch_description():
         kalman_arena,
         # ArUco Oracle (real_arena + kalman:=true + aruco_oracle:=true) — Estrategia B
         aruco_oracle_arena,
+        # Odometría de ruedas — almacén (misma lógica que real_arena)
+        wheel_odom_almacen_direct,
+        wheel_odom_almacen_raw,
+        ground_truth_almacen,
+        kalman_almacen,
+        aruco_oracle_almacen,
         # SLAM / localización
         slam_mapping,
         mcl,

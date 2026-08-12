@@ -1,99 +1,95 @@
-# Mapa de marcadores ArUco — Pista física
+# Mapa de marcadores ArUco — Almacén (almacen_racks.sdf)
 #
-# Origen (0,0) = esquina inferior izquierda de la pista
+# Origen (0,0) = esquina inferior izquierda del almacén
 # Unidades: metros / radianes
 #
-# CONVENCIÓN DE EJES (obj_pts: Y+ = arriba del marker, Z+ hacia cámara):
+# Poses copiadas 1:1 desde <model name='aruco_N'><pose> en almacen_racks.sdf.
+# aruco_node.py (_euler_to_rot) usa la misma convención de Euler extrínseco
+# Rz(yaw)·Ry(pitch)·Rx(roll) que Gazebo/SDF, así que las poses del mundo se
+# copian sin reinterpretar roll/pitch/yaw.
 #
-#   Para markers montados rectos en pared, siempre roll=π/2.
-#   Con roll=π/2, la dirección Z en el mapa = [sin(yaw), -cos(yaw), 0]:
-#       yaw =  0     → Z apunta al sur  (-Y)  ← pared norte
-#       yaw =  π/2   → Z apunta al este (+X)  ← pared oeste (izq)
-#       yaw = -π/2   → Z apunta al oeste(-X)  ← pared este (der)
-#       yaw =  π     → Z apunta al norte(+Y)  ← pared sur
-#
-# Dimensiones de la pista: 3.76 m (X) × 4.86 m (Y)
-# Marker size físico: 0.10 m
+# Dimensiones del almacén: 4.88 m (X) × 3.69 m (Y)
+# Marker size físico: 0.09 m (caja 0.09×0.09×0.003 con textura en cara +Z)
 
 aruco_markers:
 
-  # ── ID 1 — Pared norte, centro, mirando al sur ────────────────────────
-  1:
-    x:      1.88
-    y:      4.86
+  # ── ID 21 — Pared sur, izquierda, mirando al norte (+Y) ───────────────
+  21:
+    x:      0.79
+    y:      0.035
     z:      0.15
-    roll:   1.5708    # π/2
-    pitch:  0.0
-    yaw:    0.0       # Z → sur (-Y)
+    roll:   0.0
+    pitch: -1.57079
+    yaw:   -1.57079
 
-  # ── ID 0 — Pared oeste (izq), parte alta, mirando al este ────────────
-  0:
-    x:      0.0
-    y:      3.90      # 4.86 - 1.01 + 0.05
-    z:      0.18
-    roll:   1.5708
-    pitch:  0.0
-    yaw:    1.5708    # π/2 → Z apunta al este (+X)
-
-  # ── ID 4 — Pared oeste (izq), parte baja, mirando al este ────────────
-  4:
-    x:      0.0
-    y:      1.04      # 0.99 + 0.05
-    z:      0.18
-    roll:   1.5708
-    pitch:  0.0
-    yaw:    1.5708    # π/2 → Z apunta al este (+X)
-
-  # ── ID 2 — Pared este (der), parte alta, mirando al oeste ────────────
-  2:
-    x:      3.76
-    y:      3.90
-    z:      0.18
-    roll:   1.5708
-    pitch:  0.0
-    yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)
-
-  # ── ID 3 — Pared este (der), parte baja, mirando al oeste ────────────
-  3:
-    x:      3.76
-    y:      1.04
-    z:      0.18
-    roll:   1.5708
-    pitch:  0.0
-    yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)
-
-  # ── ID 5 — Rack central derecho, cara sur (robot al sur lo ve mirando al norte)
+  # ── ID 5 — Pared sur, derecha, mirando al norte (+Y) ──────────────────
   5:
-    x:      2.45
-    y:      2.50
-    z:      0.14
-    roll:   1.5708
-    pitch:  0.0
-    yaw:    0.0       # 0 → Z apunta al sur (-Y), robot está al sur del rack
+    x:      3.98
+    y:      0.035
+    z:      0.15
+    roll:   0.0
+    pitch: -1.57079
+    yaw:   -1.57079
 
-  # ── ID 6 — Rack central izquierdo, cara sur (robot al sur lo ve mirando al norte)
-  6:
-    x:      1.25
-    y:      2.50
-    z:      0.14
-    roll:   1.5708
-    pitch:  0.0
-    yaw:    0.0       # 0 → Z apunta al sur (-Y), robot está al sur del rack
+  # ── ID 37 — Pared norte, izquierda, mirando al sur (-Y) ───────────────
+  37:
+    x:      0.95
+    y:      3.655
+    z:      0.15
+    roll:   0.0
+    pitch: -1.57079
+    yaw:    1.57079
 
-  # ── ID 7 — Rack central izquierdo, cara norte (robot al norte lo ve mirando al sur)
+  # ── ID 7 — Pared norte, derecha, mirando al sur (-Y) ──────────────────
   7:
-    x:      1.25
-    y:      3.56      # 4.86 - 1.30
-    z:      0.14
-    roll:   1.5708
-    pitch:  0.0
-    yaw:    3.1416    # π → Z apunta al norte (+Y), robot está al norte del rack
+    x:      4.515
+    y:      3.655
+    z:      0.15
+    roll:   0.0
+    pitch: -1.57079
+    yaw:    1.57079
 
-  # ── ID 8 — Rack central derecho, cara norte (robot al norte lo ve mirando al sur)
-  8:
-    x:      2.45
-    y:      3.56      # 4.86 - 1.30
-    z:      0.14
-    roll:   1.5708
-    pitch:  0.0
-    yaw:    3.1416    # π → Z apunta al norte (+Y), robot está al norte del rack
+  # ── ID 17 — Pared este, mirando al oeste (-X) ─────────────────────────
+  17:
+    x:      4.845
+    y:      1.6
+    z:      0.15
+    roll:   0.0
+    pitch: -1.57079
+    yaw:    0.0
+
+  # ── ID 25 — Rack central (aisle bajo), cara este, mirando al este (+X)
+  25:
+    x:      2.49849
+    y:      1.2575
+    z:      0.100001
+    roll:   3.14159
+    pitch: -1.57079
+    yaw:    0.0
+
+  # ── ID 20 — Rack central (aisle bajo), cara oeste, mirando al oeste (-X)
+  20:
+    x:      3.59038
+    y:      1.2575
+    z:      0.100001
+    roll:   3.14159
+    pitch: -1.57079
+    yaw:    3.14159
+
+  # ── ID 41 — Rack central (aisle alto), cara este, mirando al este (+X)
+  41:
+    x:      2.51307
+    y:      2.3786
+    z:      0.100001
+    roll:   3.14159
+    pitch: -1.57079
+    yaw:    0.0
+
+  # ── ID 19 — Rack central (aisle alto), cara oeste, mirando al oeste (-X)
+  19:
+    x:      3.59656
+    y:      2.3786
+    z:      0.100001
+    roll:   3.14159
+    pitch: -1.57079
+    yaw:    3.14159

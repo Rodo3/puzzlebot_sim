@@ -1,11 +1,11 @@
 slam_node:
   ros__parameters:
-    # Grid geometry — pista física 3.76 m (X) × 4.86 m (Y) con margen.
-    # Origen igual que aruco_map.yaml: esquina inferior izquierda (SW).
+    # Grid geometry — almacén 4.88 m (X) × 3.69 m (Y) con margen.
+    # Origen igual que aruco_map.yaml: esquina inferior izquierda (SW), (0,0).
     # El margen evita cortar endpoints de pared por pequeños errores de pose.
     map_resolution:     0.05
-    map_width_meters:   4.26    # 3.76 + 0.25 m por lado
-    map_height_meters:  5.36    # 4.86 + 0.25 m por lado
+    map_width_meters:    5.38    # 4.88 + 0.25 m por lado
+    map_height_meters:   4.19  # 3.69 + 0.25 m por lado
     map_origin_x:      -0.25
     map_origin_y:      -0.25
     # Legacy fallback para launches antiguos que no definan width/height/resolution.
@@ -24,7 +24,7 @@ slam_node:
     scan_step:         1       # use every ray
     max_range_factor:  0.95    # rays >= 95% of range_max → no-hit (free only)
     min_useful_range:  0.20    # ignore beams shorter than 20 cm
-    max_mapping_range: 5.5     # la pista mide <5.5 m; ignora lecturas lejanas/ruido
+    max_mapping_range: 6.2     # diagonal del almacén ≈ 6.1 m; ignora lecturas lejanas/ruido
 
     # Frames
     map_frame:        'map'
