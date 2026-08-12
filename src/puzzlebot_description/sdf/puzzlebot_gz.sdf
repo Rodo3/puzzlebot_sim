@@ -82,7 +82,7 @@
           <horizontal_fov>1.3962634</horizontal_fov>
           <image>
             <width>640</width>
-            <height>480</height>
+            <height>360</height>
             <format>R8G8B8</format>
           </image>
           <clip><near>0.02</near><far>20.0</far></clip>

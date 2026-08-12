@@ -3,13 +3,24 @@
 # Origen (0,0) = esquina inferior izquierda del almacén
 # Unidades: metros / radianes
 #
-# Poses copiadas 1:1 desde <model name='aruco_N'><pose> en almacen_racks.sdf.
-# aruco_node.py (_euler_to_rot) usa la misma convención de Euler extrínseco
-# Rz(yaw)·Ry(pitch)·Rx(roll) que Gazebo/SDF, así que las poses del mundo se
-# copian sin reinterpretar roll/pitch/yaw.
+# CONVENCIÓN DE EJES (obj_pts de aruco_node: Y+ = arriba del marker, Z+ hacia
+# la cámara). Para markers montados rectos en pared/rack, siempre roll=π/2.
+# Con roll=π/2 y pitch=0, la dirección Z en el mapa = [sin(yaw), -cos(yaw), 0]:
+#       yaw =  0     → Z apunta al sur  (-Y)
+#       yaw =  π/2   → Z apunta al este (+X)
+#       yaw = -π/2   → Z apunta al oeste(-X)
+#       yaw =  π     → Z apunta al norte(+Y)
+#
+# IMPORTANTE: NO copiar roll/pitch/yaw directamente del <pose> del SDF.
+# El modelo SDF es una caja cuya textura está en la cara +Z; su eje Y local
+# queda horizontal, no "arriba". Copiarlo tal cual conserva el facing pero deja
+# el marker girado 90° sobre su propio eje → solvePnP devuelve un yaw erróneo
+# y el EKF rota el mapa completo 90°. Las poses de abajo ya están convertidas a
+# la convención de aruco_node conservando exactamente el mismo facing del SDF.
 #
 # Dimensiones del almacén: 4.88 m (X) × 3.69 m (Y)
 # Marker size físico: 0.09 m (caja 0.09×0.09×0.003 con textura en cara +Z)
+# Diccionario de las texturas: DICT_ARUCO_ORIGINAL (no 4X4_50)
 
 aruco_markers:
 
@@ -18,78 +29,78 @@ aruco_markers:
     x:      0.79
     y:      0.035
     z:      0.15
-    roll:   0.0
-    pitch: -1.57079
-    yaw:   -1.57079
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    3.1416    # π → Z apunta al norte (+Y)
 
   # ── ID 5 — Pared sur, derecha, mirando al norte (+Y) ──────────────────
   5:
     x:      3.98
     y:      0.035
     z:      0.15
-    roll:   0.0
-    pitch: -1.57079
-    yaw:   -1.57079
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    3.1416    # π → Z apunta al norte (+Y)
 
   # ── ID 37 — Pared norte, izquierda, mirando al sur (-Y) ───────────────
   37:
     x:      0.95
     y:      3.655
     z:      0.15
-    roll:   0.0
-    pitch: -1.57079
-    yaw:    1.57079
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    0.0       # 0 → Z apunta al sur (-Y)
 
   # ── ID 7 — Pared norte, derecha, mirando al sur (-Y) ──────────────────
   7:
     x:      4.515
     y:      3.655
     z:      0.15
-    roll:   0.0
-    pitch: -1.57079
-    yaw:    1.57079
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    0.0       # 0 → Z apunta al sur (-Y)
 
   # ── ID 17 — Pared este, mirando al oeste (-X) ─────────────────────────
   17:
     x:      4.845
     y:      1.6
     z:      0.15
-    roll:   0.0
-    pitch: -1.57079
-    yaw:    0.0
+    roll:   1.5708
+    pitch:  0.0
+    yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)
 
   # ── ID 25 — Rack central (aisle bajo), cara este, mirando al este (+X)
   25:
     x:      2.49849
     y:      1.2575
     z:      0.100001
-    roll:   3.14159
-    pitch: -1.57079
-    yaw:    0.0
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    1.5708    # π/2 → Z apunta al este (+X)
 
   # ── ID 20 — Rack central (aisle bajo), cara oeste, mirando al oeste (-X)
   20:
     x:      3.59038
     y:      1.2575
     z:      0.100001
-    roll:   3.14159
-    pitch: -1.57079
-    yaw:    3.14159
+    roll:   1.5708
+    pitch:  0.0
+    yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)
 
   # ── ID 41 — Rack central (aisle alto), cara este, mirando al este (+X)
   41:
     x:      2.51307
     y:      2.3786
     z:      0.100001
-    roll:   3.14159
-    pitch: -1.57079
-    yaw:    0.0
+    roll:   1.5708
+    pitch:  0.0
+    yaw:    1.5708    # π/2 → Z apunta al este (+X)
 
   # ── ID 19 — Rack central (aisle alto), cara oeste, mirando al oeste (-X)
   19:
     x:      3.59656
     y:      2.3786
     z:      0.100001
-    roll:   3.14159
-    pitch: -1.57079
-    yaw:    3.14159
+    roll:   1.5708
+    pitch:  0.0
+    yaw:   -1.5708    # -π/2 → Z apunta al oeste (-X)

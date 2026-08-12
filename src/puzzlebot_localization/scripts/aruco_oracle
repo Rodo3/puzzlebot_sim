@@ -17,16 +17,60 @@ El ruido y la tasa de detección se controlan con parámetros del nodo.
 
 Parámetros
 ----------
-  pose_topic          /world/real_arena/dynamic_pose/info  (PoseArray de Gazebo)
-  aruco_map_file      ruta al YAML con posiciones de marcadores
-  max_detection_dist  1.8    m   — descarta marcadores más lejanos
-  max_incidence_deg   75.0   °   — descarta marcadores muy oblicuos
-  sigma_lateral       0.015  m   — ruido en eje perpendicular al marcador
-  sigma_depth_base    0.020  m   — ruido base en eje de profundidad (se amplía con oblicuidad)
-  sigma_yaw           0.015  rad — ruido angular
-  publish_rate_hz     10.0       — cadencia máxima de publicación
-  detection_prob      1.0        — probabilidad de detectar un marcador visible (0..1)
-                                   usar <1.0 para simular pérdidas de detección
+ENTRADAS / SALIDAS
+  pose_topic          str    — topic PoseArray de Gazebo con las poses de los
+                               modelos dinámicos del mundo. NO trae nombres de
+                               modelo, por eso hace falta robot_spawn_x/y.
+                               Ej: '/world/almacen_racks/dynamic_pose/info'
+  aruco_map_file      str    — ruta al YAML con las poses conocidas de los
+                               marcadores (mismo archivo que usa aruco_node).
+  aruco_out_topic     str    — topic donde publica la detección sintética.
+                               Default '/aruco/pose'. OJO: es el MISMO topic que
+                               publica aruco_node (visión real); nunca corras
+                               ambos nodos a la vez o el EKF recibe dos fuentes.
+  map_frame           str    — frame_id de la pose publicada. Default 'map'.
+
+VISIBILIDAD — deciden si un marcador "se ve" o no (filtro geométrico)
+  max_detection_dist  m      — distancia MÁXIMA marcador↔robot para considerarlo
+                               visible. Más grande = detecta desde más lejos.
+                               (Equivale a max_detection_distance de aruco_node.)
+  max_incidence_deg   °      — ángulo MÁXIMO entre la normal del marcador y la
+                               línea marcador→robot. 0° = robot justo de frente;
+                               90° = robot de canto (marcador invisible).
+                               Más grande = acepta vistas más oblicuas.
+  detection_prob      0..1   — probabilidad de NO perder un marcador que sí es
+                               geométricamente visible. 1.0 = nunca falla;
+                               0.7 = pierde ~30% de los frames (simula oclusión,
+                               desenfoque o fallos de decodificación).
+
+RUIDO — cuánto se degrada la pose publicada respecto al ground truth
+  sigma_lateral       m      — desviación estándar en el eje PERPENDICULAR a la
+                               normal del marcador (izquierda↔derecha visto desde
+                               el marcador). Fijo, no depende del ángulo.
+  sigma_depth_base    m      — desviación estándar BASE en el eje de PROFUNDIDAD
+                               (acercarse/alejarse del marcador). Se divide entre
+                               cos(incidencia), así que crece cuando el robot mira
+                               el marcador de reojo — igual que la visión real,
+                               donde estimar distancia de canto es menos preciso.
+  sigma_yaw           rad    — desviación estándar del ángulo (orientación).
+
+CADENCIA
+  publish_rate_hz     Hz     — frecuencia del timer de publicación. Solo publica
+                               si hay al menos un marcador visible en ese tick.
+
+IDENTIFICACIÓN DEL ROBOT en el PoseArray (ver _pose_cb)
+  robot_spawn_x       m      — pose de spawn esperada del robot. En el primer
+  robot_spawn_y       m        frame se elige la pose del array más cercana a
+                               este punto (el array no trae nombres de modelo).
+  bootstrap_gate      m      — radio máximo alrededor de robot_spawn_x/y para
+                               aceptar un candidato como "el robot" al arrancar.
+                               Evita engancharse a un rack cuando el robot aún no
+                               ha sido spawneado.
+  track_gate          m      — radio máximo alrededor de la ÚLTIMA pose conocida
+                               para seguir al robot entre frames. Debe ser mayor
+                               que lo que el robot puede moverse en 1/publish_rate_hz
+                               segundos, pero menor que la separación a otros
+                               objetos del mundo.
 """
 
 import math
@@ -50,21 +94,81 @@ def _norm(a):
     return math.atan2(math.sin(a), math.cos(a))
 
 
+def _marker_facing_xy(roll, pitch, yaw):
+    """Proyección XY del eje Z local del marcador tras Rz(yaw)·Ry(pitch)·Rx(roll).
+
+    Misma convención de Euler que aruco_node._euler_to_rot y Gazebo/SDF <pose>.
+    Devuelve (facing_x, facing_y); no se normaliza (el llamador ya usa dist
+    para normalizar el vector marcador→robot).
+    """
+    cr, sr = math.cos(roll),  math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw),   math.sin(yaw)
+    # Columna Z de Rz(yaw)·Ry(pitch)·Rx(roll)
+    fx = cy * sp * cr + sy * sr
+    fy = sy * sp * cr - cy * sr
+    return fx, fy
+
+
 class ArucoOracle(Node):
     def __init__(self):
         super().__init__('aruco_oracle')
 
+        # ── Entradas / salidas ────────────────────────────────────────────
         self.declare_parameter('pose_topic',         '/world/real_arena/dynamic_pose/info')
         self.declare_parameter('aruco_map_file',     '')
+        # OJO: mismo topic que publica aruco_node (visión real).
+        # Nunca correr ambos nodos a la vez o el EKF recibe dos fuentes.
         self.declare_parameter('aruco_out_topic',    '/aruco/pose')
         self.declare_parameter('map_frame',          'map')
-        self.declare_parameter('max_detection_dist', 1.8)
+
+        # ── VISIBILIDAD: deciden si un marcador "se ve" (filtro geométrico) ──
+        # Distancia MÁXIMA marcador↔robot para considerarlo visible [m].
+        # Subir = detecta desde más lejos. Equivale a max_detection_distance
+        # de aruco_node.
+        self.declare_parameter('max_detection_dist', 0.7)
+        # Ángulo MÁXIMO entre la normal del marcador y la línea marcador→robot [°].
+        # 0° = robot justo de frente; 90° = de canto (marcador invisible).
+        # Subir = acepta vistas más oblicuas.
         self.declare_parameter('max_incidence_deg',  75.0)
+        # Probabilidad de NO perder un marcador geométricamente visible [0..1].
+        # 1.0 = nunca falla. 0.7 = pierde ~30% de frames (simula oclusión/desenfoque).
+        # Se compara contra random.random() (rango 0..1): cualquier valor >= 1.0
+        # equivale a 1.0 y desactiva por completo la simulación de pérdidas.
+        self.declare_parameter('detection_prob',     0.7)
+
+        # ── RUIDO: cuánto degrada la pose publicada vs el ground truth ──────
+        # Desv. estándar en el eje PERPENDICULAR a la normal del marcador [m]
+        # (izquierda↔derecha visto desde el marcador). Fijo, no depende del ángulo.
         self.declare_parameter('sigma_lateral',      0.015)
+        # Desv. estándar BASE en el eje de PROFUNDIDAD [m] (acercarse/alejarse).
+        # Se divide entre cos(incidencia): crece cuando el robot mira el marcador
+        # de reojo, igual que en visión real (estimar distancia de canto es peor).
         self.declare_parameter('sigma_depth_base',   0.020)
+        # Desv. estándar del ángulo/orientación [rad].
         self.declare_parameter('sigma_yaw',          0.015)
+
+        # ── CADENCIA ────────────────────────────────────────────────────────
+        # Frecuencia del timer de publicación [Hz]. Solo publica si hay al menos
+        # un marcador visible en ese tick.
         self.declare_parameter('publish_rate_hz',    10.0)
-        self.declare_parameter('detection_prob',     1.0)
+        # ── IDENTIFICACIÓN DEL ROBOT en el PoseArray (ver _pose_cb) ─────────
+        # Hint de la pose de spawn del robot [m]. El PoseArray de Gazebo no
+        # preserva nombres de modelo, así que en el primer frame elegimos la pose
+        # más cercana a este hint como robot, y después lo rastreamos por
+        # continuidad. Necesario porque en worlds con varios modelos dinámicos
+        # (almacén) el robot NO es poses[0].
+        self.declare_parameter('robot_spawn_x',      0.0)
+        self.declare_parameter('robot_spawn_y',      0.0)
+        # Radio máximo alrededor de robot_spawn_x/y para aceptar un candidato
+        # como "el robot" al arrancar [m]. Evita engancharse a un rack cercano
+        # cuando el robot todavía no ha sido spawneado.
+        self.declare_parameter('bootstrap_gate',     0.50)
+        # Radio máximo alrededor de la ÚLTIMA pose conocida para seguir al robot
+        # entre frames [m]. Debe ser MAYOR que lo que el robot puede moverse en
+        # 1/publish_rate_hz segundos, pero MENOR que la separación a otros objetos
+        # del mundo (si no, puede saltar a un rack vecino).
+        self.declare_parameter('track_gate',         0.50)
 
         pose_topic  = self.get_parameter('pose_topic').value
         map_file    = self.get_parameter('aruco_map_file').value
@@ -76,18 +180,33 @@ class ArucoOracle(Node):
         self._sig_dep    = float(self.get_parameter('sigma_depth_base').value)
         self._sig_yaw    = float(self.get_parameter('sigma_yaw').value)
         self._det_prob   = float(self.get_parameter('detection_prob').value)
+        self._spawn_x    = float(self.get_parameter('robot_spawn_x').value)
+        self._spawn_y    = float(self.get_parameter('robot_spawn_y').value)
+        self._bootstrap_gate = float(self.get_parameter('bootstrap_gate').value)
+        self._track_gate     = float(self.get_parameter('track_gate').value)
 
         # ── Cargar mapa de marcadores ─────────────────────────────────────
-        self._markers = {}   # id → {x, y, z, yaw}
+        # facing_x/facing_y: proyección XY del eje Z del marcador (hacia dónde mira),
+        # calculada desde la rotación completa roll/pitch/yaw — misma convención
+        # de Euler extrínseco Rz(yaw)·Ry(pitch)·Rx(roll) que aruco_node._euler_to_rot
+        # y que Gazebo/SDF <pose>. No asumimos roll=π/2 (válido para cualquier
+        # montaje de marcador, pared o rack).
+        self._markers = {}   # id → {x, y, yaw, facing_x, facing_y}
         if map_file:
             try:
                 with open(map_file, 'r') as f:
                     data = yaml.safe_load(f)
                 for mid, info in data.get('aruco_markers', {}).items():
+                    roll  = float(info.get('roll', 1.5708))
+                    pitch = float(info.get('pitch', 0.0))
+                    yaw   = float(info['yaw'])
+                    fx, fy = _marker_facing_xy(roll, pitch, yaw)
                     self._markers[int(mid)] = {
                         'x':   float(info['x']),
                         'y':   float(info['y']),
-                        'yaw': float(info['yaw']),   # dirección hacia la que apunta el marcador
+                        'yaw': yaw,   # dirección hacia la que apunta el marcador
+                        'facing_x': fx,
+                        'facing_y': fy,
                     }
                 self.get_logger().info(
                     f'ArUco oracle: {len(self._markers)} marcadores cargados desde {map_file}')
@@ -120,14 +239,54 @@ class ArucoOracle(Node):
     def _pose_cb(self, msg: PoseArray):
         """Extrae la pose del robot del PoseArray de Gazebo.
 
-        El bridge de Fortress no preserva nombres de modelo en el PoseArray.
-        El robot es el primer (y único) modelo dinámico en real_arena,
-        por lo que poses[0] siempre es el puzzlebot.
+        El bridge de Fortress no preserva nombres de modelo en el PoseArray, y
+        el orden NO es estable entre worlds: en real_arena el robot es poses[0],
+        pero en el almacén (varios modelos dinámicos) es otro índice.
+
+        Identificación robusta sin nombres:
+          • Bootstrap (aún no localizado): elige la pose más cercana al hint de
+            spawn (robot_spawn_x/y), PERO solo la acepta si está dentro de
+            _bootstrap_gate del hint. Esto evita "engancharse" a un rack cercano
+            cuando el robot todavía no ha sido spawneado (los primeros _pose_cb
+            llegan antes del spawn, con el robot ausente del array).
+          • Ya localizado: rastrea la pose más cercana a la última conocida del
+            robot (continuidad de movimiento), sin gate.
+
+        Nota Gazebo: dynamic_pose/info solo lista modelos que se movieron en ese
+        instante. Un robot perfectamente quieto puede desaparecer del array; en
+        ese caso conservamos la última pose conocida (no la sobreescribimos con
+        un rack cercano) gracias al gate de continuidad.
         """
         if not msg.poses:
             return
-        p = msg.poses[0]
-        self._robot_pose = (p.position.x, p.position.y, _yaw_from_pose(p))
+
+        bootstrapping = self._robot_pose is None
+        if bootstrapping:
+            ref_x, ref_y = self._spawn_x, self._spawn_y
+            gate2 = self._bootstrap_gate ** 2
+        else:
+            ref_x, ref_y = self._robot_pose[0], self._robot_pose[1]
+            gate2 = self._track_gate ** 2
+
+        best = None
+        best_d2 = None
+        for p in msg.poses:
+            px, py = p.position.x, p.position.y
+            # Descarta placeholders en el origen exacto (modelos estáticos que
+            # Gazebo lista como (0,0,0) en dynamic_pose/info).
+            if abs(px) < 1e-9 and abs(py) < 1e-9:
+                continue
+            d2 = (px - ref_x) ** 2 + (py - ref_y) ** 2
+            if best_d2 is None or d2 < best_d2:
+                best_d2 = d2
+                best = p
+
+        # Gate: si el mejor candidato está demasiado lejos de la referencia,
+        # el robot no está en este frame (aún sin spawnear, o quieto y ausente).
+        # Conservamos la pose previa en vez de saltar a un objeto equivocado.
+        if best is None or best_d2 > gate2:
+            return
+        self._robot_pose = (best.position.x, best.position.y, _yaw_from_pose(best))
 
     # ── Publicación sintética ─────────────────────────────────────────────
 
@@ -140,7 +299,6 @@ class ArucoOracle(Node):
 
         for mid, mk in self._markers.items():
             mx, my = mk['x'], mk['y']
-            mk_yaw = mk['yaw']
 
             # Vector desde marcador al robot (en frame mapa)
             dx, dy = rx - mx, ry - my
@@ -148,12 +306,10 @@ class ArucoOracle(Node):
             if dist < 1e-6 or dist > self._max_dist:
                 continue
 
-            # Dirección hacia la que apunta el marcador (su eje Z en 2D).
-            # Convención aruco_map.yaml (marcadores montados con roll=π/2):
-            #   eje Z del marcador → [sin(yaw), -cos(yaw)]  ≠ [cos(yaw), sin(yaw)]
-            # Ejemplo: ID4 yaw=π/2 → apunta hacia +X (este), no hacia +Y (norte).
-            fx = math.sin(mk_yaw)
-            fy = -math.cos(mk_yaw)
+            # Dirección hacia la que apunta el marcador (su eje Z, proyectado a XY),
+            # precalculada en __init__ desde roll/pitch/yaw completos — válida para
+            # cualquier convención de montaje, no solo roll=π/2.
+            fx, fy = mk['facing_x'], mk['facing_y']
 
             # Ángulo de incidencia: ángulo entre la normal del marcador
             # y el vector marcador→robot (= cuánto está de frente el robot)
@@ -173,7 +329,8 @@ class ArucoOracle(Node):
             candidates.append({
                 'dist':     dist,
                 'cos_inc':  cos_inc,
-                'mk_yaw':   mk_yaw,
+                'facing_x': fx,
+                'facing_y': fy,
                 'inc_angle': inc_angle,
             })
 
@@ -194,13 +351,12 @@ class ArucoOracle(Node):
 
         for c in candidates:
             cos_inc = max(0.125, c['cos_inc'])   # cap ×8 (same as aruco_node)
-            mk_yaw  = c['mk_yaw']
 
-            # El eje de profundidad es el eje de facing del marcador:
-            #   facing = [sin(yaw), -cos(yaw)]
-            #   Si |sin(yaw)| > 0.5 → facing en X → X es profundidad, Y es lateral
-            #   Si |sin(yaw)| ≤ 0.5 → facing en Y → Y es profundidad, X es lateral
-            is_depth_x = abs(math.sin(mk_yaw)) > 0.5
+            # El eje de profundidad es el eje de facing del marcador (facing_x/facing_y,
+            # precalculado desde roll/pitch/yaw completos):
+            #   Si |facing_x| > |facing_y| → facing en X → X es profundidad, Y es lateral
+            #   Si no → facing en Y → Y es profundidad, X es lateral
+            is_depth_x = abs(c['facing_x']) > abs(c['facing_y'])
 
             sig_dep = self._sig_dep / cos_inc
             if is_depth_x:

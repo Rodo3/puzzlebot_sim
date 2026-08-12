@@ -37,6 +37,8 @@ def generate_launch_description():
     slam_cfg      = os.path.join(bringup_pkg, 'config', 'slam_params.yaml')
     kalman_cfg    = os.path.join(bringup_pkg, 'config', 'kalman_params.yaml')
     aruco_map_yaml = os.path.join(bringup_pkg, 'config', 'aruco_map.yaml')
+    camera_calib_yaml = os.path.join(bringup_pkg, 'config', 'camera_calibration.yaml')
+    camera_extr_yaml  = os.path.join(bringup_pkg, 'config', 'camera_extrinsics.yaml')
 
     with open(urdf_file, 'r') as f:
         robot_description = f.read()
@@ -76,12 +78,18 @@ def generate_launch_description():
     )
 
     # aruco_oracle:=true → aruco_oracle lee ground truth de Gazebo y publica
-    #                       /aruco/pose sintético → kalman lo fusiona (Estrategia B)
+    #                       /aruco/pose sintético → kalman lo fusiona (Estrategia B,
+    #                       debug del EKF sin depender de detección real)
+    # aruco_oracle:=false (default) → aruco_node hace detección real por cámara
+    #                       + OpenCV, con su incertidumbre real. Comportamiento
+    #                       por defecto: lo más fiel posible al robot físico.
     # Requiere kalman:=true para tener efecto útil.
     arg_aruco_oracle = DeclareLaunchArgument(
         'aruco_oracle',
-        default_value='true',
-        description='[real_arena+kalman] Publica /aruco/pose sintético desde ground truth',
+        default_value='false',
+        description='Publica /aruco/pose sintético desde ground truth (Gazebo) en vez de '
+                    'usar detección real por cámara. true = debug/ground-truth, '
+                    'false = visión real (default).',
     )
 
     # navigation:=true → lanza navigation.launch.py (A* + steering_controller + obstacle_avoidance)
@@ -623,6 +631,17 @@ def generate_launch_description():
             'use_sim_time':   True,
             'marker_map_file': aruco_map_yaml,
             'marker_length':   0.09,
+            # Default del nodo es '/camera/image/compressed' (robot físico).
+            # En Gazebo el bridge publica '/camera/image_raw' (sensor_msgs/Image
+            # sin comprimir) — sin este override aruco_node nunca recibe imagen.
+            'image_topic':      '/camera/image_raw',
+            'camera_info_file': camera_calib_yaml,
+            'extrinsics_file':  camera_extr_yaml,
+            # Las texturas en puzzlebot_description/textures/arucos/ son del
+            # diccionario ARUCO_ORIGINAL, no DICT_4X4_50 (default del nodo).
+            # Con el diccionario equivocado el detector encuentra el contorno
+            # del marker pero falla al decodificar los bits → 0 detecciones.
+            'dictionary':       'DICT_ARUCO_ORIGINAL',
         }],
         output='screen',
         condition=IfCondition(PythonExpression([
